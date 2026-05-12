@@ -1,0 +1,44 @@
+# Anything not needed inside the image. Keeps build context tiny.
+
+# VCS
+.git
+.gitignore
+.github
+
+# Editor / OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+*.swp
+
+# Node
+node_modules
+deploy/backend/node_modules
+**/node_modules
+
+# Audit logs / secrets / sealed tokens — MUST NOT enter the image
+audit.log
+**/audit.log
+deploy/backend/master.key
+deploy/backend/tokens/
+deploy/backend/.env
+deploy/backend/.env.*
+!deploy/backend/.env.example
+
+# Build artefacts
+dist
+build
+
+# Design assets we don't ship to the live site
+screenshots
+uploads
+debug.png
+
+# v1 deliverables (kept in the repo for reference, not in the image)
+../rajasekarselvam.com
+
+# Misc
+README*.md
+ANALYSIS*.md
+*.log

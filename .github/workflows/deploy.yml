@@ -1,0 +1,132 @@
+# Auto-deploy to rajasekarselvam.com on every push to main.
+#
+# Pipeline:
+#   1. validate (re-uses logic from ci.yml — fail fast)
+#   2. build & push image to ghcr.io/<owner>/ats-backend
+#   3. SSH into the OCI VM and run deploy-on-vm.sh
+#
+# Required GitHub Secrets (Settings -> Secrets and variables -> Actions):
+#   OCI_SSH_HOST            : VM hostname or IP (e.g. rajasekarselvam.com)
+#   OCI_SSH_USER            : deploy user on the VM (e.g. deployer)
+#   OCI_SSH_PRIVATE_KEY     : private key whose pub key is in deployer's ~/.ssh/authorized_keys
+#   OCI_SSH_KNOWN_HOSTS     : ssh-keyscan output for the host (anti-MITM)
+#   GHCR_PULL_TOKEN         : a fine-grained PAT with read:packages, used by the VM to pull from GHCR.
+#                             (We don't strictly need a PAT — GITHUB_TOKEN works for push from CI.
+#                              The VM needs its own credential; a PAT is the simplest.)
+#
+# No broker keys live in GitHub. Those stay in /etc/ats/backend.env on the VM only.
+
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false   # never preempt a deploy mid-flight
+
+permissions:
+  contents: read
+  packages: write             # push to GHCR
+  id-token: write             # for keyless signing if we add cosign later
+
+env:
+  IMAGE_NAME: ats-backend
+  REGISTRY: ghcr.io
+
+jobs:
+  validate:
+    uses: ./.github/workflows/ci.yml
+
+  build-and-push:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      image_tag:  ${{ steps.meta.outputs.short_sha }}
+      image_ref:  ${{ steps.meta.outputs.image_ref }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: meta
+        run: |
+          short=$(echo "${GITHUB_SHA}" | cut -c1-12)
+          owner_lc=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          ref="${{ env.REGISTRY }}/${owner_lc}/${{ env.IMAGE_NAME }}"
+          echo "short_sha=${short}"             >> "$GITHUB_OUTPUT"
+          echo "owner_lc=${owner_lc}"           >> "$GITHUB_OUTPUT"
+          echo "image_ref=${ref}"               >> "$GITHUB_OUTPUT"
+          echo "tags=${ref}:${short},${ref}:latest" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push (linux/amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
+          provenance: false
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: production
+      url: https://ats.rajasekarselvam.com
+
+    steps:
+      - name: Configure SSH
+        run: |
+          set -e
+          mkdir -p ~/.ssh
+          echo "${{ secrets.OCI_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.OCI_SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Trigger deploy on VM
+        env:
+          OWNER:          ${{ needs.build-and-push.outputs.image_ref }}
+          TAG:            ${{ needs.build-and-push.outputs.image_tag }}
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+        run: |
+          set -e
+          owner_lc=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          ssh -i ~/.ssh/id_ed25519 \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              "${{ secrets.OCI_SSH_USER }}@${{ secrets.OCI_SSH_HOST }}" \
+              "ATS_GHCR_TOKEN=${GHCR_PULL_TOKEN} bash /opt/ats/scripts/deploy-on-vm.sh ${TAG} ${owner_lc}"
+
+      - name: Post-deploy smoke test (public URL)
+        run: |
+          set -e
+          # Wait up to 30 s for the public health endpoint to respond, in case Nginx is reloading.
+          for i in $(seq 1 15); do
+            if curl -fsS -o /tmp/h.json -w "%{http_code}" https://ats.rajasekarselvam.com/api/health | grep -q '^200$'; then
+              echo "public /api/health OK"
+              cat /tmp/h.json
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "!! public health check failed" >&2
+          exit 1

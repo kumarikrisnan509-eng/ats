@@ -1,0 +1,224 @@
+/* eslint-disable */
+/* Monthly AI performance review — auto-generated report every 1st of month.
+   Claude Opus 4.6 drafts narrative; Gemini validates; GPT-5 generates recommendations. */
+
+const AIReviewScreen = () => {
+  const [month, setMonth] = React.useState("2026-03");
+
+  const months = [
+    { v: "2026-03", label: "March 2026" },
+    { v: "2026-02", label: "February 2026" },
+    { v: "2026-01", label: "January 2026" },
+    { v: "2025-12", label: "December 2025" },
+  ];
+
+  const strategies = [
+    { name: "Momentum AI (Intraday)", mode: "Intraday", trades: 142, win: 58, pnl: 48200, sharpe: 1.84, drift: "stable", verdict: "keep", reason: "Consistent with last 3mo baseline. Confidence calibration within 4% of expected." },
+    { name: "Mean Reversion (Scalp)",  mode: "Intraday", trades: 428, win: 62, pnl: 22400, sharpe: 1.42, drift: "stable", verdict: "keep", reason: "Strong in choppy regime (18 sessions). Slight slippage increase — consider TWAP execution." },
+    { name: "Event-Momentum (Swing)",  mode: "Swing",    trades: 34,  win: 44, pnl: -8400,  sharpe: -0.48, drift: "degrading", verdict: "tune", reason: "3-month Sharpe trending down. News-trigger signals underperforming vs Q4 2025. Re-tune on recent regime." },
+    { name: "Breakout (Positional)",    mode: "Positional", trades: 18,  win: 72, pnl: 64800, sharpe: 2.14, drift: "stable", verdict: "keep", reason: "Benefiting from trending market. Position sizing rules working — low drawdown relative to gain." },
+    { name: "IV Crush (Options)",      mode: "Options",  trades: 24, win: 58, pnl: 12400, sharpe: 1.12, drift: "volatile", verdict: "watch", reason: "Realized vol vs implied has compressed. Edge narrowed 18% from baseline. Monitor 2 more weeks." },
+    { name: "Iron Condor (Options)",    mode: "Options",  trades: 8,  win: 38, pnl: -14200, sharpe: -0.84, drift: "broken", verdict: "kill", reason: "Hit max loss on 3 of 8. Regime no longer range-bound (VIX +42%). Recommend deactivate until regime shifts." },
+  ];
+
+  const aiCost = [
+    { p: "Claude Opus 4.6",  calls: 28420, tokens: "12.4M", cost: 4820, share: 54 },
+    { p: "Gemini 2.5 Pro",   calls: 18240, tokens: "8.2M",  cost: 2140, share: 24 },
+    { p: "GPT-5",            calls: 12480, tokens: "5.8M",  cost: 1940, share: 22 },
+  ];
+
+  const highlights = [
+    { icon: "✓", kind: "up",   t: "Net PnL ₹1,24,800", d: "+11.2% of deployed capital, best month since Dec 2025." },
+    { icon: "⚠", kind: "warn", t: "Iron Condor underwater", d: "3 max-loss events. AI recommends deactivation until VIX drops below 18." },
+    { icon: "★", kind: "acc",  t: "AI cost efficiency +14%", d: "Migrated 40% of non-critical calls to Haiku. Quality unchanged per A/B." },
+    { icon: "!", kind: "down", t: "2 circuit-breaker events", d: "Both triggered by overnight gap. No manual intervention required." },
+  ];
+
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+        <div>
+          <div style={{ fontSize: 12, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>
+            Operations · AI performance review
+          </div>
+          <div style={{ fontSize: 13, color: "var(--text-2)", marginTop: 4, maxWidth: 720 }}>
+            Auto-generated on the 1st of every month. Claude Opus 4.6 drafts the narrative, Gemini 2.5 Pro cross-validates, GPT-5 suggests actions. All three must agree before an action is surfaced.
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <select className="input" value={month} onChange={e => setMonth(e.target.value)} style={{ width: 160 }}>
+            {months.map(m => <option key={m.v} value={m.v}>{m.label}</option>)}
+          </select>
+          <button className="btn btn-ghost">Export PDF</button>
+        </div>
+      </div>
+
+      {window.AICostCard && <div style={{ marginBottom: 16 }}><window.AICostCard/></div>}
+
+      {/* Report header */}
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: 11, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>
+              Monthly report · {months.find(m => m.v === month)?.label}
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 600, marginTop: 6, letterSpacing: -0.3 }}>
+              A strong month overall, with one strategy requiring action.
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 6 }}>
+              Generated Apr 1, 2026 · 03:42 AM IST · 3-AI consensus · PDF ref: AR-202603-7842
+            </div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+            <Chip variant="up">✓ Consensus reached</Chip>
+            <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 6 }}>3 of 3 AI agreed</div>
+          </div>
+        </div>
+
+        {/* KPI band */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, padding: 16, background: "var(--bg-soft)", borderRadius: "var(--r-md)" }}>
+          <div>
+            <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Net PnL</div>
+            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: "var(--up)" }}>+₹1,24,800</div>
+            <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>+11.2% of capital</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Trades</div>
+            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>654</div>
+            <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>across 6 strategies</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Win rate</div>
+            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>58.4%</div>
+            <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>vs 3mo avg 56.2%</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Sharpe</div>
+            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>1.72</div>
+            <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>vs 3mo 1.64</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Max DD</div>
+            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: "var(--down)" }}>-₹18,400</div>
+            <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>Mar 14, recovered 2d</div>
+          </div>
+        </div>
+      </Card>
+
+      {/* Highlights */}
+      <div style={{ marginTop: 16 }}>
+        <Card title="Key highlights" sub="Most important findings">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
+            {highlights.map((h, i) => {
+              const colors = { up: "var(--up)", down: "var(--down)", warn: "oklch(65% 0.13 80)", acc: "var(--acc)" };
+              const bgs = { up: "var(--up-soft)", down: "var(--down-soft)", warn: "var(--warn-soft)", acc: "var(--bg-soft)" };
+              return (
+                <div key={i} style={{ padding: 14, borderRadius: "var(--r-md)", background: bgs[h.kind], border: `1px solid ${colors[h.kind]}20` }}>
+                  <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                    <div style={{ width: 24, height: 24, borderRadius: 6, background: colors[h.kind], color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, flexShrink: 0 }}>{h.icon}</div>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: colors[h.kind] }}>{h.t}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-2)", marginTop: 4, lineHeight: 1.5 }}>{h.d}</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      </div>
+
+      {/* Strategy review */}
+      <div style={{ marginTop: 16 }}>
+        <Card title="Strategy-by-strategy review" sub="AI verdict for each active strategy">
+          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 80px 70px 90px 70px 80px 80px 2fr", padding: "8px 12px", borderBottom: "1px solid var(--border)", fontSize: 10, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600 }}>
+            <div>Strategy</div><div>Mode</div><div style={{ textAlign: "right" }}>Trades</div><div style={{ textAlign: "right" }}>Win %</div><div style={{ textAlign: "right" }}>PnL</div><div style={{ textAlign: "right" }}>Sharpe</div><div>Verdict</div><div>AI reasoning</div>
+          </div>
+          {strategies.map((s, i) => {
+            const vColor = s.verdict === "keep" ? "up" : s.verdict === "watch" ? "info" : s.verdict === "tune" ? "warn" : "down";
+            return (
+              <div key={i} style={{
+                display: "grid", gridTemplateColumns: "1.4fr 80px 70px 90px 70px 80px 80px 2fr",
+                padding: "12px", borderBottom: i < strategies.length - 1 ? "1px solid var(--border)" : "none",
+                alignItems: "center", fontSize: 12,
+              }}>
+                <div>
+                  <div style={{ fontWeight: 600 }}>{s.name}</div>
+                  <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>drift: {s.drift}</div>
+                </div>
+                <div><Chip variant="info">{s.mode}</Chip></div>
+                <div className="mono" style={{ textAlign: "right" }}>{s.trades}</div>
+                <div className="mono" style={{ textAlign: "right" }}>{s.win}%</div>
+                <div className="mono" style={{ textAlign: "right", fontWeight: 600, color: s.pnl >= 0 ? "var(--up)" : "var(--down)" }}>
+                  {s.pnl >= 0 ? "+" : ""}₹{(s.pnl / 1000).toFixed(1)}k
+                </div>
+                <div className="mono" style={{ textAlign: "right", color: s.sharpe >= 0 ? "var(--text)" : "var(--down)" }}>{s.sharpe.toFixed(2)}</div>
+                <div><Chip variant={vColor}>{s.verdict.toUpperCase()}</Chip></div>
+                <div style={{ fontSize: 11, color: "var(--text-2)", lineHeight: 1.45 }}>{s.reason}</div>
+              </div>
+            );
+          })}
+        </Card>
+      </div>
+
+      {/* AI cost breakdown */}
+      <div style={{ marginTop: 16 }}>
+        <Card title="AI cost breakdown" sub="Where LLM budget was spent this month">
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20 }}>
+            <div>
+              {aiCost.map((p, i) => (
+                <div key={i} style={{ marginBottom: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500 }}>{p.p}</div>
+                    <div className="mono" style={{ fontSize: 12, fontWeight: 600 }}>₹{p.cost.toLocaleString("en-IN")}</div>
+                  </div>
+                  <div style={{ height: 6, background: "var(--border)", borderRadius: 3 }}>
+                    <div style={{ width: `${p.share}%`, height: "100%", background: i === 0 ? "var(--acc)" : i === 1 ? "var(--info)" : "var(--vio)", borderRadius: 3 }}/>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, fontSize: 10, color: "var(--text-3)" }}>
+                    <span className="mono">{p.calls.toLocaleString("en-IN")} calls</span>
+                    <span className="mono">{p.tokens} tokens</span>
+                    <span className="mono">{p.share}% share</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ padding: 16, background: "var(--bg-soft)", borderRadius: "var(--r-md)" }}>
+              <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.4 }}>TOTAL AI SPEND</div>
+              <div className="mono" style={{ fontSize: 28, fontWeight: 700, marginTop: 4 }}>₹8,900</div>
+              <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>of ₹15,000 budget · 59% used</div>
+              <div style={{ marginTop: 16, padding: 10, background: "var(--up-soft)", color: "var(--up)", borderRadius: "var(--r-sm)", fontSize: 11 }}>
+                <strong>Cost per ₹ PnL:</strong> ₹0.0713 (vs ₹0.0831 last mo) — 14% more efficient
+              </div>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      {/* Recommended actions */}
+      <div style={{ marginTop: 16 }}>
+        <Card title="Recommended actions" sub="All 3 AIs must agree before an action is surfaced here">
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {[
+              { p: 1, t: "Deactivate Iron Condor (Options)", d: "VIX has broken above 22, range-bound assumption no longer valid. Claude + Gemini + GPT-5 all flagged as high-conviction action.", action: "Deactivate" },
+              { p: 2, t: "Retune Event-Momentum (Swing) params", d: "Sharpe trending below 0 for 3 consecutive weeks. Auto-tuner ready to run 48hr Bayesian search on recent 90-day window.", action: "Start tuner" },
+              { p: 3, t: "Increase allocation to Breakout (Positional)", d: "Sharpe 2.14, DD profile excellent. Suggest moving capital from under-performing Swing bucket. Claude flagged, Gemini concurred, GPT-5 concurred.", action: "Review allocation" },
+              { p: 4, t: "Switch 40% of Gemini calls to Gemini Flash", d: "Non-critical news summarization doesn't need Pro-tier. Estimated savings: ₹620/mo. Quality delta: 0.2% (within A/B noise).", action: "Apply switch" },
+            ].map((a, i) => (
+              <div key={i} style={{ padding: 14, border: "1px solid var(--border)", borderRadius: "var(--r-md)", display: "flex", gap: 14, alignItems: "flex-start" }}>
+                <div style={{ width: 28, height: 28, borderRadius: 14, background: "var(--acc)", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, flexShrink: 0 }}>{a.p}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{a.t}</div>
+                  <div style={{ fontSize: 11, color: "var(--text-2)", marginTop: 4, lineHeight: 1.5 }}>{a.d}</div>
+                </div>
+                <button className="btn btn-primary" style={{ fontSize: 11, padding: "6px 12px" }}>{a.action}</button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
+    </>
+  );
+};
+
+window.AIReviewScreen = AIReviewScreen;

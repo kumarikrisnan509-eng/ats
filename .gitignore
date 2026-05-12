@@ -1,0 +1,83 @@
+# ===== Secrets — NEVER commit these =====
+# Anything containing broker keys, session secrets, or master keys.
+.env
+.env.*
+!.env.example
+deploy/backend/.env
+deploy/backend/.env.*
+!deploy/backend/.env.example
+
+# libsodium master key (encrypts Zerodha access tokens at rest)
+master.key
+deploy/backend/master.key
+deploy/master.key
+
+# Sealed per-user access tokens (one .enc file per user)
+tokens/
+deploy/backend/tokens/
+
+# SSH keys (deploy user)
+id_rsa
+id_ed25519
+*.pem
+*.key
+# (Exception: re-allow public keys you might want to ship in /docs)
+!*.pub
+
+# Local-only secrets scratch dir (deploy SSH keys, known_hosts captures, etc.)
+.secrets-local/
+ats-deploy
+ats-deploy.pub
+
+# Local helper .cmd files (hardcoded VM IPs, key paths). Not for shipping.
+BOOTSTRAP-VM.cmd
+KEYSCAN.cmd
+COPY-KNOWN-HOSTS.cmd
+PUSH-TO-GITHUB.cmd
+deploy/.bootstrap.log
+
+# ===== Logs =====
+audit.log
+deploy/backend/audit.log
+*.log
+logs/
+
+# ===== Node =====
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp.*
+.npm
+
+# ===== Build artefacts =====
+dist/
+build/
+.cache/
+.parcel-cache/
+.next/
+out/
+
+# ===== Local dev =====
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ===== Local test outputs / Claude session scratch =====
+deploy/backend/audit.log
+deploy/backend/master.key
+deploy/backend/tokens/
+
+# ===== Design assets we keep locally but don't want in CI / docker context =====
+# (Comment any of these out if you DO want them in the repo for reference.)
+debug.png
+
+# We DO keep screenshots/uploads in the repo for documentation, but they don't go
+# into the Docker image — that's handled by .dockerignore.
+
+# ===== OS / editor cruft =====
+*.bak
+*~

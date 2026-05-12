@@ -1,0 +1,56 @@
+# /opt/ats/compose/docker-compose.yml on the Oracle Cloud Linux VM.
+# Pulls the image GitHub Actions pushed to GHCR and runs it.
+#
+# Image tag is parameterised via the ATS_IMAGE_TAG env so deploy.sh can
+# pin a specific SHA and roll back by changing it.
+#
+# Static front-end files live INSIDE the image (at /app/static). The deploy
+# script `docker cp`s them out to /var/www/rajasekarselvam.com/ so the host
+# Nginx can serve them; no shared volume is needed.
+
+services:
+  ats-backend:
+    image: "ghcr.io/${ATS_REPO_OWNER}/ats-backend:${ATS_IMAGE_TAG:-latest}"
+    container_name: ats-backend
+    restart: always
+    # Only expose to loopback. Nginx on the host fronts this.
+    ports:
+      - "127.0.0.1:8080:8080"
+    env_file:
+      - /etc/ats/backend.env
+    environment:
+      # Override paths so they point at host-mounted volumes inside the container.
+      AUDIT_LOG: /var/log/ats/audit.log
+      MASTER_KEY_PATH: /run/secrets/master.key
+      TOKENS_DIR: /var/lib/ats/tokens
+    volumes:
+      # Append-only audit log — host owns the directory; container appends.
+      - type: bind
+        source: /var/log/ats
+        target: /var/log/ats
+      # Sealed per-user Zerodha access tokens.
+      - type: bind
+        source: /var/lib/ats/tokens
+        target: /var/lib/ats/tokens
+      # libsodium master key, read-only.
+      - type: bind
+        source: /etc/ats/master.key
+        target: /run/secrets/master.key
+        read_only: true
+    # Tighten kernel-level perms.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m
+    mem_limit: 512m
+    pids_limit: 256
+    # Healthcheck is defined in the Dockerfile.
+    logging:
+      driver: journald
+      options:
+        tag: ats-backend

@@ -1,0 +1,547 @@
+/* eslint-disable */
+/* Shell: sidebar nav, top bar */
+
+// Hold-to-confirm kill switch — 1.2s press + 2FA code before firing
+// Prevents accidental clicks AND requires authentication for destructive halt
+const KillSwitchButton = () => {
+  const [holding, setHolding] = React.useState(false);
+  const [progress, setProgress] = React.useState(0);
+  const [needs2FA, setNeeds2FA] = React.useState(false);
+  const [fired, setFired] = React.useState(false);
+  const timerRef = React.useRef(null);
+  const rafRef = React.useRef(null);
+  const startRef = React.useRef(0);
+
+  const HOLD_MS = 1200;
+
+  const begin = () => {
+    if (fired || needs2FA) return;
+    setHolding(true);
+    startRef.current = Date.now();
+    const tick = () => {
+      const elapsed = Date.now() - startRef.current;
+      const p = Math.min(100, (elapsed / HOLD_MS) * 100);
+      setProgress(p);
+      if (p < 100) rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    timerRef.current = setTimeout(() => {
+      setHolding(false);
+      setProgress(0);
+      setNeeds2FA(true); // Hold complete → trigger 2FA modal
+    }, HOLD_MS);
+  };
+
+  const end = () => {
+    if (fired || needs2FA) return;
+    cancelAnimationFrame(rafRef.current);
+    clearTimeout(timerRef.current);
+    setHolding(false);
+    setProgress(0);
+  };
+
+  const onConfirm2FA = () => {
+    setFired(true);
+    setNeeds2FA(false);
+    window.dispatchEvent(new CustomEvent("kill-switch-fired"));
+  };
+
+  if (fired) {
+    return (
+      <button
+        className="top__killswitch"
+        style={{ background: "var(--down)", color: "white", opacity: 0.9 }}
+        onClick={() => { setFired(false); setProgress(0); }}
+        title="All automated trading halted — click to reset"
+      >
+        <I.stop size={14}/> Halted
+      </button>
+    );
+  }
+
+  return (
+    <>
+      <button
+        className="top__killswitch"
+        onMouseDown={begin}
+        onMouseUp={end}
+        onMouseLeave={end}
+        onTouchStart={begin}
+        onTouchEnd={end}
+        style={{
+          position: "relative",
+          background: holding ? `linear-gradient(to right, var(--down) ${progress}%, var(--down-soft) ${progress}%)` : undefined,
+          color: holding ? "white" : undefined,
+          overflow: "hidden",
+          userSelect: "none",
+        }}
+        title="Press and hold 1.2s, then confirm with 2FA"
+      >
+        <I.stop size={14}/> {holding ? "Hold…" : "Kill"}
+      </button>
+      {window.TwoFactorModal && (
+        <window.TwoFactorModal
+          open={needs2FA}
+          onClose={() => setNeeds2FA(false)}
+          action="Halt all automated trading"
+          detail="This will cancel all working orders, square off all open positions, and prevent new trades until manually re-enabled. All 4 trading modes will be paused."
+          onConfirm={onConfirm2FA}
+        />
+      )}
+    </>
+  );
+};
+
+const NAV_GROUPS = [
+  {
+    // Zero-group: Dashboard floats above everything as the "home"
+    label: null,
+    items: [
+      { id: "dashboard",  label: "Dashboard",   icon: I.dashboard, badge: { text: "LIVE", kind: "live" } },
+    ],
+  },
+  {
+    // Hierarchy: Modes → Strategies → Signals
+    label: "Automate",
+    items: [
+      { id: "modes",      label: "Trading modes", icon: I.layers },
+      { id: "strategies", label: "Strategies",    icon: I.strategy,  badge: { text: "8" } },
+      { id: "signals",    label: "AI Signals",    icon: I.brain,     badge: { text: "12" } },
+      { id: "abtest",     label: "A/B testing",   icon: I.code,      badge: { text: "2" } },
+      { id: "compare",    label: "Compare",       icon: I.scale },
+      { id: "tuner",      label: "Auto-tuner",    icon: I.sparkle,   badge: { text: "1" } },
+      { id: "news",       label: "News & sentiment", icon: I.globe,  badge: { text: "8" } },
+      { id: "regime",     label: "Market regime",    icon: I.compass,   badge: { text: "trend" } },
+      { id: "alerts",     label: "Alerts builder",   icon: I.pulse,     badge: { text: "3", overflow: true } },
+      { id: "options",    label: "Options builder",  icon: I.options, overflow: true },
+    ],
+  },
+  {
+    label: "Validate",
+    items: [
+      { id: "backtest",   label: "Backtest lab",  icon: I.code },
+      { id: "paper",      label: "Paper trading", icon: I.flame,    badge: { text: "₹50L" } },
+      { id: "circuits",   label: "Circuit breakers", icon: I.gauge,  badge: { text: "13" } },
+    ],
+  },
+  {
+    label: "Execute",
+    items: [
+      { id: "trading",    label: "Live trading",  icon: I.trade },
+      { id: "audit",      label: "Audit trail",   icon: I.check },
+      { id: "margin",     label: "Margin calculator", icon: I.scale },
+    ],
+  },
+  {
+    // Wealth — regrouped: core → long-term plans → tax → social → brokers
+    label: "Wealth",
+    items: [
+      { id: "portfolio",  label: "Portfolio",            icon: I.portfolio },
+      { id: "benchmark",  label: "Benchmarking",         icon: I.trendUp,   badge: { text: "top 18%" } },
+      { id: "copy",       label: "Copy trading",         icon: I.user,      badge: { text: "2" } },
+    ],
+  },
+  {
+    label: "Long-term plans",
+    items: [
+      { id: "goals",      label: "Life goals",           icon: I.target,    badge: { text: "5" } },
+      { id: "stpswp",     label: "STP / SWP plans",      icon: I.refresh,   badge: { text: "3" } },
+      { id: "smallcase",  label: "Smallcases",           icon: I.basket },
+      { id: "fixed",      label: "Fixed income & REITs", icon: I.coin },
+    ],
+  },
+  {
+    label: "Tax",
+    items: [
+      { id: "harvest",    label: "Tax-loss harvest",     icon: I.leaf,      badge: { text: "6" } },
+      { id: "tax",        label: "Tax &amp; ITR",        icon: I.calc },
+    ],
+  },
+  {
+    label: "Connections",
+    items: [
+      { id: "brokers",    label: "Brokers",              icon: I.broker,    badge: { text: "3/5" } },
+    ],
+  },
+  {
+    label: "Operations",
+    items: [
+      { id: "review",      label: "AI monthly review", icon: I.report,    badge: { text: "MAR" } },
+      { id: "recon",       label: "Reconciliation",    icon: I.sync,      badge: { text: "2" } },
+      { id: "attribution", label: "PnL attribution",   icon: I.breakdown },
+    ],
+  },
+  {
+    label: "System",
+    items: [
+      { id: "risk",       label: "Risk",          icon: I.shield },
+      { id: "compliance", label: "Compliance",    icon: I.shieldCheck, badge: { text: "SEBI" } },
+      { id: "infra",      label: "Infrastructure",icon: I.server },
+      { id: "mobile",     label: "Mobile app",    icon: I.phone,   badge: { text: "preview" } },
+      { id: "apidocs",    label: "API & Webhooks",icon: I.code,    badge: { text: "v1" } },
+      { id: "settings",   label: "Settings",      icon: I.settings },
+    ],
+  },
+];
+
+const NavOverflow = ({ items, route, setRoute, groupKey }) => {
+  const storageKey = `ats.nav.overflow.${groupKey}`;
+  const [open, setOpen] = React.useState(() => {
+    try { return localStorage.getItem(storageKey) === "1"; } catch { return false; }
+  });
+  // If a route inside the overflow is active, force-open
+  const hasActive = items.some(it => it.id === route);
+  const expanded = open || hasActive;
+  const toggle = () => {
+    const next = !expanded;
+    setOpen(next);
+    try { localStorage.setItem(storageKey, next ? "1" : "0"); } catch {}
+  };
+  return (
+    <>
+      <button onClick={toggle} className="nav__item" style={{ opacity: 0.7, fontSize: 12 }} aria-expanded={expanded}>
+        <span style={{ width: 16, display: "inline-block", textAlign: "center" }}>{expanded ? "−" : "+"}</span>
+        <span>{expanded ? "Fewer" : "More"} tools</span>
+        <span className="nav__badge">{items.length}</span>
+      </button>
+      {expanded && items.map(it => (
+        <button
+          key={it.id}
+          onClick={() => setRoute(it.id)}
+          className={"nav__item" + (route === it.id ? " nav__item--active" : "")}
+          style={{ paddingLeft: 26 }}
+        >
+          <it.icon size={16}/>
+          <span>{it.label}</span>
+          {it.badge && <span className="nav__badge">{it.badge.text}</span>}
+        </button>
+      ))}
+    </>
+  );
+};
+
+const Sidebar = ({ route, setRoute }) => {
+  const [q, setQ] = React.useState("");
+  const ql = q.trim().toLowerCase();
+  const filt = (it) => !ql || it.label.toLowerCase().includes(ql);
+  return (
+  <aside className="nav">
+    <div className="nav__brand">
+      <div className="nav__logo">ATS</div>
+      <div>
+        <div className="nav__name">ATS</div>
+        <div className="nav__sub">Automated Trading System</div>
+      </div>
+    </div>
+
+    <div style={{ padding: "4px 14px 8px" }}>
+      <div style={{ position: "relative" }}>
+        <I.search size={12}/>
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter nav…" style={{
+          width: "100%", padding: "6px 8px 6px 26px", fontSize: 12,
+          background: "var(--bg-soft)", border: "1px solid var(--border)", borderRadius: 6,
+          color: "var(--text-1)",
+        }}/>
+        <span style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: "var(--text-3)", pointerEvents: "none" }}><I.search size={12}/></span>
+      </div>
+    </div>
+
+    {NAV_GROUPS.map((g, gi) => {
+      const allItems = g.items.filter(filt);
+      const items = allItems.filter(it => !it.overflow);
+      const overflow = allItems.filter(it => it.overflow);
+      if (!items.length && !overflow.length) return null;
+      return (
+      <React.Fragment key={g.label || `grp-${gi}`}>
+        {g.label && <div className="nav__group-label">{g.label}</div>}
+        {items.map(it => (
+          <button
+            key={it.id}
+            onClick={() => setRoute(it.id)}
+            className={"nav__item" + (route === it.id ? " nav__item--active" : "")}
+          >
+            <it.icon size={16}/>
+            <span>{it.label}</span>
+            {it.badge && (
+              <span className={"nav__badge" + (it.badge.kind === "live" ? " nav__badge--live" : "")}>
+                {it.badge.kind === "live" && <span style={{ display: "inline-block", width: 6, height: 6, background: "currentColor", borderRadius: "50%", marginRight: 4, verticalAlign: "middle" }}/>}
+                {it.badge.text}
+              </span>
+            )}
+          </button>
+        ))}
+        {overflow.length > 0 && <NavOverflow items={overflow} route={route} setRoute={setRoute} groupKey={g.label || `grp-${gi}`}/>}
+      </React.Fragment>
+      );
+    })}
+
+    <div className="nav__footer">
+      <div style={{ fontSize: 11, color: "var(--text-3)", textAlign: "center", lineHeight: 1.5 }}>
+        ATS · v2.4.1<br/>
+        <span style={{ color: "var(--success)" }}>●</span> All systems operational
+      </div>
+    </div>
+  </aside>
+  );
+};
+
+const TopBar = ({ title, crumb, theme, setTheme, setRoute }) => {
+  // Sourced from Kite /market/holidays (refreshed 06:00 IST daily) + clock.
+  const status = window.marketStatus();
+  const open = status.open;
+  const nextHol = window.nextHoliday();
+
+  // Mode chip — counts active modes, refreshes on storage events
+  const [, bump] = React.useReducer(x => x + 1, 0);
+  React.useEffect(() => {
+    const h = () => bump();
+    window.addEventListener("storage", h);
+    window.addEventListener("modes-changed", h);
+    return () => {
+      window.removeEventListener("storage", h);
+      window.removeEventListener("modes-changed", h);
+    };
+  }, []);
+  const activeModes = window.MODE_IDS.filter(id => window.isModeActive(id));
+  const allActive = activeModes.length === 4;
+
+  return (
+    <header className="top">
+      <div className="top__heading">
+        <div className="top__crumb">{crumb}</div>
+        <div className="top__title">{title}</div>
+      </div>
+
+      <button
+        type="button"
+        className="top__search"
+        onClick={() => window.dispatchEvent(new CustomEvent("open-palette"))}
+        title="Open command palette"
+        style={{ cursor: "pointer", textAlign: "left" }}
+      >
+        <I.search size={14}/>
+        <span style={{ flex: 1, color: "var(--text-3)", fontSize: 13 }}>Search pages, actions, symbols…</span>
+        <span className="top__kbd">⌘K</span>
+      </button>
+
+      <div className="top__actions">
+        <button
+          onClick={() => setRoute && setRoute("modes")}
+          title={`Active modes: ${activeModes.map(id => window.MODE_META[id].label).join(", ") || "none"}`}
+          style={{
+            display: "flex", alignItems: "center", gap: 6,
+            padding: "6px 10px", borderRadius: 999,
+            background: allActive ? "var(--up-soft)" : activeModes.length === 0 ? "var(--down-soft)" : "var(--warn-soft)",
+            color: allActive ? "var(--up)" : activeModes.length === 0 ? "var(--down)" : "oklch(45% 0.13 80)",
+            fontSize: 12, fontWeight: 500, border: "1px solid transparent", whiteSpace: "nowrap",
+          }}
+        >
+          <span style={{ display: "inline-flex", gap: 2 }}>
+            {window.MODE_IDS.map(id => (
+              <span key={id} style={{
+                width: 6, height: 6, borderRadius: "50%",
+                background: window.isModeActive(id) ? window.MODE_META[id].color : "currentColor",
+                opacity: window.isModeActive(id) ? 1 : 0.25,
+              }}/>
+            ))}
+          </span>
+          {activeModes.length}/4 modes
+        </button>
+
+        <div className={"top__market" + (open ? "" : " top__market--closed")}>
+          <span className="top__market-dot"/>
+          <span className="mono" style={{ fontSize: 12 }}>NSE</span>
+          <span style={{ color: "var(--text-3)" }} title={nextHol ? `Next holiday: ${nextHol.name} · ${nextHol.date}` : ""}>{status.label}</span>
+        </div>
+
+        <button className="iconbtn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} title="Toggle theme">
+          {theme === "dark" ? <I.sun size={16}/> : <I.moon size={16}/>}
+        </button>
+        {window.DensityToggle && <window.DensityToggle/>}
+        <NotificationsBell setRoute={setRoute}/>
+        <KillSwitchButton/>
+        <div style={{ width: 1, height: 24, background: "var(--border)", margin: "0 4px" }}/>
+        <ProfileMenu setRoute={setRoute}/>
+      </div>
+    </header>
+  );
+};
+
+const NOTIF_ROUTE = { 1: "signals", 2: "modes", 3: "portfolio", 4: "compliance", 5: "infra", 6: "settings" };
+
+// Notifications dropdown — event feed with severity + read state
+const NotificationsBell = ({ setRoute }) => {
+  const [open, setOpen] = React.useState(false);
+  const [items, setItems] = React.useState([
+    { id: 1, sev: "info",  icon: "◆", title: "HDFCBANK signal promoted to live",  detail: "Momentum AI · 82% conf · paper win-rate 64% (14d)", when: "2m ago", unread: true },
+    { id: 2, sev: "warn",  icon: "!", title: "Options mode near daily loss limit", detail: "-₹4,820 / -₹5,000 · will auto-halt at limit", when: "18m ago", unread: true },
+    { id: 3, sev: "up",    icon: "↑", title: "Monthly profit sweep complete",       detail: "₹38,450 moved → NIFTY Next 50 index fund", when: "2h ago", unread: true },
+    { id: 4, sev: "info",  icon: "◆", title: "Compliance: daily audit exported",    detail: "237 orders · Algo-ID tagged · sent to SEBI inbox", when: "3h ago", unread: false },
+    { id: 5, sev: "down",  icon: "✕", title: "Zerodha WebSocket reconnected",       detail: "8s disconnect at 11:42:17 · no orders missed", when: "yesterday", unread: false },
+    { id: 6, sev: "info",  icon: "◆", title: "Claude Opus 4.6 released",            detail: "Auto-upgraded from 4.5 · 12% cheaper per signal", when: "yesterday", unread: false },
+  ]);
+  const unreadCount = items.filter(i => i.unread).length;
+  const markAll = () => setItems(items.map(i => ({ ...i, unread: false })));
+
+  const sevColor = {
+    info: "var(--info)", warn: "oklch(65% 0.13 80)", up: "var(--up)", down: "var(--down)",
+  };
+  const sevBg = {
+    info: "var(--info-soft)", warn: "var(--warn-soft)", up: "var(--up-soft)", down: "var(--down-soft)",
+  };
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button className="iconbtn iconbtn--notify" title="Notifications" onClick={() => setOpen(!open)} style={{ position: "relative" }}>
+        <I.bell size={16}/>
+        {unreadCount > 0 && (
+          <span style={{
+            position: "absolute", top: 4, right: 4,
+            minWidth: 14, height: 14, borderRadius: 7,
+            background: "var(--down)", color: "white",
+            fontSize: 9, fontWeight: 700,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: "0 4px",
+          }}>{unreadCount}</span>
+        )}
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 50 }}/>
+          <div style={{
+            position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 51,
+            width: 400,
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--r-md)",
+            boxShadow: "0 12px 32px oklch(0% 0 0 / 0.18)",
+            overflow: "hidden",
+          }}>
+            <div className="between" style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)" }}>
+              <div>
+                <div style={{ fontWeight: 500, fontSize: 14 }}>Notifications</div>
+                <div className="muted" style={{ fontSize: 11 }}>{unreadCount} unread · last 24h</div>
+              </div>
+              <button className="btn btn--ghost" style={{ fontSize: 11, padding: "4px 8px" }} onClick={markAll} disabled={unreadCount === 0}>
+                Mark all read
+              </button>
+            </div>
+            <div style={{ maxHeight: 420, overflowY: "auto" }}>
+              {items.map(it => (
+                <div key={it.id} onClick={() => { setItems(items.map(x => x.id === it.id ? {...x, unread: false} : x)); setOpen(false); setRoute && setRoute(NOTIF_ROUTE[it.id] || "dashboard"); }} style={{
+                  display: "flex", gap: 12,
+                  padding: "12px 16px",
+                  borderBottom: "1px solid var(--border)",
+                  background: it.unread ? "var(--bg-soft)" : "transparent",
+                  cursor: "pointer",
+                }}>
+                  <div style={{
+                    width: 26, height: 26, borderRadius: 6, flexShrink: 0,
+                    background: sevBg[it.sev], color: sevColor[it.sev],
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontWeight: 700, fontSize: 13, fontFamily: "var(--mono)",
+                  }}>{it.icon}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+                      <div style={{ fontSize: 13, fontWeight: it.unread ? 500 : 400, flex: 1 }}>{it.title}</div>
+                      {it.unread && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)", flexShrink: 0 }}/>}
+                    </div>
+                    <div className="muted" style={{ fontSize: 11, marginTop: 2, lineHeight: 1.45 }}>{it.detail}</div>
+                    <div className="muted" style={{ fontSize: 10, marginTop: 4, fontFamily: "var(--mono)" }}>{it.when}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", textAlign: "center" }}>
+              <a href="#settings" onClick={() => setOpen(false)} style={{ fontSize: 12, color: "var(--text-3)", textDecoration: "underline" }}>Notification preferences</a>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+// Profile menu — avatar + dropdown with quick links
+const ProfileMenu = ({ setRoute }) => {
+  const [open, setOpen] = React.useState(false);
+  const [demo, setDemo] = window.useDemoMode();
+  const nav = (r) => { setOpen(false); setRoute && setRoute(r); };
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          width: 30, height: 30, borderRadius: "50%",
+          background: "linear-gradient(135deg, var(--accent), oklch(50% 0.12 280))",
+          color: "white", fontWeight: 600, fontSize: 12,
+          border: "2px solid var(--border)",
+          cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+        }}
+      >RS</button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 50 }}/>
+          <div style={{
+            position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 51,
+            width: 240,
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--r-md)",
+            boxShadow: "0 12px 32px oklch(0% 0 0 / 0.18)",
+            overflow: "hidden",
+          }}>
+            <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)", display: "flex", gap: 12, alignItems: "center" }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: "50%",
+                background: "linear-gradient(135deg, var(--accent), oklch(50% 0.12 280))",
+                color: "white", fontWeight: 600, fontSize: 14,
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>RS</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 500, fontSize: 13 }}>Rajasekar Selvam</div>
+                <div className="muted" style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>rajasekar@example.in</div>
+              </div>
+            </div>
+            <div style={{ padding: "6px 0" }}>
+              {[
+                { label: "Profile",        route: "profile",  icon: I.user },
+                { label: "Brokers",        route: "brokers",  icon: I.link },
+                { label: "AI sources",     route: "settings", icon: I.sparkle },
+                { label: "Compliance",     route: "compliance", icon: I.shieldCheck },
+              ].map(it => (
+                <button key={it.route} className="btn btn--ghost" onClick={() => nav(it.route)} style={{ width: "100%", justifyContent: "flex-start", padding: "8px 16px", borderRadius: 0, fontSize: 13 }}>
+                  <it.icon size={14}/> {it.label}
+                </button>
+              ))}
+            </div>
+            <div style={{ borderTop: "1px solid var(--border)", padding: "8px 16px" }}>
+              <div className="between" style={{ padding: "4px 0" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}>
+                    <I.sparkle size={12}/> Demo mode
+                  </div>
+                  <div className="muted" style={{ fontSize: 10, marginTop: 1 }}>
+                    {demo ? "Clean slate · empty data" : "Seeded sample data"}
+                  </div>
+                </div>
+                <Toggle on={demo} onClick={() => setDemo(!demo)}/>
+              </div>
+            </div>
+            <div style={{ borderTop: "1px solid var(--border)", padding: "6px 0" }}>
+              <button
+                className="btn btn--ghost"
+                onClick={() => { window.dispatchEvent(new CustomEvent("logout")); setOpen(false); }}
+                style={{ width: "100%", justifyContent: "flex-start", padding: "8px 16px", borderRadius: 0, fontSize: 13, color: "var(--down)" }}
+              >
+                <I.stop size={14}/> Sign out
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+Object.assign(window, { Sidebar, TopBar });

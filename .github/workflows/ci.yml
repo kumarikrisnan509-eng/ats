@@ -1,0 +1,84 @@
+# PR + push validation. Cheap. Runs on every push and every pull request.
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: validate (lint + syntax)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: deploy/backend/package-lock.json
+
+      - name: Install backend deps
+        working-directory: deploy/backend
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Syntax-check backend JS
+        run: |
+          set -e
+          for f in $(find deploy/backend -name '*.js' -not -path '*/node_modules/*'); do
+            node --check "$f"
+          done
+          echo "backend JS OK"
+
+      - name: Lint static HTML (basic checks)
+        run: |
+          set -e
+          test -f app.html
+          test -f styles.css
+          test -d src
+          # JSX files must parse as JS-with-JSX. We use @babel/parser as a cheap check.
+          npx --yes @babel/parser@7 --version >/dev/null
+          node -e '
+            const parser = require("@babel/parser");
+            const fs = require("fs"), path = require("path");
+            const dir = "src";
+            let bad = 0;
+            for (const f of fs.readdirSync(dir)) {
+              if (!f.endsWith(".jsx")) continue;
+              const code = fs.readFileSync(path.join(dir, f), "utf8");
+              try {
+                parser.parse(code, { sourceType: "script", plugins: ["jsx"] });
+                console.log("OK  " + f);
+              } catch (e) {
+                console.error("FAIL " + f + " :: " + e.message);
+                bad++;
+              }
+            }
+            if (bad > 0) { console.error(bad + " JSX file(s) failed to parse"); process.exit(1); }
+          '
+
+      - name: Secret-leak guard
+        run: |
+          set -e
+          # Hard fail if anything that looks like a secret is committed.
+          ! grep -RIn --exclude-dir=node_modules --exclude-dir=.git \
+              -e 'ZERODHA_API_SECRET=[A-Za-z0-9]\+' \
+              -e 'BEGIN RSA PRIVATE KEY' \
+              -e 'BEGIN OPENSSH PRIVATE KEY' \
+              -e 'GHCR_TOKEN=ghp_' \
+              .
+          # Master key, audit log, sealed tokens must never be committed.
+          for path in deploy/backend/master.key deploy/backend/audit.log deploy/backend/tokens; do
+            if [ -e "$path" ]; then echo "!! committed: $path" >&2; exit 1; fi
+          done
+          echo "no leaks detected"

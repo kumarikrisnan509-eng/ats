@@ -1,0 +1,39 @@
+[Unit]
+Description=ATS backend (Node.js) for rajasekarselvam.com
+Documentation=file:///opt/ats/backend/server.js
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ats
+Group=ats
+WorkingDirectory=/opt/ats/backend
+EnvironmentFile=/etc/ats/backend.env
+ExecStart=/usr/bin/node /opt/ats/backend/server.js
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ats-backend
+
+# --- Hardening ---
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+ReadWritePaths=/var/log/ats
+MemoryMax=512M
+TasksMax=256
+# Only outbound networking; backend binds to loopback so no need to open ports.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

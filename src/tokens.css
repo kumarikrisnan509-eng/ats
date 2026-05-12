@@ -1,0 +1,66 @@
+/* R11 #4 — Design tokens. Additive; inline-styled screens can migrate gradually.
+   Spacing scale (4px base):  --space-0 .. --space-8
+   Type scale:                --text-xs .. --text-3xl
+   Radii echo existing --r-* but normalized here for new code.
+*/
+:root {
+  /* spacing — 4px base, doubled to 64 */
+  --space-0:  0;
+  --space-05: 2px;
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-7:  32px;
+  --space-8:  48px;
+  --space-9:  64px;
+
+  /* type — line-heights tuned for compact dashboard density */
+  --text-xs:   11px;
+  --text-sm:   12px;
+  --text-base: 13px;
+  --text-md:   14px;
+  --text-lg:   16px;
+  --text-xl:   20px;
+  --text-2xl:  24px;
+  --text-3xl:  32px;
+  --text-4xl:  44px;
+
+  --lh-tight:  1.2;
+  --lh-snug:   1.35;
+  --lh-normal: 1.5;
+
+  /* weight aliases */
+  --fw-regular: 400;
+  --fw-medium:  500;
+  --fw-semi:    600;
+  --fw-bold:    700;
+
+  /* density-aware row heights */
+  --row-comfort: 44px;
+  --row-default: 36px;
+  --row-compact: 28px;
+}
+
+/* Density toggle hook — flips spacing scale globally.
+   Toggle by setting <html data-density="compact"> (already wired in topbar). */
+html[data-density="compact"] {
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 14px;
+  --space-6: 18px;
+  --text-base: 12px;
+  --text-md: 13px;
+  --row-default: 28px;
+}
+html[data-density="comfortable"] {
+  --space-3: 14px;
+  --space-4: 20px;
+  --space-5: 26px;
+  --space-6: 32px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --row-default: 44px;
+}
