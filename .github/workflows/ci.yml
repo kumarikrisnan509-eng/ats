@@ -44,10 +44,12 @@ jobs:
           test -f app.html
           test -f styles.css
           test -d src
-          # JSX files must parse as JS-with-JSX. We use @babel/parser as a cheap check.
-          npx --yes @babel/parser@7 --version >/dev/null
+          # JSX files must parse as JS-with-JSX. Install @babel/parser into a throwaway dir, then require it.
+          mkdir -p .ci-tmp && cd .ci-tmp
+          npm install --silent --no-save --no-package-lock @babel/parser@7 >/dev/null
+          cd ..
           node -e '
-            const parser = require("@babel/parser");
+            const parser = require("./.ci-tmp/node_modules/@babel/parser");
             const fs = require("fs"), path = require("path");
             const dir = "src";
             let bad = 0;
@@ -64,6 +66,7 @@ jobs:
             }
             if (bad > 0) { console.error(bad + " JSX file(s) failed to parse"); process.exit(1); }
           '
+          rm -rf .ci-tmp
 
       - name: Secret-leak guard
         run: |
