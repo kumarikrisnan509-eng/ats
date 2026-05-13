@@ -354,6 +354,35 @@ app.get('/api/calc/position-size', (req, res) => {
   }
 });
 
+// ---------- Strategy registry ----------
+// Source-of-truth catalog for backtest + scanner + future UI.
+const STRATEGIES = [
+  {
+    id: 'rsi_mean_revert',
+    name: 'RSI mean reversion',
+    description: 'Long-only: BUY when RSI(period) < entryRsi; SELL when RSI > exitRsi.',
+    bias: 'mean-reverting markets, range-bound',
+    params: [
+      { name: 'period',   type: 'int',   default: 14, min: 2,  max: 100 },
+      { name: 'entryRsi', type: 'float', default: 30, min: 1,  max: 99 },
+      { name: 'exitRsi',  type: 'float', default: 70, min: 1,  max: 99 },
+    ],
+  },
+  {
+    id: 'ema_cross',
+    name: 'EMA cross',
+    description: 'Long-only: BUY when close crosses above N-EMA; SELL when crosses below.',
+    bias: 'trending markets',
+    params: [
+      { name: 'period', type: 'int', default: 20, min: 2, max: 200 },
+    ],
+  },
+];
+
+app.get('/api/strategies', (_req, res) => {
+  res.json({ ok: true, strategies: STRATEGIES });
+});
+
 // ---------- Backtest ----------
 // POST /api/backtest  body: { symbol, strategy, from, to, qty?, params? }
 app.post('/api/backtest', async (req, res) => {
@@ -603,6 +632,167 @@ app.get('/api/instruments/search', (req, res) => {
 });
 
 app.get('/api/kill-switch', (_req, res) => res.json({ killSwitch: KILL_SWITCH }));
+
+// ---------- Watchlist backtest ----------
+// POST /api/backtest/watchlist  body: { strategy, from, to, qty?, params?, interval? }
+// Runs the strategy across every scannable symbol in the watchlist (skips indices),
+// returns per-symbol stats sorted by totalPnl desc.
+app.post('/api/backtest/watchlist', async (req, res) => {
+  try {
+    if (!watchlist) return res.status(503).json({ ok: false, reason: 'watchlist_not_initialized' });
+    const { strategy, from, to, qty, params, interval } = req.body || {};
+    if (!strategy)    return res.status(400).json({ ok: false, reason: 'strategy required' });
+    if (!from || !to) return res.status(400).json({ ok: false, reason: 'from and to required' });
+
+    const symbols = watchlist.list().filter(s =>
+      !/^(NIFTY|BANKNIFTY|SENSEX|FINNIFTY|MIDCPNIFTY|INDIA VIX)/i.test(s) &&
+      !/(CE|PE|FUT)$/.test(s)
+    );
+    if (symbols.length === 0) return res.json({ ok: true, results: [], note: 'no scannable symbols in watchlist' });
+
+    const results = [];
+    const errors = {};
+    for (const symbol of symbols) {
+      try {
+        const candles = await broker.getHistorical({
+          symbol, interval: interval || 'day', from, to,
+        });
+        if (!Array.isArray(candles) || candles.length < 30) {
+          errors[symbol] = `only ${candles ? candles.length : 0} candles`;
+          continue;
+        }
+        const r = runBacktest({
+          candles,
+          strategy,
+          params: params || {},
+          qty: Number(qty) || 1,
+        });
+        results.push({
+          symbol,
+          trades: r.stats.trades,
+          winRate: r.stats.winRate,
+          totalPnl: r.stats.totalPnl,
+          buyAndHoldPnl: r.stats.buyAndHoldPnl,
+          vsBuyAndHold: r.stats.vsBuyAndHold,
+          maxDrawdown: r.stats.maxDrawdown,
+          avgWin: r.stats.avgWin,
+          avgLoss: r.stats.avgLoss,
+        });
+      } catch (e) {
+        errors[symbol] = e.message;
+      }
+      // Polite pacing for Kite REST.
+      await new Promise(r => setTimeout(r, 250));
+    }
+
+    results.sort((a, b) => b.totalPnl - a.totalPnl);
+
+    const aggregate = {
+      symbolsScanned: results.length,
+      totalPnl: +results.reduce((s, r) => s + r.totalPnl, 0).toFixed(2),
+      profitable: results.filter(r => r.totalPnl > 0).length,
+      losing:     results.filter(r => r.totalPnl < 0).length,
+      avgWinRate: results.length ? +(results.reduce((s, r) => s + r.winRate, 0) / results.length).toFixed(2) : 0,
+    };
+
+    audit('backtest.watchlist', { strategy, ...aggregate });
+    res.json({ ok: true, strategy, from, to, qty: Number(qty) || 1, aggregate, results, errors: Object.keys(errors).length ? errors : null });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
+// ---------- Order placement (kill-switch gated) ----------
+//
+// Real order placement is INTENTIONALLY gated. The route exists so that:
+//   - Payload validation, audit, idempotency-key flow are all wired and tested
+//   - Frontend can wire the "Place order" button now
+//   - When you're ready to actually trade, flip KILL_SWITCH=false in /etc/ats/backend.env
+//     and (separately) wire the broker.placeOrder() call. That broker method is NOT
+//     present yet by design — adding it is the deliberate moment you decide to trade live.
+//
+// Until then this endpoint validates + audits + returns 503 with reason:'KILL_SWITCH_ON'.
+const VALID_SIDES         = new Set(['BUY', 'SELL']);
+const VALID_PRODUCTS      = new Set(['CNC', 'NRML', 'MIS', 'BO', 'CO']);
+const VALID_ORDER_TYPES   = new Set(['MARKET', 'LIMIT', 'SL', 'SL-M']);
+const VALID_VARIETIES     = new Set(['regular', 'amo', 'co', 'iceberg', 'auction']);
+const VALID_VALIDITY      = new Set(['DAY', 'IOC', 'TTL']);
+
+app.post('/api/orders/place', (req, res) => {
+  const body = req.body || {};
+  const required = ['strategyTag', 'symbol', 'side', 'quantity', 'product', 'orderType'];
+  for (const k of required) {
+    if (!(k in body)) return res.status(400).json({ ok: false, reason: `missing:${k}` });
+  }
+
+  // Normalize + validate
+  const side       = String(body.side).toUpperCase();
+  const product    = String(body.product).toUpperCase();
+  const orderType  = String(body.orderType).toUpperCase();
+  const variety    = String(body.variety || 'regular').toLowerCase();
+  const validity   = String(body.validity || 'DAY').toUpperCase();
+  const quantity   = Number(body.quantity);
+  const price      = body.price != null ? Number(body.price) : null;
+  const triggerPx  = body.triggerPrice != null ? Number(body.triggerPrice) : null;
+  const symbol     = String(body.symbol).trim();
+  const exchange   = String(body.exchange || 'NSE').toUpperCase();
+
+  if (!VALID_SIDES.has(side))             return res.status(400).json({ ok:false, reason:`invalid side: ${side}` });
+  if (!VALID_PRODUCTS.has(product))       return res.status(400).json({ ok:false, reason:`invalid product: ${product}` });
+  if (!VALID_ORDER_TYPES.has(orderType))  return res.status(400).json({ ok:false, reason:`invalid orderType: ${orderType}` });
+  if (!VALID_VARIETIES.has(variety))      return res.status(400).json({ ok:false, reason:`invalid variety: ${variety}` });
+  if (!VALID_VALIDITY.has(validity))      return res.status(400).json({ ok:false, reason:`invalid validity: ${validity}` });
+  if (!Number.isFinite(quantity) || quantity <= 0) return res.status(400).json({ ok:false, reason:'quantity must be > 0' });
+  if (orderType === 'LIMIT' && (!Number.isFinite(price) || price <= 0))
+    return res.status(400).json({ ok:false, reason:'LIMIT order requires price > 0' });
+  if ((orderType === 'SL' || orderType === 'SL-M') && (!Number.isFinite(triggerPx) || triggerPx <= 0))
+    return res.status(400).json({ ok:false, reason:`${orderType} order requires triggerPrice > 0` });
+
+  const clientOrderId = body.clientOrderId || crypto.randomUUID();
+
+  const normalizedPayload = {
+    strategyTag: String(body.strategyTag),
+    symbol, exchange, side, quantity, product, orderType, variety, validity,
+    price, triggerPrice: triggerPx,
+    clientOrderId,
+  };
+
+  // Hard safety: while kill-switch is on, NEVER route to broker. Just audit.
+  if (KILL_SWITCH) {
+    audit('order.blocked.killSwitch', normalizedPayload);
+    return res.status(503).json({
+      ok: false,
+      reason: 'KILL_SWITCH_ON',
+      message: 'Live orders are disabled while KILL_SWITCH=true. Set KILL_SWITCH=false in /etc/ats/backend.env to enable.',
+      clientOrderId,
+      validatedPayload: normalizedPayload,
+    });
+  }
+
+  // KILL_SWITCH is off — but broker.placeOrder() is deliberately not implemented yet.
+  // Hard fail until that method is added in a separate, intentional change.
+  if (typeof broker.placeOrder !== 'function') {
+    audit('order.blocked.notImplemented', normalizedPayload);
+    return res.status(501).json({
+      ok: false,
+      reason: 'PLACE_ORDER_NOT_IMPLEMENTED',
+      message: 'Broker adapter has no placeOrder() method. Add it deliberately when wiring live trading.',
+      clientOrderId,
+      validatedPayload: normalizedPayload,
+    });
+  }
+
+  // Reserved for the future. Unreachable today.
+  broker.placeOrder(normalizedPayload)
+    .then((result) => {
+      audit('order.placed', { clientOrderId, result });
+      res.json({ ok: true, clientOrderId, ...result });
+    })
+    .catch((err) => {
+      audit('order.placeError', { clientOrderId, msg: err.message });
+      res.status(502).json({ ok: false, reason: err.message, clientOrderId });
+    });
+});
 
 app.post('/api/orders/dry-run', (req, res) => {
   if (KILL_SWITCH) {
