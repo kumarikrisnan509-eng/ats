@@ -110,9 +110,7 @@ ${DEPLOY_USER} ALL=(root) NOPASSWD: \\
     /bin/mv /var/www/${DOMAIN} /var/www/${DOMAIN}.old, \\
     /bin/mv /var/www/${DOMAIN}.new /var/www/${DOMAIN}, \\
     /bin/mv /var/www/${DOMAIN}.old /var/www/${DOMAIN}, \\
-    /bin/chown -R root\\:root /var/www/${DOMAIN}, \\
-    /usr/bin/find /var/www/${DOMAIN} -type d -exec chmod 755 {} +, \\
-    /usr/bin/find /var/www/${DOMAIN} -type f -exec chmod 644 {} +
+    /bin/chown -R ${DEPLOY_USER}\\:${DEPLOY_USER} /var/www/${DOMAIN}.new
 EOF
 chmod 440 /etc/sudoers.d/ats-deployer
 visudo -c -q -f /etc/sudoers.d/ats-deployer
@@ -122,7 +120,7 @@ echo "==> [5/9] directories"
 install -d -m 755 -o root            -g root             "/opt/ats"
 install -d -m 755 -o "${DEPLOY_USER}" -g "${DEPLOY_USER}" "${COMPOSE_DIR}"
 install -d -m 755 -o "${DEPLOY_USER}" -g "${DEPLOY_USER}" "${SCRIPTS_DIR}"
-install -d -m 755 -o root            -g root             "${STATIC_ROOT}"
+install -d -m 755 -o "${DEPLOY_USER}" -g "${DEPLOY_USER}" "${STATIC_ROOT}"
 install -d -m 755 -o root            -g root             /var/www/letsencrypt
 install -d -m 750 -o root            -g "${SERVICE_USER}" "${ETC_DIR}"
 install -d -m 750 -o "${SERVICE_USER}" -g "${SERVICE_USER}" "${LOG_DIR}"

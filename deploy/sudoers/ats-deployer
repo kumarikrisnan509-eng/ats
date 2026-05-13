@@ -1,0 +1,11 @@
+deployer ALL=(root) NOPASSWD: \
+    /usr/sbin/nginx -t, \
+    /bin/systemctl reload nginx, \
+    /bin/rm -rf /var/www/ats.rajasekarselvam.com, \
+    /bin/rm -rf /var/www/ats.rajasekarselvam.com.new, \
+    /bin/rm -rf /var/www/ats.rajasekarselvam.com.old, \
+    /bin/mkdir -p /var/www/ats.rajasekarselvam.com.new, \
+    /bin/mv /var/www/ats.rajasekarselvam.com /var/www/ats.rajasekarselvam.com.old, \
+    /bin/mv /var/www/ats.rajasekarselvam.com.new /var/www/ats.rajasekarselvam.com, \
+    /bin/mv /var/www/ats.rajasekarselvam.com.old /var/www/ats.rajasekarselvam.com, \
+    /bin/chown -R deployer\:deployer /var/www/ats.rajasekarselvam.com.new

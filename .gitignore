@@ -35,6 +35,7 @@ KEYSCAN.cmd
 COPY-KNOWN-HOSTS.cmd
 PUSH-TO-GITHUB.cmd
 PUSH-NOW.cmd
+UPDATE-VM.cmd
 deploy/.bootstrap.log
 
 # ===== Logs =====

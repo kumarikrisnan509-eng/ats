@@ -36,17 +36,18 @@ docker pull "${IMAGE}:${NEW_TAG}"
 echo "==> Extracting baked-in static files to ${STATIC_DIR}"
 TMP_CNTR="ats-extract-$$"
 docker create --name "${TMP_CNTR}" "${IMAGE}:${NEW_TAG}" >/dev/null
+# Create .new owned by deployer so docker cp (running via deployer's docker group) can write into it.
 sudo rm -rf "${STATIC_DIR}.new"
 sudo mkdir -p "${STATIC_DIR}.new"
+sudo chown -R deployer:deployer "${STATIC_DIR}.new"
 docker cp "${TMP_CNTR}:/app/static/." "${STATIC_DIR}.new/"
 docker rm "${TMP_CNTR}" >/dev/null
-# Atomic swap of the static directory.
+# Atomic swap.
 if [[ -d "${STATIC_DIR}" ]]; then sudo mv "${STATIC_DIR}" "${STATIC_DIR}.old"; fi
 sudo mv "${STATIC_DIR}.new" "${STATIC_DIR}"
-sudo chown -R root:root "${STATIC_DIR}"
-sudo find "${STATIC_DIR}" -type d -exec chmod 755 {} \;
-sudo find "${STATIC_DIR}" -type f -exec chmod 644 {} \;
-sudo restorecon -Rq "${STATIC_DIR}" 2>/dev/null || true
+# Make files world-readable for Nginx.
+find "${STATIC_DIR}" -type d -exec chmod 755 {} + 2>/dev/null || true
+find "${STATIC_DIR}" -type f -exec chmod 644 {} + 2>/dev/null || true
 
 # Remember the tag we are switching from so we can roll back if health fails.
 if [[ -f "${TAG_FILE}" ]]; then cp "${TAG_FILE}" "${PREV_FILE}"; fi

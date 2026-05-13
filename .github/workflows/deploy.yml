@@ -79,7 +79,7 @@ jobs:
           file: deploy/docker/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          platforms: linux/amd64
+          platforms: linux/arm64
           cache-from: type=gha
           cache-to:   type=gha,mode=max
           provenance: false
@@ -101,6 +101,30 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           echo "${{ secrets.OCI_SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
+
+      - name: Sync latest deploy scripts to VM
+        run: |
+          set -e
+          scp -i ~/.ssh/id_ed25519 \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              deploy/scripts/deploy-on-vm.sh \
+              "${{ secrets.OCI_SSH_USER }}@${{ secrets.OCI_SSH_HOST }}:/tmp/deploy-on-vm.sh.new"
+          ssh -i ~/.ssh/id_ed25519 \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              "${{ secrets.OCI_SSH_USER }}@${{ secrets.OCI_SSH_HOST }}" \
+              "mv /tmp/deploy-on-vm.sh.new /opt/ats/scripts/deploy-on-vm.sh && chmod +x /opt/ats/scripts/deploy-on-vm.sh"
+          scp -i ~/.ssh/id_ed25519 \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              deploy/docker/docker-compose.yml \
+              "${{ secrets.OCI_SSH_USER }}@${{ secrets.OCI_SSH_HOST }}:/tmp/docker-compose.yml.new"
+          ssh -i ~/.ssh/id_ed25519 \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              "${{ secrets.OCI_SSH_USER }}@${{ secrets.OCI_SSH_HOST }}" \
+              "mv /tmp/docker-compose.yml.new /opt/ats/compose/docker-compose.yml"
 
       - name: Trigger deploy on VM
         env:
