@@ -62,7 +62,8 @@ const TradingScreen = () => {
   const askTotal = asks.reduce((s, a) => s + a.q, 0);
   const spread = (asks[0].p - bids[0].p).toFixed(2);
 
-  const orders = [
+  // Mock orders feed used in demo mode. In production, screens fetch from /api/orders.
+  const __mockOrders = [
     { t: "13:42:08", s: "INFY",     side: "BUY",  qty: 60,  px: "1876.25", t2: "LIMIT",  st: "executed",  mode: "intraday", strat: "Momentum AI" },
     { t: "13:48:31", s: "RELIANCE", side: "BUY",  qty: 40,  px: "MKT",     t2: "MARKET", st: "executed",  mode: "intraday", strat: "Mean Reversion v2" },
     { t: "14:02:11", s: "TCS",      side: "SELL", qty: 25,  px: "4140.50", t2: "LIMIT",  st: "executed",  mode: "swing",    strat: "Trend Follow" },
@@ -72,6 +73,39 @@ const TradingScreen = () => {
     { t: "14:52:44", s: "NIFTY PE",  side: "BUY",  qty: 75,  px: "112.00",  t2: "LIMIT",  st: "executed",  mode: "options",  strat: "PE Hedge" },
     { t: "15:01:20", s: "SBIN",      side: "BUY",  qty: 100, px: "884.00",  t2: "LIMIT",  st: "pending",   mode: "intraday", strat: "Grid Trader" },
   ];
+
+  const _isDemo = (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
+  const [orders, setOrders] = React.useState(_isDemo ? __mockOrders : []);
+  React.useEffect(() => {
+    if (_isDemo) { setOrders(__mockOrders); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await window.fetchApi('/api/orders');
+        if (cancelled) return;
+        const rows = (data && data.rows || []).map(o => {
+          // Normalize Kite shape to the screen's row shape.
+          const t = o.placedAt ? new Date(o.placedAt).toLocaleTimeString('en-IN', { hour12: false }) : '—';
+          return {
+            t,
+            s: o.symbol,
+            side: (o.transactionType || '').toUpperCase(),
+            qty: o.quantity,
+            px: o.orderType === 'MARKET' ? 'MKT' : String(o.price),
+            t2: o.orderType,
+            st: (o.status || '').toLowerCase(),
+            mode: (o.product || '').toLowerCase(),
+            strat: '—',
+          };
+        });
+        setOrders(rows);
+      } catch (err) {
+        console.warn('[trading] /api/orders failed:', err.message);
+        if (!cancelled) setOrders([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [_isDemo]);
 
   const [modeFilter, setModeFilter] = useState("All");
   const visibleOrders = orders.filter(o => modeFilter === "All" || o.mode === modeFilter);

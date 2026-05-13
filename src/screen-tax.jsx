@@ -5,7 +5,13 @@ const TaxScreen = () => {
   const [tab, setTab] = useState("Tax");
   const tabs = ["Tax", "Goals", "Rebalance", "AI review"];
 
-  const taxBuckets = [
+  // Tax buckets, harvest candidates, goals and rebalance targets are user-set
+  // financial planning data that needs its own backend storage (Kite doesn't
+  // expose any of these). For now they're gated behind demo mode so production
+  // users see an empty state until we wire up a planning-data service.
+  const _isDemo = (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
+
+  const __mockTaxBuckets = [
     { k: "STCG (equity)",       gain: 48240,  tax: 15,   tax_amt: 7236,  color: "var(--info)" },
     { k: "LTCG (equity)",       gain: 182400, tax: 10,   tax_amt: 12240, color: "var(--accent)", note: "₹1L exempt" },
     { k: "Intraday (speculative)", gain: 24800, tax: "slab",tax_amt: 7440,color: "var(--warn)", note: "added to income" },
@@ -13,24 +19,27 @@ const TaxScreen = () => {
     { k: "MF — LTCG",           gain: 42800,  tax: 10,   tax_amt: 4280,  color: "var(--accent)" },
     { k: "MF — STCG",           gain: 8400,   tax: 15,   tax_amt: 1260,  color: "var(--info)" },
   ];
+  const taxBuckets = _isDemo ? __mockTaxBuckets : [];
   const totalGain = taxBuckets.reduce((s,b) => s + b.gain, 0);
   const totalTax  = taxBuckets.reduce((s,b) => s + b.tax_amt, 0);
 
-  const harvestCandidates = [
+  const __mockHarvest = [
     { s: "VEDL",       qty: 100, avg: 412, ltp: 368, loss: -4400,  type: "STCL", age: "4 mo", ok: true },
     { s: "IDEA",       qty: 500, avg: 14.2, ltp: 10.8, loss: -1700, type: "STCL", age: "8 mo", ok: true },
     { s: "YESBANK",    qty: 300, avg: 22,  ltp: 18.5, loss: -1050, type: "STCL", age: "6 mo", ok: true },
     { s: "PAYTM",      qty: 40,  avg: 820, ltp: 680,  loss: -5600, type: "LTCL", age: "14 mo", ok: true },
   ];
+  const harvestCandidates = _isDemo ? __mockHarvest : [];
 
-  const goals = [
+  const __mockGoals = [
     { n: "Retirement",          target: 50000000, current: 8420000, by: "2046",      monthly: 45000, on_track: true,  color: "var(--accent)" },
     { n: "Child's education",   target: 12000000, current: 2140000, by: "2038",      monthly: 25000, on_track: true,  color: "var(--info)" },
     { n: "Home down payment",   target:  5000000, current: 1820000, by: "2029",      monthly: 60000, on_track: false, color: "var(--warn)" },
     { n: "Emergency fund",      target:  1800000, current: 1650000, by: "2026",      monthly: 10000, on_track: true,  color: "var(--up)" },
   ];
+  const goals = _isDemo ? __mockGoals : [];
 
-  const rebalance = [
+  const __mockRebalance = [
     { asset: "Equity — large cap",   target: 35, actual: 42, diff: +7, action: "Sell ₹3.4L",  color: "var(--down)" },
     { asset: "Equity — mid cap",      target: 15, actual: 12, diff: -3, action: "Buy ₹1.5L",   color: "var(--up)" },
     { asset: "Equity — small cap",    target: 8,  actual: 6,  diff: -2, action: "Buy ₹1.0L",   color: "var(--up)" },
@@ -39,6 +48,7 @@ const TaxScreen = () => {
     { asset: "International equity",  target: 10, actual: 12, diff: +2, action: "Sell ₹1.0L",  color: "var(--down)" },
     { asset: "Cash",                 target: 2,  actual: 2,  diff:  0, action: "Hold",        color: "var(--text-3)" },
   ];
+  const rebalance = _isDemo ? __mockRebalance : [];
 
   return (
     <>

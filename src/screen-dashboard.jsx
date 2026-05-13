@@ -299,7 +299,8 @@ const DashboardScreen = () => {
     return base;
   }, [tf]);
 
-  const symbols = [
+  // Watchlist seed (cosmetic — overwritten by live ticks once /ws starts pushing for these symbols)
+  const __seedSymbols = [
     { s: "RELIANCE",   p: 2948.50, c: 1.24, v: "12.4M" },
     { s: "TCS",        p: 4120.10, c: -0.45, v: "3.2M" },
     { s: "HDFCBANK",   p: 1712.80, c: 0.78, v: "8.9M" },
@@ -309,14 +310,36 @@ const DashboardScreen = () => {
     { s: "BAJFINANCE", p: 7250.00, c: -0.88, v: "1.8M" },
     { s: "LT",         p: 3784.65, c: 0.34, v: "2.4M" },
   ];
+  const symbols = __seedSymbols;
 
-  const positions = demo ? [] : [
+  // Positions: demo → mock array, live → fetch from /api/portfolio/positions.
+  const __mockPositions = [
     { s: "NIFTY 22550 CE", qty: 150, avg: 82.40,  strat: "Momentum AI" },
     { s: "RELIANCE",        qty: 40,  avg: 2932.10, strat: "Mean Reversion" },
     { s: "BANKNIFTY FUT",   qty: 15,  avg: 48210,  strat: "Grid Trader" },
     { s: "INFY",            qty: 60,  avg: 1843.00, strat: "Momentum AI" },
     { s: "TCS",             qty: 25,  avg: 4140.50, strat: "Swing Bot" },
   ];
+  const [positions, setPositions] = React.useState(demo ? __mockPositions : []);
+  React.useEffect(() => {
+    if (demo) { setPositions(__mockPositions); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await window.fetchApi('/api/portfolio/positions');
+        if (cancelled) return;
+        const net = (data && data.net || []).map(p => ({
+          s: p.symbol, qty: p.quantity, avg: p.avgPrice,
+          strat: p.product || '—',
+        }));
+        setPositions(net);
+      } catch (err) {
+        console.warn('[dashboard] /api/portfolio/positions failed:', err.message);
+        if (!cancelled) setPositions([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [demo]);
   // Live aggregate P&L across all positions
   const livePnL = useLivePnL(positions.map(p => ({ symbol: p.s, qty: p.qty, avg: p.avg })));
 
