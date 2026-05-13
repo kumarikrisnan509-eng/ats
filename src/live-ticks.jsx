@@ -96,6 +96,46 @@
             symbols: Object.keys(SYMBOLS),
           }));
         } catch {}
+
+        // Snapshot prices NOW so the UI doesn't sit on hardcoded seeds while
+        // we wait for the first live tick (which during market-closed hours
+        // may never arrive). /api/quotes hits Kite's REST LTP endpoint and
+        // returns the last traded price per symbol — current during market
+        // hours, last close after-hours.
+        (async () => {
+          try {
+            // Equity symbols only — indices are handled by /ws subscribe.
+            const eq = Object.keys(SYMBOLS).filter(s =>
+              !/^(NIFTY|BANKNIFTY|SENSEX|FINNIFTY|MIDCPNIFTY|INDIAVIX|NIFTY 22550 CE|BANKNIFTY FUT)/.test(s)
+            );
+            if (eq.length === 0) return;
+            const url = "/api/quotes?symbols=" + encodeURIComponent(eq.join(","));
+            const res = await fetch(url, { credentials: "include" });
+            if (!res.ok) return;
+            const body = await res.json();
+            if (!body || !body.quotes) return;
+            let hits = 0;
+            for (const [key, row] of Object.entries(body.quotes)) {
+              if (!row || typeof row.last_price !== "number") continue;
+              // backend returns "NSE:RELIANCE" — strip prefix.
+              const sym = key.includes(":") ? key.split(":")[1] : key;
+              if (!SYMBOLS[sym]) SYMBOLS[sym] = { ltp: row.last_price, prev: row.last_price };
+              else {
+                SYMBOLS[sym].prev = SYMBOLS[sym].ltp;
+                SYMBOLS[sym].ltp = row.last_price;
+              }
+              hits++;
+            }
+            if (hits > 0) {
+              lastTickAt = Date.now();
+              tickCount += hits;
+              window.dispatchEvent(new CustomEvent("tick", { detail: state() }));
+              try { console.log(`[live-ticks] snapshot from /api/quotes: ${hits} symbols`); } catch {}
+            }
+          } catch (e) {
+            try { console.warn("[live-ticks] snapshot fetch failed:", e.message); } catch {}
+          }
+        })();
         return;
       }
       if (msg.type === "subscribed") {
