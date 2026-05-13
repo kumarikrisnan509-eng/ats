@@ -269,6 +269,31 @@ class ZerodhaBroker extends BrokerGateway {
     return Array.from(this.instruments.byShort.keys()).slice(0, 500);
   }
 
+  /** Available option expiries for an underlying. */
+  listOptionExpiries(underlying) {
+    if (!underlying) return [];
+    return this.instruments.listExpiries(String(underlying).toUpperCase());
+  }
+
+  /**
+   * Full option chain (all strikes, CE+PE pairs) for an underlying+expiry.
+   * Does NOT include LTPs/OI — caller chains to /api/quotes for those.
+   * @returns {{underlying, expiry, strikes:Array<{strike,ce,pe}>, count, lotSize}}
+   */
+  getOptionChain(underlying, expiry) {
+    if (!underlying || !expiry) throw new Error('underlying and expiry required');
+    const strikes = this.instruments.optionsFor(String(underlying).toUpperCase(), expiry);
+    const lotSize = strikes.length && strikes[0].ce ? strikes[0].ce.lotSize : (strikes[0] && strikes[0].pe ? strikes[0].pe.lotSize : 0);
+    return { underlying, expiry, strikes, count: strikes.length, lotSize };
+  }
+
+  /** Get full metadata for a symbol (lot, segment, expiry, strike, etc.) */
+  symbolMeta(symbol) {
+    const tok = this.instruments.tokenOf(symbol);
+    if (!tok) return null;
+    return this.instruments.metaFor(tok);
+  }
+
   /** Snapshot of the in-memory tick cache. Includes indices that /quotes can't return. */
   getLastTicks() {
     const out = [];

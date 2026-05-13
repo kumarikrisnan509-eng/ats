@@ -44,6 +44,12 @@ class InstrumentsMaster {
     this.byTok = new Map();
     /** Map<string, number>  short symbol -> token (uses default exchange resolution) */
     this.byShort = new Map();
+    /** Map<token, {strike, lotSize, tickSize, instrumentType, expiry, name, segment, exchange}> */
+    this.metaByTok = new Map();
+    /** Options index: Map<"NAME|YYYY-MM-DD", Array<{strike, ts, t, it, ls}>> */
+    this.optionsByNameExpiry = new Map();
+    /** Map<"NAME", Set<"YYYY-MM-DD">> of available option expiries per underlying */
+    this.expiriesByName = new Map();
     this.loadedAt = 0;
     this.size = 0;
   }
@@ -53,10 +59,16 @@ class InstrumentsMaster {
     try {
       if (!fs.existsSync(this.cachePath)) return false;
       const stat = fs.statSync(this.cachePath);
-      // Reject cache older than 24h — instruments do change daily (new F&O contracts, expiries).
+      // Reject cache older than 24h - instruments do change daily (new F&O contracts, expiries).
       if (Date.now() - stat.mtimeMs > 24 * 3600 * 1000) return false;
       const raw = JSON.parse(fs.readFileSync(this.cachePath, 'utf8'));
-      this._rebuildFromArray(raw.rows || []);
+      const rows = Array.isArray(raw && raw.rows) ? raw.rows : [];
+      // Reject pre-v2 cache (no strike `k` field) so it refreshes with new schema.
+      if (rows.length > 0 && !('k' in rows[0]) && !('ls' in rows[0])) {
+        console.log('[instruments] disk cache is pre-v2 schema (no strike/lotSize), will refresh');
+        return false;
+      }
+      this._rebuildFromArray(rows);
       this.loadedAt = raw.loadedAt || stat.mtimeMs;
       console.log(`[instruments] hydrated from disk: ${this.size} rows (age ${Math.round((Date.now() - this.loadedAt)/1000)}s)`);
       return true;
@@ -84,6 +96,9 @@ class InstrumentsMaster {
               n:   String(r.name || ''),
               it:  String(r.instrument_type || ''),
               ed:  r.expiry ? String(r.expiry) : '',
+              k:   typeof r.strike === 'number' ? r.strike : (r.strike ? Number(r.strike) : 0),
+              ls:  typeof r.lot_size === 'number' ? r.lot_size : (r.lot_size ? Number(r.lot_size) : 0),
+              ti:  typeof r.tick_size === 'number' ? r.tick_size : (r.tick_size ? Number(r.tick_size) : 0),
             });
           }
         }
@@ -120,6 +135,9 @@ class InstrumentsMaster {
     this.byKey.clear();
     this.byTok.clear();
     this.byShort.clear();
+    this.metaByTok.clear();
+    this.optionsByNameExpiry.clear();
+    this.expiriesByName.clear();
 
     // Add index tokens first so they win short-name lookup.
     for (const [name, tok] of Object.entries(INDEX_TOKENS)) {
@@ -135,8 +153,70 @@ class InstrumentsMaster {
       if (!this.byShort.has(r.ts) || r.x === 'NSE') {
         this.byShort.set(r.ts, r.t);
       }
+      // Metadata
+      this.metaByTok.set(r.t, {
+        token: r.t,
+        tradingsymbol: r.ts,
+        exchange: r.x,
+        segment: r.s,
+        name: r.n,
+        instrumentType: r.it,
+        expiry: r.ed || null,
+        strike: r.k || 0,
+        lotSize: r.ls || 0,
+        tickSize: r.ti || 0,
+      });
+      // Options index: only OPT segments with a valid name+expiry.
+      if ((r.s === 'NFO-OPT' || r.s === 'BFO-OPT') && r.n && r.ed && (r.it === 'CE' || r.it === 'PE')) {
+        const key = `${r.n}|${r.ed}`;
+        if (!this.optionsByNameExpiry.has(key)) this.optionsByNameExpiry.set(key, []);
+        this.optionsByNameExpiry.get(key).push({
+          strike: r.k || 0,
+          tradingsymbol: r.ts,
+          token: r.t,
+          instrumentType: r.it,
+          lotSize: r.ls || 0,
+          exchange: r.x,
+        });
+        if (!this.expiriesByName.has(r.n)) this.expiriesByName.set(r.n, new Set());
+        this.expiriesByName.get(r.n).add(r.ed);
+      }
     }
     this.size = arr.length;
+  }
+
+  /**
+   * List available option expiries for an underlying.
+   * @param {string} underlying e.g. "NIFTY", "BANKNIFTY", "RELIANCE"
+   * @returns {string[]} ISO dates sorted ascending
+   */
+  listExpiries(underlying) {
+    const set = this.expiriesByName.get(underlying);
+    if (!set) return [];
+    return Array.from(set).sort();
+  }
+
+  /**
+   * Get the full option chain (CE + PE for every strike) for an underlying + expiry.
+   * @returns {Array<{strike, ce: {tradingsymbol,token,lotSize}|null, pe: similar}>}  sorted by strike asc
+   */
+  optionsFor(underlying, expiry) {
+    const list = this.optionsByNameExpiry.get(`${underlying}|${expiry}`);
+    if (!list) return [];
+    const byStrike = new Map();
+    for (const r of list) {
+      if (!byStrike.has(r.strike)) byStrike.set(r.strike, { strike: r.strike, ce: null, pe: null });
+      const slot = byStrike.get(r.strike);
+      const leg = { tradingsymbol: r.tradingsymbol, token: r.token, lotSize: r.lotSize, exchange: r.exchange };
+      if (r.instrumentType === 'CE') slot.ce = leg;
+      else if (r.instrumentType === 'PE') slot.pe = leg;
+    }
+    return Array.from(byStrike.values()).sort((a, b) => a.strike - b.strike);
+  }
+
+  /** Metadata for a token (segment, lot, ISIN-not-available, etc.) */
+  metaFor(token) {
+    return this.metaByTok.get(Number(token)) || null;
   }
 
   /**

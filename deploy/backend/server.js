@@ -299,6 +299,65 @@ app.get('/api/audit', (req, res) => {
   }
 });
 
+// ---------- Symbol metadata ----------
+// GET /api/symbol/:symbol  - lot/segment/strike/expiry + latest quote
+app.get('/api/symbol/:symbol', async (req, res) => {
+  try {
+    const sym = req.params.symbol;
+    const meta = typeof broker.symbolMeta === 'function' ? broker.symbolMeta(sym) : null;
+    if (!meta) return res.status(404).json({ ok: false, reason: 'symbol_not_found' });
+
+    let quote = null;
+    try {
+      const q = await broker.getQuotes([sym]);
+      const k = `${meta.exchange}:${meta.tradingsymbol}`;
+      quote = q[k] || q[`NSE:${meta.tradingsymbol}`] || null;
+    } catch { /* quote fetch can fail for indices, that's fine */ }
+
+    res.json({ ok: true, symbol: sym, meta, quote });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
+// ---------- Option chain ----------
+// GET /api/option-expiries?underlying=NIFTY
+app.get('/api/option-expiries', (req, res) => {
+  try {
+    const u = String(req.query.underlying || '').trim();
+    if (!u) return res.status(400).json({ ok: false, reason: 'underlying required' });
+    const list = typeof broker.listOptionExpiries === 'function' ? broker.listOptionExpiries(u) : [];
+    res.json({ ok: true, underlying: u.toUpperCase(), expiries: list, count: list.length });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
+// GET /api/option-chain?symbol=NIFTY&expiry=2026-05-29
+app.get('/api/option-chain', (req, res) => {
+  try {
+    const underlying = String(req.query.symbol || req.query.underlying || '').trim();
+    const expiry     = String(req.query.expiry || '').trim();
+    if (!underlying || !expiry) return res.status(400).json({ ok: false, reason: 'symbol and expiry required' });
+    const chain = broker.getOptionChain(underlying, expiry);
+
+    // Best-effort spot from the in-memory tick cache (works for indices like NIFTY 50)
+    let spot = null;
+    try {
+      const ticks = broker.getLastTicks ? broker.getLastTicks() : [];
+      // Map common underlyings to index symbols on /ws
+      const indexSymbolMap = { 'NIFTY':'NIFTY 50', 'BANKNIFTY':'NIFTY BANK', 'FINNIFTY':'NIFTY FIN SERVICE' };
+      const want = indexSymbolMap[underlying.toUpperCase()] || underlying;
+      const hit = ticks.find(t => t.symbol === want);
+      if (hit) spot = hit.ltp;
+    } catch {}
+
+    res.json({ ok: true, spot, ...chain });
+  } catch (e) {
+    res.status(400).json({ ok: false, reason: e.message });
+  }
+});
+
 // ---------- Indices snapshot ----------
 // Returns current LTPs for major indices from the in-memory tick cache (since /quotes
 // doesn't return indices cleanly via NSE:NIFTY key).
