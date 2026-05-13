@@ -23,7 +23,6 @@ const { Vault }        = require('./crypto-vault');
 const { SessionStore } = require('./sessions');
 const { LoginVault }   = require('./login-vault');
 const { notify }       = require('./notify');
-const { runAutoLogin } = require('./brokers/zerodha-auto-login');
 
 // ---------- Config ----------
 const PORT            = parseInt(process.env.PORT || '8080', 10);
@@ -203,61 +202,67 @@ app.get('/api/brokers/zerodha/callback', async (req, res) => {
   }
 });
 
-// ---------- Auto-login (loopback-only, called by cron) ----------
+// ---------- Auto-login helpers (loopback-only) ----------
 //
-// Operator-authorized daily automation. Triggered by /etc/cron.d/ats-auto-login
-// inside the VM. Refuses any request that doesn't come from 127.0.0.1 AND carry
-// the X-ATS-Internal header. KILL_SWITCH stays TRUE — this only authenticates;
-// no real orders are placed by any code path.
-app.post('/api/brokers/zerodha/auto-login', async (req, res) => {
+// The actual browser automation runs on the HOST (via Playwright installed
+// directly on Ubuntu). These two routes exist for the host script to:
+//   (a) fetch the loginUrl + sealed credentials
+//   (b) hand back the captured request_token for sealing
+//
+// Both require X-ATS-Internal header AND loopback IP. KILL_SWITCH stays TRUE.
+
+function requireInternal(req, res) {
+  const ra = (req.ip || req.connection.remoteAddress || '').replace('::ffff:', '');
+  if (ra !== '127.0.0.1' && ra !== '::1') {
+    audit('internal.rejected', { reason: 'non_loopback', ip: ra });
+    res.status(403).json({ ok: false, reason: 'loopback_only' });
+    return false;
+  }
+  if (req.headers['x-ats-internal'] !== '1') {
+    audit('internal.rejected', { reason: 'missing_header' });
+    res.status(403).json({ ok: false, reason: 'missing_header' });
+    return false;
+  }
+  return true;
+}
+
+// Host-side script calls this to fetch credentials + loginUrl in one trip.
+app.get('/api/brokers/zerodha/auto-login/bundle', async (req, res) => {
+  if (!requireInternal(req, res)) return;
   if (BROKER_NAME !== 'zerodha') {
     return res.status(400).json({ ok: false, reason: 'broker_not_zerodha' });
   }
-
-  // Loopback check
-  const ra = (req.ip || req.connection.remoteAddress || '').replace('::ffff:', '');
-  if (ra !== '127.0.0.1' && ra !== '::1') {
-    audit('autologin.rejected', { reason: 'non_loopback', ip: ra });
-    return res.status(403).json({ ok: false, reason: 'loopback_only' });
-  }
-  if (req.headers['x-ats-internal'] !== '1') {
-    audit('autologin.rejected', { reason: 'missing_internal_header' });
-    return res.status(403).json({ ok: false, reason: 'missing_header' });
-  }
-
-  audit('autologin.invoked', {});
-
   try {
     if (!vault) return res.status(503).json({ ok: false, reason: 'vault_not_open' });
-
-    const loginVault = new LoginVault(vault);
-    if (!loginVault.exists()) {
+    const lv = new LoginVault(vault);
+    if (!lv.exists()) {
       return res.status(412).json({ ok: false, reason: 'no_creds_run_install_script' });
     }
-    const creds = await loginVault.load();
-
-    const loginUrl = broker.buildLoginUrl();
-    const result = await runAutoLogin({
+    const creds = await lv.load();
+    audit('autologin.bundle.served', { userId: creds.userId });
+    res.json({
+      ok: true,
+      loginUrl: broker.buildLoginUrl(),
       userId:   creds.userId,
       password: creds.password,
       totpSeed: creds.totpSeed,
-      apiKey:   process.env.ZERODHA_API_KEY,
-      loginUrl,
-      audit,
     });
+  } catch (err) {
+    audit('autologin.bundle.error', { msg: err.message });
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
-    if (!result.ok) {
-      audit('autologin.flow_failed', { error: result.error, screenshot: result.screenshot });
-      notify('error', 'ATS auto-login FAILED', {
-        body: 'Need to log in manually.',
-        fields: { error: result.error.slice(0, 120) },
-        url: 'https://ats.rajasekarselvam.com/api/brokers/zerodha/login',
-      }).catch(() => {});
-      return res.status(502).json({ ok: false, reason: 'auto_login_failed', error: result.error });
-    }
-
-    // Exchange the captured request_token using the existing broker method.
-    const session = await broker.exchangeRequestToken(result.requestToken);
+// Host-side script POSTs the request_token here once Kite redirects.
+app.post('/api/brokers/zerodha/auto-login/exchange', express.json(), async (req, res) => {
+  if (!requireInternal(req, res)) return;
+  if (BROKER_NAME !== 'zerodha') {
+    return res.status(400).json({ ok: false, reason: 'broker_not_zerodha' });
+  }
+  const rt = req.body && req.body.requestToken;
+  if (!rt) return res.status(400).json({ ok: false, reason: 'missing_request_token' });
+  try {
+    const session = await broker.exchangeRequestToken(rt);
     broker.setAccessToken(session.accessToken);
     await sessions.saveTokens(session.userId, {
       accessToken: session.accessToken,
@@ -266,20 +271,18 @@ app.post('/api/brokers/zerodha/auto-login', async (req, res) => {
       issuedAt:    new Date().toISOString(),
     });
     audit('autologin.connected', { userId: session.userId });
-
     notify('success', 'ATS auto-login OK', {
       body: 'Kite session established. Ticker connecting.',
       fields: { userId: session.userId, time: new Date().toISOString() },
     }).catch(() => {});
-
     res.json({ ok: true, userId: session.userId });
   } catch (err) {
-    audit('autologin.exception', { msg: err.message });
-    notify('error', 'ATS auto-login EXCEPTION', {
+    audit('autologin.exchange.error', { msg: err.message });
+    notify('error', 'ATS auto-login exchange FAILED', {
       body: err.message.slice(0, 200),
       url: 'https://ats.rajasekarselvam.com/api/brokers/zerodha/login',
     }).catch(() => {});
-    res.status(500).json({ ok: false, reason: 'exception', error: err.message });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 

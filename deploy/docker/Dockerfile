@@ -1,42 +1,40 @@
 # syntax=docker/dockerfile:1.7
 # ----------------------------------------------------------------------
-# ATS image — Node backend + static frontend + Playwright runtime.
+# ATS image — bundles the Node backend AND the static prototype (app.html
+# + src/ + styles.css). Nginx on the host (or in another container) serves
+# the static files by `docker cp`-ing them out of this image at deploy time,
+# OR by mounting the /app/static directory as a volume.
 #
-# Why Playwright base: the auto-login flow uses headless Chromium. Playwright's
-# bundled Chromium needs glibc + a specific set of shared libs that aren't easy
-# to maintain on Alpine. Microsoft publishes an official image with everything
-# pre-installed for both amd64 and arm64.
+# Build context must be the project root (the folder containing app.html).
 #
-# Image size is ~700 MB (vs ~100 MB on Alpine). Trade-off accepted: the
-# backend is one container per VM and disk isn't tight.
+# Note: Playwright is NOT in this image. The auto-login flow runs as a
+# host-side script (deploy/scripts/auto-login.js) so this image stays small.
 # ----------------------------------------------------------------------
 
-# ---------- 1) deps stage (smaller node image, faster npm install) ----------
-FROM node:20-bookworm-slim AS deps
+# ---------- 1) deps stage ----------
+FROM node:20-alpine AS deps
 WORKDIR /app
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends python3 make g++ ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+# Native build deps for any npm packages that compile from source.
+# Removed after install to keep the runtime image small.
+RUN apk add --no-cache python3 make g++
 
+# Copy only manifest first for better layer caching.
 COPY deploy/backend/package.json deploy/backend/package-lock.json* ./
-# Playwright's npm package will download Chromium by default — we use the system
-# Chromium from the runtime base image, so skip the download here.
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+# `npm ci` if a lockfile is present, else `npm install`.
 RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
 
-# ---------- 2) runtime stage (Playwright official image, has Chromium) ----------
-FROM mcr.microsoft.com/playwright:v1.49.1-noble AS runtime
+# ---------- 2) runtime stage ----------
+FROM node:20-alpine AS runtime
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends tini wget ca-certificates \
- && rm -rf /var/lib/apt/lists/* \
- && groupadd -r ats --gid=10001 \
- && useradd  -r -g ats --uid=10001 --home-dir=/app --shell=/usr/sbin/nologin ats
+# tini = PID 1 that forwards signals correctly. wget = healthcheck. dumb-init alternative.
+RUN apk add --no-cache tini wget \
+ && addgroup -S ats \
+ && adduser  -S -G ats ats
 
 WORKDIR /app
 
-# Bring in node_modules from the deps stage.
+# Dependencies from the deps stage.
 COPY --from=deps /app/node_modules ./node_modules
 
 # Backend source.
@@ -55,8 +53,6 @@ USER ats
 
 ENV NODE_ENV=production
 ENV PORT=8080
-# Playwright base already has Chromium at this path; tell our code to use it.
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 EXPOSE 8080
 
@@ -64,10 +60,11 @@ EXPOSE 8080
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
   CMD wget -qO- http://127.0.0.1:8080/api/health >/dev/null || exit 1
 
-ENTRYPOINT ["/usr/bin/tini","--"]
+ENTRYPOINT ["/sbin/tini","--"]
 CMD ["node","server.js"]
 
+# OCI image labels (consumed by GHCR + tooling)
 LABEL org.opencontainers.image.title="ats-backend"
-LABEL org.opencontainers.image.description="ATS (rajasekarselvam.com) — Node backend + cockpit + Playwright auto-login."
+LABEL org.opencontainers.image.description="ATS (rajasekarselvam.com) — Node backend + static cockpit prototype."
 LABEL org.opencontainers.image.source="https://github.com/mohanapriya63085/ats"
 LABEL org.opencontainers.image.licenses="UNLICENSED"

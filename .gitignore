@@ -64,6 +64,8 @@ deploy/.recover-output.txt
 deploy/scripts/recover-and-zerodha.ps1
 FIX-MASTERKEY.cmd
 deploy/.fix-masterkey-output.txt
+DIAG-NEW-IMAGE.cmd
+deploy/.diag-new-image-output.txt
 # set-zerodha-env.ps1 contains embedded API key+secret (after the user creates the Kite app).
 deploy/scripts/set-zerodha-env.ps1
 deploy/.vm-analysis.txt
