@@ -205,6 +205,99 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
+// ---------- Watchlist snapshot ----------
+// GET /api/watchlist/snapshot
+// Returns watchlist symbols + per-symbol LTP + day change (in absolute and %).
+// One round trip for the dashboard's watchlist table.
+app.get('/api/watchlist/snapshot', async (_req, res) => {
+  if (!watchlist) return res.status(503).json({ ok: false, reason: 'watchlist_not_initialized' });
+  const symbols = watchlist.list();
+  if (symbols.length === 0) return res.json({ ok: true, rows: [] });
+  try {
+    // Strip indices from /quotes (Kite uses different keying); we'll still include them but with null prices.
+    const eq = symbols.filter(s => !/^(NIFTY|BANKNIFTY|SENSEX|FINNIFTY|MIDCPNIFTY|INDIA VIX)/i.test(s));
+    const quotes = eq.length ? await broker.getQuotes(eq) : {};
+    const rows = symbols.map((sym) => {
+      const key = `NSE:${sym}`;
+      const q = quotes[key];
+      if (!q || typeof q.last_price !== 'number') {
+        return { symbol: sym, ltp: null, close: null, change: null, changePct: null, volume: null };
+      }
+      const close = q.ohlc && typeof q.ohlc.close === 'number' ? q.ohlc.close : q.last_price;
+      const change = +(q.last_price - close).toFixed(2);
+      const changePct = close ? +(((q.last_price - close) / close) * 100).toFixed(2) : 0;
+      return {
+        symbol: sym,
+        ltp: q.last_price,
+        close,
+        change,
+        changePct,
+        volume: q.volume || null,
+        ohlc: q.ohlc || null,
+      };
+    });
+    res.json({ ok: true, count: rows.length, rows });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
+// ---------- Top movers ----------
+// GET /api/movers?limit=10
+// Reuses the snapshot logic, sorts by abs(changePct), splits into gainers/losers.
+app.get('/api/movers', async (req, res) => {
+  if (!watchlist) return res.status(503).json({ ok: false, reason: 'watchlist_not_initialized' });
+  const limit = Math.max(1, Math.min(50, parseInt(req.query.limit || '10', 10) || 10));
+  const symbols = watchlist.list().filter(s => !/^(NIFTY|BANKNIFTY|SENSEX|FINNIFTY|MIDCPNIFTY|INDIA VIX)/i.test(s));
+  if (symbols.length === 0) return res.json({ ok: true, gainers: [], losers: [] });
+  try {
+    const quotes = await broker.getQuotes(symbols);
+    const rows = [];
+    for (const sym of symbols) {
+      const q = quotes[`NSE:${sym}`];
+      if (!q || typeof q.last_price !== 'number') continue;
+      const close = q.ohlc && typeof q.ohlc.close === 'number' ? q.ohlc.close : q.last_price;
+      if (!close) continue;
+      const changePct = +(((q.last_price - close) / close) * 100).toFixed(2);
+      rows.push({ symbol: sym, ltp: q.last_price, close, change: +(q.last_price - close).toFixed(2), changePct });
+    }
+    const gainers = [...rows].filter(r => r.changePct > 0).sort((a, b) => b.changePct - a.changePct).slice(0, limit);
+    const losers  = [...rows].filter(r => r.changePct < 0).sort((a, b) => a.changePct - b.changePct).slice(0, limit);
+    res.json({ ok: true, gainers, losers, total: rows.length });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
+// ---------- Audit log reader ----------
+// GET /api/audit?since=ISO&event=order.dryRun&limit=50
+// Read-only paginated view of the JSONL audit log.
+app.get('/api/audit', (req, res) => {
+  try {
+    if (!fs.existsSync(AUDIT_LOG)) return res.json({ ok: true, rows: [], note: 'no audit log yet' });
+    const limit  = Math.max(1, Math.min(500, parseInt(req.query.limit || '50', 10) || 50));
+    const sinceQ = req.query.since ? new Date(String(req.query.since)).getTime() : 0;
+    const eventQ = typeof req.query.event === 'string' ? String(req.query.event) : null;
+
+    // Slurp & parse — audit log is rotated daily (logrotate keeps it well under a few MB).
+    const raw = fs.readFileSync(AUDIT_LOG, 'utf8');
+    const lines = raw.split('\n').filter(Boolean);
+    // Walk in reverse to find newest matches first.
+    const rows = [];
+    for (let i = lines.length - 1; i >= 0 && rows.length < limit; i--) {
+      let obj;
+      try { obj = JSON.parse(lines[i]); } catch { continue; }
+      if (!obj || !obj.ts) continue;
+      if (sinceQ && new Date(obj.ts).getTime() < sinceQ) break; // log is roughly chronological
+      if (eventQ && obj.event !== eventQ) continue;
+      rows.push(obj);
+    }
+    res.json({ ok: true, count: rows.length, rows });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
 // ---------- Scanner ----------
 app.get('/api/scanner', (_req, res) => {
   if (!scanner) return res.status(503).json({ ok: false, reason: 'scanner_not_initialized' });
