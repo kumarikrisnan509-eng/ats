@@ -23,6 +23,7 @@ const { Vault }        = require('./crypto-vault');
 const { SessionStore } = require('./sessions');
 const { LoginVault }   = require('./login-vault');
 const { notify }       = require('./notify');
+const { Alerts }       = require('./alerts');
 
 // ---------- Config ----------
 const PORT            = parseInt(process.env.PORT || '8080', 10);
@@ -52,13 +53,20 @@ function audit(event, data) {
   }
 }
 
-// ---------- Boot: broker + vault + sessions ----------
-let broker, vault, sessions;
+// ---------- Boot: broker + vault + sessions + alerts ----------
+let broker, vault, sessions, alerts;
 
 async function init() {
   broker = createBroker(process.env);
   await broker.start();
   audit('broker.start', { name: broker.name });
+
+  alerts = new Alerts({
+    storePath: process.env.ALERTS_PATH || '/var/lib/ats/tokens/_alerts.json',
+    notify,
+    audit,
+  });
+  alerts.load();
 
   if (BROKER_NAME === 'zerodha') {
     if (!fs.existsSync(MASTER_KEY_PATH)) {
@@ -119,7 +127,41 @@ app.get('/api/health', (_req, res) => {
     uptimeSec: Math.floor(process.uptime()),
     time: new Date().toISOString(),
     broker: broker.health(),
+    alerts: alerts ? alerts.stats() : null,
   });
+});
+
+// ---------- Alerts ----------
+app.get('/api/alerts', (_req, res) => {
+  if (!alerts) return res.status(503).json({ ok: false, reason: 'alerts_not_initialized' });
+  res.json({ ok: true, alerts: alerts.list() });
+});
+
+app.post('/api/alerts', (req, res) => {
+  if (!alerts) return res.status(503).json({ ok: false, reason: 'alerts_not_initialized' });
+  try {
+    const a = alerts.add(req.body || {});
+    res.status(201).json({ ok: true, alert: a });
+  } catch (e) {
+    res.status(400).json({ ok: false, reason: e.message });
+  }
+});
+
+app.delete('/api/alerts/:id', (req, res) => {
+  if (!alerts) return res.status(503).json({ ok: false, reason: 'alerts_not_initialized' });
+  const ok = alerts.remove(req.params.id);
+  res.status(ok ? 200 : 404).json({ ok });
+});
+
+app.post('/api/alerts/:id/reset', (req, res) => {
+  if (!alerts) return res.status(503).json({ ok: false, reason: 'alerts_not_initialized' });
+  const ok = alerts.reset(req.params.id);
+  res.status(ok ? 200 : 404).json({ ok });
+});
+
+app.get('/api/alerts/stats', (_req, res) => {
+  if (!alerts) return res.status(503).json({ ok: false, reason: 'alerts_not_initialized' });
+  res.json({ ok: true, ...alerts.stats() });
 });
 
 // Config exposed to the front-end
@@ -376,6 +418,9 @@ let brokerUnsubscribe = null;
 async function startBrokerFanout() {
   if (brokerUnsubscribe) return;
   brokerUnsubscribe = await broker.subscribeTicks(DEFAULT_SYMBOLS, (tick) => {
+    // 1. Evaluate alerts (synchronous, no I/O).
+    try { if (alerts) alerts.evaluate(tick); } catch (e) { /* keep loop alive */ }
+    // 2. Fan out to /ws clients.
     const payload = JSON.stringify({ type: 'tick', ...tick });
     for (const ws of wsClients) {
       if (ws.readyState === 1) ws.send(payload);
