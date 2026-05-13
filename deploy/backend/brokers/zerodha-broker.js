@@ -95,10 +95,21 @@ class ZerodhaBroker extends BrokerGateway {
   setAccessToken(accessToken) {
     this.accessToken = accessToken;
     this.kc.setAccessToken(accessToken);
+    // If start() was deferred earlier (no token at boot), kick off the ticker now.
+    if (!this.ticker) {
+      this.start().catch((err) =>
+        console.error('[zerodha] deferred start() failed after setAccessToken:', err && err.message)
+      );
+    }
   }
 
   async start() {
-    if (!this.accessToken) throw new Error('ZerodhaBroker.start() called without accessToken');
+    if (!this.accessToken) {
+      // No token yet (first-time deploy before user OAuth). Defer KiteTicker init —
+      // it will be created when setAccessToken() is called after the OAuth callback.
+      console.log('[zerodha] start() deferred: no access token yet, awaiting OAuth at /api/brokers/zerodha/login');
+      return;
+    }
     if (this.ticker) return;
 
     this.ticker = new KiteTicker({
@@ -157,6 +168,17 @@ class ZerodhaBroker extends BrokerGateway {
     this._subs.clear();
     this._subscribedTokens.clear();
     this._connected = false;
+  }
+
+  /** Health snapshot for /api/health */
+  health() {
+    return {
+      name: this.name,
+      connected: this._connected,
+      subscribers: this._subs.size,
+      hasAccessToken: !!this.accessToken,
+      tickerInitialized: !!this.ticker,
+    };
   }
 
   /**

@@ -39,6 +39,28 @@ UPDATE-VM.cmd
 FIX-VM-PERMS.cmd
 FIX-PERMS-AND-RESTART.cmd
 DIAG-VM.cmd
+DIAG2.cmd
+ANALYZE-VM.cmd
+CLEANUP-VM.cmd
+SETUP-RCLONE-ARCHIVE.cmd
+ENABLE-AND-TEST-ARCHIVE.cmd
+FIX-LOGROTATE-SU.cmd
+TEST-EVERYTHING.cmd
+TEST-VM.cmd
+SET-ZERODHA.cmd
+FORCE-RECREATE.cmd
+DIAG-ZERODHA.cmd
+WIRE-ZERODHA.cmd
+deploy/.wire-zerodha-output.txt
+# wire-zerodha-fully.ps1 contains embedded API key + secret (gitignored)
+deploy/scripts/wire-zerodha-fully.ps1
+WIRE-ZERODHA-PROPERLY.cmd
+deploy/.wire-zerodha-properly-output.txt
+deploy/scripts/wire-zerodha-properly.ps1
+# set-zerodha-env.ps1 contains embedded API key+secret (after the user creates the Kite app).
+deploy/scripts/set-zerodha-env.ps1
+deploy/.vm-analysis.txt
+deploy/.vm-test-output.txt
 deploy/.bootstrap.log
 
 # ===== Logs =====
