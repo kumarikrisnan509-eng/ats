@@ -25,6 +25,7 @@ const { LoginVault }   = require('./login-vault');
 const { notify }       = require('./notify');
 const { Alerts }       = require('./alerts');
 const { Watchlist }    = require('./watchlist');
+const { Scanner }      = require('./scanner');
 
 // ---------- Config ----------
 const PORT            = parseInt(process.env.PORT || '8080', 10);
@@ -55,7 +56,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist;
+let broker, vault, sessions, alerts, watchlist, scanner;
 
 async function init() {
   broker = createBroker(process.env);
@@ -74,6 +75,16 @@ async function init() {
     audit,
   });
   watchlist.load();
+
+  scanner = new Scanner({
+    broker,
+    watchlist,
+    notify,
+    audit,
+    storePath: process.env.SCANNER_PATH || '/var/lib/ats/tokens/_scanner.json',
+  });
+  scanner.load();
+  scanner.scheduleDaily();
 
   if (BROKER_NAME === 'zerodha') {
     if (!fs.existsSync(MASTER_KEY_PATH)) {
@@ -125,6 +136,60 @@ app.use((req, _res, next) => {
   next();
 });
 
+// ---------- Dashboard summary ----------
+// One call returns everything the cockpit's home view needs.
+// Failures of any single broker call degrade gracefully — partial responses
+// are tagged with an `errors` map so the UI can render whatever succeeded.
+app.get('/api/summary', async (_req, res) => {
+  const errors = {};
+  const safe = async (name, p) => {
+    try { return await p; }
+    catch (e) { errors[name] = e.message; return null; }
+  };
+
+  const [holdings, positions, orders, profile, margins] = await Promise.all([
+    safe('holdings', broker.getHoldings()),
+    safe('positions', broker.getPositions()),
+    safe('orders', broker.getOrders()),
+    safe('profile', broker.getProfile()),
+    safe('margins', broker.getMargins()),
+  ]);
+
+  // Compact aggregates so a tiny dashboard card has everything pre-computed.
+  const aggregates = {
+    holdingsCount: Array.isArray(holdings) ? holdings.length : 0,
+    holdingsValue: Array.isArray(holdings)
+      ? +holdings.reduce((s, h) => s + (h.quantity || 0) * (h.ltp || 0), 0).toFixed(2)
+      : 0,
+    holdingsPnl: Array.isArray(holdings)
+      ? +holdings.reduce((s, h) => s + (h.pnl || 0), 0).toFixed(2)
+      : 0,
+    positionsNetCount: positions && Array.isArray(positions.net) ? positions.net.length : 0,
+    positionsDayCount: positions && Array.isArray(positions.day) ? positions.day.length : 0,
+    ordersTotal: Array.isArray(orders) ? orders.length : 0,
+    ordersOpen: Array.isArray(orders)
+      ? orders.filter(o => ['OPEN', 'TRIGGER PENDING', 'PENDING'].includes(String(o.status).toUpperCase())).length
+      : 0,
+  };
+
+  res.json({
+    ok: true,
+    time: new Date().toISOString(),
+    env: ENV_NAME,
+    killSwitch: KILL_SWITCH,
+    broker: broker.health(),
+    profile,
+    aggregates,
+    holdings,
+    positions,
+    orders,
+    margins,
+    watchlist: watchlist ? watchlist.list() : [],
+    alerts: alerts ? alerts.list() : [],
+    errors: Object.keys(errors).length ? errors : null,
+  });
+});
+
 // Health
 app.get('/api/health', (_req, res) => {
   res.json({
@@ -136,7 +201,30 @@ app.get('/api/health', (_req, res) => {
     broker: broker.health(),
     alerts: alerts ? alerts.stats() : null,
     watchlist: watchlist ? watchlist.stats() : null,
+    scanner: scanner ? scanner.stats() : null,
   });
+});
+
+// ---------- Scanner ----------
+app.get('/api/scanner', (_req, res) => {
+  if (!scanner) return res.status(503).json({ ok: false, reason: 'scanner_not_initialized' });
+  res.json({ ok: true, ...scanner.stats() });
+});
+
+app.get('/api/scanner/history', (req, res) => {
+  if (!scanner) return res.status(503).json({ ok: false, reason: 'scanner_not_initialized' });
+  const limit = parseInt(req.query.limit || '25', 10);
+  res.json({ ok: true, history: scanner.history(limit) });
+});
+
+app.post('/api/scanner/run', async (req, res) => {
+  if (!scanner) return res.status(503).json({ ok: false, reason: 'scanner_not_initialized' });
+  // Async: kick it off and return immediately so the HTTP request doesn't hold open
+  // for 15+ seconds across the watchlist.
+  scanner.runOnce({ manual: true, limit: req.body && req.body.limit })
+    .then((r) => audit('scanner.runOnce', r))
+    .catch((e) => audit('scanner.runOnce.error', { msg: e.message }));
+  res.status(202).json({ ok: true, accepted: true, note: 'scanning in background — poll /api/scanner/history' });
 });
 
 // ---------- Watchlist ----------
