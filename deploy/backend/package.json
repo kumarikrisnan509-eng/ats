@@ -17,6 +17,8 @@
     "ws": "^8.18.0",
     "kiteconnect": "^4.1.0",
     "libsodium-wrappers": "^0.7.13",
-    "cookie": "^0.7.0"
+    "cookie": "^0.7.0",
+    "otplib": "^12.0.1",
+    "playwright": "1.49.1"
   }
 }

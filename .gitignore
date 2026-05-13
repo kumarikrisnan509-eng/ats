@@ -57,6 +57,13 @@ deploy/scripts/wire-zerodha-fully.ps1
 WIRE-ZERODHA-PROPERLY.cmd
 deploy/.wire-zerodha-properly-output.txt
 deploy/scripts/wire-zerodha-properly.ps1
+FORCE-PULL.cmd
+deploy/.force-pull-output.txt
+RECOVER.cmd
+deploy/.recover-output.txt
+deploy/scripts/recover-and-zerodha.ps1
+FIX-MASTERKEY.cmd
+deploy/.fix-masterkey-output.txt
 # set-zerodha-env.ps1 contains embedded API key+secret (after the user creates the Kite app).
 deploy/scripts/set-zerodha-env.ps1
 deploy/.vm-analysis.txt
