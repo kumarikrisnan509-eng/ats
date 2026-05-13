@@ -352,6 +352,72 @@ class ZerodhaBroker extends BrokerGateway {
     return await this.kc.getMargins();
   }
 
+  /**
+   * Historical OHLCV candles for a symbol.
+   * Requires the Kite Connect "Historical Data" subscription (included in Connect plan).
+   *
+   * @param {object} args
+   * @param {string} args.symbol   short or "EXCH:SYM" — resolved via InstrumentsMaster.
+   * @param {string} args.interval one of: minute, 3minute, 5minute, 10minute, 15minute, 30minute, 60minute, day
+   * @param {string} args.from     ISO date (YYYY-MM-DD) or full ISO timestamp
+   * @param {string} args.to       ISO date (YYYY-MM-DD) or full ISO timestamp
+   * @param {boolean} [args.continuous] continuous data for F&O
+   * @param {boolean} [args.oi]         include OI for F&O
+   * @returns {Promise<Array<{date:string,open:number,high:number,low:number,close:number,volume:number}>>}
+   */
+  async getHistorical({ symbol, interval, from, to, continuous, oi }) {
+    if (!this.accessToken) throw new Error('not authenticated');
+    if (!symbol)   throw new Error('symbol required');
+    if (!interval) throw new Error('interval required');
+    if (!from || !to) throw new Error('from and to required');
+
+    const VALID = new Set(['minute','3minute','5minute','10minute','15minute','30minute','60minute','day']);
+    if (!VALID.has(interval)) throw new Error(`interval must be one of: ${[...VALID].join(', ')}`);
+
+    const token = this.instruments.tokenOf(symbol);
+    if (!token) throw new Error(`unknown symbol: ${symbol}`);
+
+    const rows = await this.kc.getHistoricalData(token, interval, from, to, !!continuous, !!oi);
+    return (rows || []).map((r) => ({
+      date:   r.date instanceof Date ? r.date.toISOString() : String(r.date),
+      open:   r.open,
+      high:   r.high,
+      low:    r.low,
+      close:  r.close,
+      volume: r.volume,
+      ...(oi ? { oi: r.oi } : {}),
+    }));
+  }
+
+  /**
+   * Search the in-memory instrument master.
+   * @param {string} q  case-insensitive substring against tradingsymbol AND name
+   * @param {number} [limit=20]
+   * @returns {Array<{symbol:string, token:number, exchange:string, name?:string, segment?:string, instrumentType?:string, expiry?:string}>}
+   */
+  searchInstruments(q, limit) {
+    if (!q || typeof q !== 'string') return [];
+    const needle = q.trim().toUpperCase();
+    if (needle.length < 1) return [];
+    const cap = Math.max(1, Math.min(100, limit || 20));
+    const seen = new Set();
+    const out = [];
+
+    // Walk byKey ("NSE:RELIANCE" -> token). The master persists raw rows we
+    // discarded after building maps; cheapest path is matching on the key string.
+    for (const [key, tok] of this.instruments.byKey) {
+      if (out.length >= cap) break;
+      if (seen.has(tok)) continue;
+      const upper = key.toUpperCase();
+      if (upper.includes(needle)) {
+        const [exchange, ts] = key.split(':');
+        out.push({ symbol: ts, token: tok, exchange });
+        seen.add(tok);
+      }
+    }
+    return out;
+  }
+
   /** Health snapshot for /api/health */
   health() {
     return {

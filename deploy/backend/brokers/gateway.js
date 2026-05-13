@@ -69,6 +69,19 @@ class BrokerGateway {
   async getMargins()  { return {}; }
 
   /**
+   * Historical OHLCV candles. Default returns empty.
+   * @param {{symbol:string,interval:string,from:string,to:string,continuous?:boolean,oi?:boolean}} _args
+   */
+  async getHistorical(_args) { return []; }
+
+  /**
+   * In-memory symbol search. Default returns empty (only meaningful when an
+   * instrument master is loaded — e.g. Zerodha).
+   * @returns {Array<{symbol:string, token:number, exchange:string}>}
+   */
+  searchInstruments(_q, _limit) { return []; }
+
+  /**
    * Order placement is intentionally NOT on this interface.
    * Use placeDryRun to test order payloads without hitting a broker.
    */

@@ -123,6 +123,42 @@ class MockBroker extends BrokerGateway {
     return { equity: { available: { cash: 100000 }, utilised: { debits: 0 } } };
   }
 
+  async getHistorical({ symbol, interval, from, to }) {
+    // Random walk for demo. Roughly mimics market hours but doesn't pretend
+    // to be accurate.
+    const intervalSec = {
+      'minute': 60, '3minute': 180, '5minute': 300, '10minute': 600,
+      '15minute': 900, '30minute': 1800, '60minute': 3600, 'day': 86400,
+    }[interval] || 300;
+    const fromMs = new Date(from).getTime();
+    const toMs   = new Date(to).getTime();
+    if (!fromMs || !toMs || toMs <= fromMs) return [];
+    const seed = (this._state[symbol] && this._state[symbol].ltp) || 1000;
+    const out = [];
+    let v = seed * 0.95;
+    for (let t = fromMs; t <= toMs; t += intervalSec * 1000) {
+      const o = v;
+      const change = (Math.random() - 0.5) * 0.01;
+      const c = +(v * (1 + change)).toFixed(2);
+      const h = +Math.max(o, c, o * (1 + Math.random() * 0.005)).toFixed(2);
+      const l = +Math.min(o, c, o * (1 - Math.random() * 0.005)).toFixed(2);
+      out.push({ date: new Date(t).toISOString(), open: o, high: h, low: l, close: c, volume: Math.floor(50000 + Math.random() * 200000) });
+      v = c;
+      if (out.length > 2000) break;
+    }
+    return out;
+  }
+
+  searchInstruments(q, limit) {
+    if (!q) return [];
+    const needle = String(q).toUpperCase();
+    const cap = Math.max(1, Math.min(50, limit || 20));
+    return Object.keys(this._state)
+      .filter(s => s.toUpperCase().includes(needle))
+      .slice(0, cap)
+      .map(s => ({ symbol: s, token: 0, exchange: 'NSE' }));
+  }
+
   health() {
     return { name: this.name, connected: this._timer != null, subscribers: this._subs.size };
   }

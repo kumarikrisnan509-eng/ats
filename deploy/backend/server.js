@@ -248,6 +248,42 @@ app.get('/api/margins', async (_req, res) => {
   }
 });
 
+// ---------- Historical OHLCV ----------
+// GET /api/historical?symbol=RELIANCE&interval=5minute&from=2026-05-12&to=2026-05-13
+app.get('/api/historical', async (req, res) => {
+  try {
+    const { symbol, interval, from, to, continuous, oi } = req.query;
+    if (!symbol || !interval || !from || !to) {
+      return res.status(400).json({ ok: false, reason: 'symbol, interval, from, to are required' });
+    }
+    const candles = await broker.getHistorical({
+      symbol: String(symbol),
+      interval: String(interval),
+      from: String(from),
+      to: String(to),
+      continuous: continuous === '1' || continuous === 'true',
+      oi: oi === '1' || oi === 'true',
+    });
+    res.json({ ok: true, symbol: String(symbol), interval: String(interval), count: candles.length, candles });
+  } catch (e) {
+    res.status(400).json({ ok: false, reason: e.message });
+  }
+});
+
+// ---------- Instrument search ----------
+// GET /api/instruments/search?q=RELI&limit=20
+app.get('/api/instruments/search', (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit || '20', 10) || 20));
+    if (q.length < 1) return res.status(400).json({ ok: false, reason: 'q is required' });
+    const results = broker.searchInstruments(q, limit);
+    res.json({ ok: true, q, count: results.length, results });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
 app.get('/api/kill-switch', (_req, res) => res.json({ killSwitch: KILL_SWITCH }));
 
 app.post('/api/orders/dry-run', (req, res) => {
