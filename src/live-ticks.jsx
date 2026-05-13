@@ -86,15 +86,19 @@
         connected = true;
         gotData = true;
         clearTimeout(fallbackTimer);
-        // Subscribe to the locally-tracked symbol set so the backend resolves
-        // them to Kite instrument tokens and starts pushing ticks for them.
-        // (Welcome itself already auto-subscribes default watchlist on backend side,
-        //  but this catches extra symbols this client cares about.)
+
+        // Merge backend's effective symbol set (defaults + persisted watchlist)
+        // into the in-memory SYMBOLS map so the rest of the app sees them.
+        const backendSymbols = Array.isArray(msg.symbols) ? msg.symbols : [];
+        for (const s of backendSymbols) {
+          if (!SYMBOLS[s]) SYMBOLS[s] = { ltp: 0, prev: 0 };
+        }
+
+        // Subscribe to the union of backend symbols + symbols this client already
+        // tracks locally, so any extra symbols get resolved to Kite tokens.
+        const union = Array.from(new Set([...backendSymbols, ...Object.keys(SYMBOLS)]));
         try {
-          realSocket.send(JSON.stringify({
-            type: "subscribe",
-            symbols: Object.keys(SYMBOLS),
-          }));
+          realSocket.send(JSON.stringify({ type: "subscribe", symbols: union }));
         } catch {}
 
         // Snapshot prices NOW so the UI doesn't sit on hardcoded seeds while

@@ -24,6 +24,7 @@ const { SessionStore } = require('./sessions');
 const { LoginVault }   = require('./login-vault');
 const { notify }       = require('./notify');
 const { Alerts }       = require('./alerts');
+const { Watchlist }    = require('./watchlist');
 
 // ---------- Config ----------
 const PORT            = parseInt(process.env.PORT || '8080', 10);
@@ -54,7 +55,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts;
+let broker, vault, sessions, alerts, watchlist;
 
 async function init() {
   broker = createBroker(process.env);
@@ -67,6 +68,12 @@ async function init() {
     audit,
   });
   alerts.load();
+
+  watchlist = new Watchlist({
+    storePath: process.env.WATCHLIST_PATH || '/var/lib/ats/tokens/_watchlist.json',
+    audit,
+  });
+  watchlist.load();
 
   if (BROKER_NAME === 'zerodha') {
     if (!fs.existsSync(MASTER_KEY_PATH)) {
@@ -128,7 +135,52 @@ app.get('/api/health', (_req, res) => {
     time: new Date().toISOString(),
     broker: broker.health(),
     alerts: alerts ? alerts.stats() : null,
+    watchlist: watchlist ? watchlist.stats() : null,
   });
+});
+
+// ---------- Watchlist ----------
+app.get('/api/watchlist', (_req, res) => {
+  if (!watchlist) return res.status(503).json({ ok: false, reason: 'watchlist_not_initialized' });
+  res.json({ ok: true, symbols: watchlist.list() });
+});
+
+app.put('/api/watchlist', (req, res) => {
+  if (!watchlist) return res.status(503).json({ ok: false, reason: 'watchlist_not_initialized' });
+  try {
+    const symbols = watchlist.set(req.body && req.body.symbols);
+    // Push the new list to the broker subscription set so /ws ticks start flowing.
+    if (typeof broker.ensureSubscribed === 'function') {
+      broker.ensureSubscribed(symbols).catch(() => {});
+    }
+    res.json({ ok: true, symbols });
+  } catch (e) {
+    res.status(400).json({ ok: false, reason: e.message });
+  }
+});
+
+app.post('/api/watchlist/add', (req, res) => {
+  if (!watchlist) return res.status(503).json({ ok: false, reason: 'watchlist_not_initialized' });
+  try {
+    const sym = req.body && req.body.symbol;
+    const out = watchlist.add(sym);
+    if (out.added && typeof broker.ensureSubscribed === 'function') {
+      broker.ensureSubscribed([sym]).catch(() => {});
+    }
+    res.json({ ok: true, ...out });
+  } catch (e) {
+    res.status(400).json({ ok: false, reason: e.message });
+  }
+});
+
+app.post('/api/watchlist/remove', (req, res) => {
+  if (!watchlist) return res.status(503).json({ ok: false, reason: 'watchlist_not_initialized' });
+  try {
+    const out = watchlist.remove(req.body && req.body.symbol);
+    res.json({ ok: true, ...out });
+  } catch (e) {
+    res.status(400).json({ ok: false, reason: e.message });
+  }
 });
 
 // ---------- Alerts ----------
@@ -469,21 +521,26 @@ wss.on('connection', (ws, req) => {
   wsClients.add(ws);
   audit('ws.connect', { ip: req.socket.remoteAddress, total: wsClients.size });
 
+  // Build the effective subscribe set: defaults + persisted watchlist (deduped).
+  const userSaved = watchlist ? watchlist.list() : [];
+  const merged = Array.from(new Set([...DEFAULT_SYMBOLS, ...userSaved]));
+
   ws.send(JSON.stringify({
     type: 'welcome',
     broker: broker.name,
     killSwitch: KILL_SWITCH,
-    symbols: DEFAULT_SYMBOLS,
+    symbols: merged,
+    defaultSymbols: DEFAULT_SYMBOLS,
+    watchlist: userSaved,
     note: broker.name === 'mock'
       ? 'Simulated ticks for UI only. Not a real market feed.'
       : 'Live ticks via Kite Ticker. Subject to market hours.',
   }));
 
-  // Auto-subscribe this client's default watchlist to the broker so it gets ticks
-  // immediately during market hours, without needing to send a subscribe frame.
+  // Auto-subscribe so this client gets ticks immediately during market hours.
   if (typeof broker.ensureSubscribed === 'function') {
-    broker.ensureSubscribed(DEFAULT_SYMBOLS).catch((err) =>
-      console.error('[ws] auto-subscribe defaults failed:', err && err.message)
+    broker.ensureSubscribed(merged).catch((err) =>
+      console.error('[ws] auto-subscribe failed:', err && err.message)
     );
   }
 
