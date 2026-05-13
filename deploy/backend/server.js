@@ -265,7 +265,8 @@ wss.on('connection', (ws, req) => {
   try {
     await init();
     await startBrokerFanout();
-    server.listen(PORT, '127.0.0.1', () => {
+    // Bind 0.0.0.0 inside the container; host exposure is restricted by docker-compose port mapping to 127.0.0.1.
+server.listen(PORT, '0.0.0.0', () => {
       audit('server.start', { port: PORT, env: ENV_NAME, killSwitch: KILL_SWITCH, broker: broker.name });
       console.log(`ats-backend listening on 127.0.0.1:${PORT} (env=${ENV_NAME}, broker=${broker.name}, killSwitch=${KILL_SWITCH})`);
     });

@@ -85,6 +85,8 @@ if ! id -u "${DEPLOY_USER}" >/dev/null 2>&1; then
     useradd --create-home --shell /bin/bash "${DEPLOY_USER}"
 fi
 usermod -aG docker "${DEPLOY_USER}"
+# Also add deployer to ats group so it can read /etc/ats/backend.env (mode 640, root:ats).
+usermod -aG "${SERVICE_USER}" "${DEPLOY_USER}"
 
 # Install the GitHub-Actions deploy public key. Idempotent.
 DEPLOYER_PUBKEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIWnY09RubaEAvP5Q0/j0wUtzyKKZTclHiDEMUWuP+Hi github-actions@rajasekarselvam.com'

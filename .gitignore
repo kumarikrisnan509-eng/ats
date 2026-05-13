@@ -36,6 +36,9 @@ COPY-KNOWN-HOSTS.cmd
 PUSH-TO-GITHUB.cmd
 PUSH-NOW.cmd
 UPDATE-VM.cmd
+FIX-VM-PERMS.cmd
+FIX-PERMS-AND-RESTART.cmd
+DIAG-VM.cmd
 deploy/.bootstrap.log
 
 # ===== Logs =====

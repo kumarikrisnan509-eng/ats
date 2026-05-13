@@ -63,11 +63,17 @@ sudo nginx -t && sudo systemctl reload nginx
 
 echo "==> Health check"
 ok=0
-for i in 1 2 3 4 5 6 7 8 9 10; do
+for i in $(seq 1 30); do
     sleep 2
     if curl -sf "${HEALTH_URL}" >/dev/null; then ok=1; break; fi
     echo "    ...attempt ${i}, not ready yet"
 done
+if [[ ${ok} -ne 1 ]]; then
+    echo "==> Container logs (last 50 lines) for diagnosis:"
+    docker logs --tail 50 ats-backend 2>&1 || true
+    echo "==> Container ps:"
+    docker ps -a --filter name=ats-backend
+fi
 
 if [[ ${ok} -ne 1 ]]; then
     echo "!! Health check failed after 20 s. Rolling back."
