@@ -10,7 +10,11 @@
 const fs = require('fs');
 const path = require('path');
 
-const LOGIN_VAULT_PATH = process.env.LOGIN_VAULT_PATH || '/var/lib/ats/secrets/zerodha-login.enc';
+// Default to /var/lib/ats/tokens/ because that path is already bind-mounted into
+// the backend container (it's where per-user OAuth tokens go). Overridable via
+// LOGIN_VAULT_PATH env var. Filename starts with "_" to keep it from colliding
+// with user-token files (which are named "{userId}.enc").
+const LOGIN_VAULT_PATH = process.env.LOGIN_VAULT_PATH || '/var/lib/ats/tokens/_zerodha-login.enc';
 
 class LoginVault {
   /** @param {import('./crypto-vault').Vault} vault */

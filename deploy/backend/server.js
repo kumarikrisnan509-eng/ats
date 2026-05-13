@@ -212,14 +212,21 @@ app.get('/api/brokers/zerodha/callback', async (req, res) => {
 // Both require X-ATS-Internal header AND loopback IP. KILL_SWITCH stays TRUE.
 
 function requireInternal(req, res) {
+  // Allow loopback AND docker private network IPs (10.x, 172.16-31.x, 192.168.x).
+  // When the host curl 127.0.0.1:8080 → docker proxy → container, the container
+  // sees the docker bridge gateway as the source (e.g. 172.18.0.1), NOT 127.0.0.1.
+  // Nginx, which proxies real public traffic, is configured upstream to STRIP the
+  // X-ATS-Internal header — so the header check is the actual security boundary.
   const ra = (req.ip || req.connection.remoteAddress || '').replace('::ffff:', '');
-  if (ra !== '127.0.0.1' && ra !== '::1') {
-    audit('internal.rejected', { reason: 'non_loopback', ip: ra });
-    res.status(403).json({ ok: false, reason: 'loopback_only' });
+  const isLoopback = ra === '127.0.0.1' || ra === '::1';
+  const isPrivate  = /^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)/.test(ra);
+  if (!isLoopback && !isPrivate) {
+    audit('internal.rejected', { reason: 'non_internal_ip', ip: ra });
+    res.status(403).json({ ok: false, reason: 'external_ip' });
     return false;
   }
   if (req.headers['x-ats-internal'] !== '1') {
-    audit('internal.rejected', { reason: 'missing_header' });
+    audit('internal.rejected', { reason: 'missing_header', ip: ra });
     res.status(403).json({ ok: false, reason: 'missing_header' });
     return false;
   }

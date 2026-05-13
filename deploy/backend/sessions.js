@@ -70,6 +70,9 @@ class SessionStore {
     if (!fs.existsSync(this.tokensDir)) return [];
     return fs.readdirSync(this.tokensDir)
       .filter(f => f.endsWith('.enc'))
+      // Skip filenames starting with '_' — they're for non-user data (e.g.
+      // _zerodha-login.enc holds auto-login credentials, sealed but distinct).
+      .filter(f => !f.startsWith('_'))
       .map(f => f.replace(/\.enc$/, ''));
   }
 }
