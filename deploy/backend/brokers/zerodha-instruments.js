@@ -68,6 +68,12 @@ class InstrumentsMaster {
         console.log('[instruments] disk cache is pre-v2 schema (no strike/lotSize), will refresh');
         return false;
       }
+      // Reject pre-v3 cache: expiry stored as JS Date toString() instead of ISO YYYY-MM-DD.
+      const sample = rows.find(r => r.ed);
+      if (sample && sample.ed.length > 10) {
+        console.log('[instruments] disk cache is pre-v3 schema (non-ISO expiry), will refresh');
+        return false;
+      }
       this._rebuildFromArray(rows);
       this.loadedAt = raw.loadedAt || stat.mtimeMs;
       console.log(`[instruments] hydrated from disk: ${this.size} rows (age ${Math.round((Date.now() - this.loadedAt)/1000)}s)`);
@@ -88,6 +94,21 @@ class InstrumentsMaster {
         const rows = await this.kc.getInstruments(ex);
         if (Array.isArray(rows)) {
           for (const r of rows) {
+            // kc.getInstruments() returns expiry as JS Date object — coerce to ISO YYYY-MM-DD.
+            let edIso = '';
+            if (r.expiry) {
+              if (r.expiry instanceof Date) {
+                edIso = isFinite(r.expiry.getTime()) ? r.expiry.toISOString().slice(0, 10) : '';
+              } else {
+                const s = String(r.expiry);
+                // Already ISO?
+                if (/^\d{4}-\d{2}-\d{2}/.test(s)) edIso = s.slice(0, 10);
+                else {
+                  const d = new Date(s);
+                  edIso = isFinite(d.getTime()) ? d.toISOString().slice(0, 10) : '';
+                }
+              }
+            }
             all.push({
               t:   Number(r.instrument_token),
               ts:  String(r.tradingsymbol || ''),
@@ -95,7 +116,7 @@ class InstrumentsMaster {
               s:   String(r.segment || ''),
               n:   String(r.name || ''),
               it:  String(r.instrument_type || ''),
-              ed:  r.expiry ? String(r.expiry) : '',
+              ed:  edIso,
               k:   typeof r.strike === 'number' ? r.strike : (r.strike ? Number(r.strike) : 0),
               ls:  typeof r.lot_size === 'number' ? r.lot_size : (r.lot_size ? Number(r.lot_size) : 0),
               ti:  typeof r.tick_size === 'number' ? r.tick_size : (r.tick_size ? Number(r.tick_size) : 0),
