@@ -26,6 +26,7 @@ const { notify }       = require('./notify');
 const { Alerts }       = require('./alerts');
 const { Watchlist }    = require('./watchlist');
 const { Scanner }      = require('./scanner');
+const { runBacktest }  = require('./backtest');
 
 // ---------- Config ----------
 const PORT            = parseInt(process.env.PORT || '8080', 10);
@@ -295,6 +296,90 @@ app.get('/api/audit', (req, res) => {
     res.json({ ok: true, count: rows.length, rows });
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
+// ---------- Indices snapshot ----------
+// Returns current LTPs for major indices from the in-memory tick cache (since /quotes
+// doesn't return indices cleanly via NSE:NIFTY key).
+app.get('/api/indices/snapshot', (_req, res) => {
+  try {
+    const ticks = broker.getLastTicks ? broker.getLastTicks() : [];
+    const wanted = ['NIFTY 50','NIFTY BANK','BANKNIFTY','SENSEX','FINNIFTY','NIFTY FIN SERVICE','MIDCPNIFTY','NIFTY MIDCAP 100','INDIA VIX'];
+    const map = new Map(ticks.map(t => [t.symbol, t]));
+    const rows = [];
+    for (const sym of wanted) {
+      const t = map.get(sym);
+      if (t) rows.push({ symbol: sym, ltp: t.ltp, ts: t.ts });
+    }
+    res.json({ ok: true, count: rows.length, rows });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
+// ---------- Position-size calculator ----------
+// GET /api/calc/position-size?account=100000&riskPct=1&stopLossPct=2&entryPrice=100
+// Pure math: qty = floor((account * riskPct/100) / (entryPrice * stopLossPct/100))
+app.get('/api/calc/position-size', (req, res) => {
+  try {
+    const account     = Number(req.query.account);
+    const riskPct     = Number(req.query.riskPct || 1);
+    const stopLossPct = Number(req.query.stopLossPct);
+    const entryPrice  = Number(req.query.entryPrice || 0);
+    if (!Number.isFinite(account) || account <= 0)         return res.status(400).json({ ok:false, reason:'account must be positive' });
+    if (!Number.isFinite(riskPct) || riskPct <= 0)         return res.status(400).json({ ok:false, reason:'riskPct must be positive' });
+    if (!Number.isFinite(stopLossPct) || stopLossPct <= 0) return res.status(400).json({ ok:false, reason:'stopLossPct must be positive' });
+
+    const riskAmount = +(account * (riskPct / 100)).toFixed(2);
+    // If entryPrice given, compute qty using per-share risk. Else just return riskAmount.
+    let qty = null, perShareRisk = null, capitalDeployed = null;
+    if (entryPrice > 0) {
+      perShareRisk = +(entryPrice * (stopLossPct / 100)).toFixed(4);
+      qty = Math.floor(riskAmount / perShareRisk);
+      capitalDeployed = +(qty * entryPrice).toFixed(2);
+    }
+
+    res.json({
+      ok: true,
+      inputs: { account, riskPct, stopLossPct, entryPrice: entryPrice || null },
+      riskAmount,
+      perShareRisk,
+      suggestedQty: qty,
+      capitalDeployed,
+      capitalUtilizationPct: capitalDeployed != null ? +(capitalDeployed / account * 100).toFixed(2) : null,
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
+// ---------- Backtest ----------
+// POST /api/backtest  body: { symbol, strategy, from, to, qty?, params? }
+app.post('/api/backtest', async (req, res) => {
+  try {
+    const { symbol, strategy, from, to, qty, params, interval } = req.body || {};
+    if (!symbol)   return res.status(400).json({ ok:false, reason:'symbol required' });
+    if (!strategy) return res.status(400).json({ ok:false, reason:'strategy required (rsi_mean_revert | ema_cross)' });
+    if (!from || !to) return res.status(400).json({ ok:false, reason:'from and to required (YYYY-MM-DD)' });
+
+    const candles = await broker.getHistorical({
+      symbol, interval: interval || 'day', from, to,
+    });
+    if (!Array.isArray(candles) || candles.length < 30) {
+      return res.status(400).json({ ok:false, reason:`need >= 30 candles, got ${candles ? candles.length : 0}` });
+    }
+
+    const result = runBacktest({
+      candles,
+      strategy,
+      params: params || {},
+      qty: Number(qty) || 1,
+    });
+    audit('backtest.run', { symbol, strategy, bars: result.bars, trades: result.stats.trades, pnl: result.stats.totalPnl });
+    res.json({ ok: true, symbol, from, to, ...result });
+  } catch (e) {
+    res.status(400).json({ ok: false, reason: e.message });
   }
 });
 

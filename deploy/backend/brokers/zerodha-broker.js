@@ -269,6 +269,15 @@ class ZerodhaBroker extends BrokerGateway {
     return Array.from(this.instruments.byShort.keys()).slice(0, 500);
   }
 
+  /** Snapshot of the in-memory tick cache. Includes indices that /quotes can't return. */
+  getLastTicks() {
+    const out = [];
+    for (const [symbol, ltp] of this._lastLtp) {
+      out.push({ symbol, ltp, ts: this._lastTickAt });
+    }
+    return out;
+  }
+
   // ------------------ Read-only account data ------------------
 
   async getHoldings() {

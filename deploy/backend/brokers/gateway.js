@@ -60,6 +60,14 @@ class BrokerGateway {
   async getQuotes(_symbols) { return {}; }
 
   /**
+   * Return the in-memory map of last seen ticks per symbol.
+   * Cheap snapshot — useful for indices which the REST /quotes endpoint
+   * can't return cleanly.
+   * @returns {Array<{symbol:string, ltp:number, ts?:number}>}
+   */
+  getLastTicks() { return []; }
+
+  /**
    * Read-only account data. Default to empty so MockBroker can omit overrides.
    */
   async getHoldings()  { return []; }
