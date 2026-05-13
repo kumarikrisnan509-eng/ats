@@ -93,6 +93,9 @@ jobs:
       url: https://ats.rajasekarselvam.com
 
     steps:
+      - name: Checkout (need deploy/ scripts to sync to VM)
+        uses: actions/checkout@v4
+
       - name: Configure SSH
         run: |
           set -e
