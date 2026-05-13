@@ -9,7 +9,7 @@
 //   2. User logs into Kite, TOTP, redirects back to .../callback?request_token=...
 //   3. exchangeRequestToken(requestToken) -> { accessToken, publicToken, userId, ... }
 //   4. Backend encrypts and stores per-user token
-//   5. start() connects KiteTicker with that token, subscribes to instrument tokens
+//   5. setAccessToken() -> kicks off instrument-master load + ticker connect
 //   6. Ticker emits raw ticks; we translate to canonical {symbol, ltp, ts, change, changePct}
 //
 // Requires `kiteconnect` npm package. The package's KiteTicker is a server-side WebSocket
@@ -18,7 +18,9 @@
 // Daily expiry: access_token expires ~6:00 IST every day. Detect 403 from REST, mark the
 // user "needs reconnect", and have the UI surface a Reconnect button.
 
+const path = require('path');
 const { BrokerGateway } = require('./gateway');
+const { InstrumentsMaster } = require('./zerodha-instruments');
 
 let KiteConnect, KiteTicker;
 try {
@@ -34,10 +36,9 @@ class ZerodhaBroker extends BrokerGateway {
    * @param {string} opts.apiKey
    * @param {string} opts.apiSecret
    * @param {string} opts.redirectUrl  e.g. https://rajasekarselvam.com/api/brokers/zerodha/callback
-   * @param {(symbolOrToken: string|number) => string|null} [opts.symbolForToken]
-   *   Map instrument_token (number) -> canonical symbol. Fed by instrument-master sync.
+   * @param {string} [opts.instrumentsCachePath]  default /var/lib/ats/instruments-cache.json
    */
-  constructor({ apiKey, apiSecret, redirectUrl, symbolForToken }) {
+  constructor({ apiKey, apiSecret, redirectUrl, instrumentsCachePath }) {
     super();
     if (!KiteConnect) {
       throw new Error('kiteconnect package not installed. Run `npm install` in deploy/backend/.');
@@ -48,9 +49,19 @@ class ZerodhaBroker extends BrokerGateway {
     this.apiKey = apiKey;
     this.apiSecret = apiSecret;
     this.redirectUrl = redirectUrl;
-    this.symbolForToken = symbolForToken || ((t) => `TOKEN:${t}`);
 
     this.kc = new KiteConnect({ api_key: apiKey });
+
+    // Instrument master — resolves canonical symbols to Kite instrument_tokens.
+    // Cache lives in the bind-mounted tokens dir; underscore prefix keeps sessions.js
+    // from treating it as a per-user token file.
+    this.instruments = new InstrumentsMaster({
+      kc: this.kc,
+      cachePath: instrumentsCachePath || '/var/lib/ats/tokens/_instruments-cache.json',
+    });
+    // Try disk hydrate immediately so even pre-auth health endpoints can introspect.
+    this.instruments.hydrateFromDisk();
+
     /** @type {string|null} */
     this.accessToken = null;
     /** @type {KiteTicker|null} */
@@ -95,6 +106,13 @@ class ZerodhaBroker extends BrokerGateway {
   setAccessToken(accessToken) {
     this.accessToken = accessToken;
     this.kc.setAccessToken(accessToken);
+
+    // Kick off instrument-master refresh in the background (don't await — slow on first run).
+    // After this resolves, future symbol->token lookups work for all of NSE+NFO+BFO+MCX.
+    this.instruments.refresh()
+      .then(() => this.instruments.scheduleDailyRefresh())
+      .catch((err) => console.error('[zerodha] instruments refresh failed:', err && err.message));
+
     // If start() was deferred earlier (no token at boot), kick off the ticker now.
     if (!this.ticker) {
       this.start().catch((err) =>
@@ -139,14 +157,21 @@ class ZerodhaBroker extends BrokerGateway {
     this.ticker.on('ticks', (ticks) => {
       this._lastTickAt = Date.now();
       for (const t of ticks) {
-        const symbol = this.symbolForToken(t.instrument_token) || `TOKEN:${t.instrument_token}`;
+        // Resolve token back to a friendly symbol. Prefer the instruments master,
+        // fall back to TOKEN:n.
+        const fullSym = this.instruments.symbolOf(t.instrument_token);
+        // Strip "NSE:" prefix for the frontend's existing simple symbol scheme,
+        // but keep INDICES names intact ("NIFTY 50", "BANKNIFTY", etc).
+        let symbol = fullSym || `TOKEN:${t.instrument_token}`;
+        if (fullSym && fullSym.startsWith('NSE:')) symbol = fullSym.slice(4);
+
         const ltp = typeof t.last_price === 'number' ? t.last_price : null;
         if (ltp == null) continue;
         const prev = this._lastLtp.get(symbol);
         this._lastLtp.set(symbol, ltp);
         const change = prev != null ? +(ltp - prev).toFixed(2) : 0;
         const changePct = prev != null && prev > 0 ? +(((ltp - prev) / prev) * 100).toFixed(4) : 0;
-        const tick = { symbol, ltp, ts: Date.now(), change, changePct, raw: t };
+        const tick = { symbol, ltp, ts: Date.now(), change, changePct };
         for (const cb of this._subs) {
           try { cb(tick); } catch { /* don't kill the loop */ }
         }
@@ -170,41 +195,49 @@ class ZerodhaBroker extends BrokerGateway {
     this._connected = false;
   }
 
-  /** Health snapshot for /api/health */
-  health() {
-    return {
-      name: this.name,
-      connected: this._connected,
-      subscribers: this._subs.size,
-      hasAccessToken: !!this.accessToken,
-      tickerInitialized: !!this.ticker,
-    };
-  }
-
   /**
    * Subscribe to a list of canonical symbols. Adapter resolves them to instrument_tokens
-   * via the instrument master (caller-supplied via the constructor).
-   *
-   * For this scaffold, callers can pass instrument tokens directly as `TOKEN:<n>` strings,
-   * which is how the mock symbolForToken renders them. Wire a real instrument master in
-   * a later step.
+   * via the InstrumentsMaster. Accepts:
+   *   - "NSE:RELIANCE"  (preferred)
+   *   - "RELIANCE"      (short — resolves to NSE)
+   *   - "NIFTY 50"      (index)
+   *   - "TOKEN:738561"  (raw passthrough)
    */
   async subscribeTicks(symbols, onTick) {
     this._subs.add(onTick);
 
-    const tokens = symbols
-      .map((s) => (typeof s === 'string' && s.startsWith('TOKEN:')) ? Number(s.slice(6)) : null)
+    const tokens = (symbols || [])
+      .map((s) => this.instruments.tokenOf(s))
       .filter((t) => Number.isFinite(t));
 
-    if (tokens.length > 0 && this.ticker && this._connected) {
-      for (const t of tokens) this._subscribedTokens.add(t);
-      this.ticker.subscribe(tokens);
-      this.ticker.setMode(this.ticker.modeQuote, tokens);
-    } else {
-      for (const t of tokens) this._subscribedTokens.add(t); // queue until connected
+    // Dedupe against currently-subscribed set
+    const newTokens = tokens.filter((t) => !this._subscribedTokens.has(t));
+    for (const t of tokens) this._subscribedTokens.add(t);
+
+    if (newTokens.length > 0 && this.ticker && this._connected) {
+      this.ticker.subscribe(newTokens);
+      this.ticker.setMode(this.ticker.modeQuote, newTokens);
     }
+    // Otherwise tokens are queued in _subscribedTokens; the 'connect' handler will pick them up.
 
     return () => { this._subs.delete(onTick); };
+  }
+
+  /**
+   * Subscribe additional symbols to an EXISTING fan-out (no new onTick callback added).
+   * Used by /ws handler when a client says {type:"subscribe",symbols:[...]}.
+   */
+  async ensureSubscribed(symbols) {
+    const tokens = (symbols || [])
+      .map((s) => this.instruments.tokenOf(s))
+      .filter((t) => Number.isFinite(t));
+    const newTokens = tokens.filter((t) => !this._subscribedTokens.has(t));
+    for (const t of newTokens) this._subscribedTokens.add(t);
+    if (newTokens.length > 0 && this.ticker && this._connected) {
+      this.ticker.subscribe(newTokens);
+      this.ticker.setMode(this.ticker.modeQuote, newTokens);
+    }
+    return { requested: symbols.length, resolved: tokens.length, newlySubscribed: newTokens.length };
   }
 
   async getQuote(symbol) {
@@ -217,12 +250,109 @@ class ZerodhaBroker extends BrokerGateway {
     return { ltp: row.last_price, ts: Date.now() };
   }
 
-  async listSymbols() {
-    // In production: cache the instruments master dump (refreshed at 6am IST).
-    // For the scaffold: return what we currently have LTPs for.
-    return Array.from(this._lastLtp.keys());
+  /**
+   * Bulk quote — returns { "NSE:RELIANCE": {ltp, ohlc, ...}, ... }
+   * Pass symbols in either "RELIANCE" or "NSE:RELIANCE" form.
+   */
+  async getQuotes(symbols) {
+    if (!this.accessToken) throw new Error('not authenticated');
+    const keys = (symbols || []).map(s => s.includes(':') ? s : `NSE:${s}`);
+    if (keys.length === 0) return {};
+    return await this.kc.getQuote(keys);
   }
 
+  async listSymbols() {
+    // In production: cache the instruments master dump (refreshed at 6am IST).
+    // For the scaffold: return what we currently have LTPs for, falling back to short names from master.
+    const live = Array.from(this._lastLtp.keys());
+    if (live.length > 0) return live;
+    return Array.from(this.instruments.byShort.keys()).slice(0, 500);
+  }
+
+  // ------------------ Read-only account data ------------------
+
+  async getHoldings() {
+    if (!this.accessToken) throw new Error('not authenticated');
+    const rows = await this.kc.getHoldings();
+    // Normalize to the shape the frontend expects.
+    return (rows || []).map((h) => ({
+      symbol:        h.tradingsymbol,
+      exchange:      h.exchange,
+      quantity:      h.quantity,
+      avgPrice:      h.average_price,
+      ltp:           h.last_price,
+      pnl:           h.pnl,
+      dayChange:     h.day_change,
+      dayChangePct:  h.day_change_percentage,
+      isin:          h.isin,
+      product:       h.product,
+    }));
+  }
+
+  async getPositions() {
+    if (!this.accessToken) throw new Error('not authenticated');
+    const data = await this.kc.getPositions();
+    const norm = (rows) => (rows || []).map((p) => ({
+      symbol:       p.tradingsymbol,
+      exchange:     p.exchange,
+      product:      p.product,
+      quantity:     p.quantity,
+      avgPrice:     p.average_price,
+      ltp:          p.last_price,
+      pnl:          p.pnl,
+      m2m:          p.m2m,
+      unrealised:   p.unrealised,
+      realised:     p.realised,
+      multiplier:   p.multiplier,
+    }));
+    return { net: norm(data && data.net), day: norm(data && data.day) };
+  }
+
+  async getOrders() {
+    if (!this.accessToken) throw new Error('not authenticated');
+    const rows = await this.kc.getOrders();
+    return (rows || []).map((o) => ({
+      orderId:       o.order_id,
+      exchangeOrder: o.exchange_order_id,
+      status:        o.status,
+      symbol:        o.tradingsymbol,
+      exchange:      o.exchange,
+      transactionType: o.transaction_type,
+      product:       o.product,
+      orderType:     o.order_type,
+      variety:       o.variety,
+      quantity:      o.quantity,
+      filledQuantity:o.filled_quantity,
+      pendingQuantity:o.pending_quantity,
+      price:         o.price,
+      averagePrice:  o.average_price,
+      triggerPrice:  o.trigger_price,
+      placedAt:      o.order_timestamp,
+      statusMessage: o.status_message,
+    }));
+  }
+
+  async getProfile() {
+    if (!this.accessToken) throw new Error('not authenticated');
+    const p = await this.kc.getProfile();
+    return {
+      userId:    p.user_id,
+      userName:  p.user_name,
+      userType:  p.user_type,
+      email:     p.email,
+      broker:    p.broker,
+      products:  p.products,
+      exchanges: p.exchanges,
+      orderTypes:p.order_types,
+    };
+  }
+
+  async getMargins() {
+    if (!this.accessToken) throw new Error('not authenticated');
+    return await this.kc.getMargins();
+  }
+
+  /** Health snapshot for /api/health */
   health() {
     return {
       name: this.name,
@@ -232,6 +362,9 @@ class ZerodhaBroker extends BrokerGateway {
       reconnectAttempts: this._reconnectAttempts,
       lastTickAt: this._lastTickAt,
       lagMs: this._lastTickAt ? Date.now() - this._lastTickAt : null,
+      hasAccessToken: !!this.accessToken,
+      tickerInitialized: !!this.ticker,
+      instruments: this.instruments.stats(),
     };
   }
 }

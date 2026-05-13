@@ -148,6 +148,64 @@ app.get('/api/quote/:symbol', async (req, res) => {
   }
 });
 
+// Bulk quote — /api/quotes?symbols=RELIANCE,INFY,TCS
+app.get('/api/quotes', async (req, res) => {
+  try {
+    const raw = (req.query.symbols || '').toString();
+    const symbols = raw.split(',').map(s => s.trim()).filter(Boolean);
+    if (symbols.length === 0) return res.status(400).json({ ok: false, reason: 'no_symbols' });
+    const data = await broker.getQuotes(symbols);
+    res.json({ ok: true, quotes: data });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
+// ---------- Portfolio / orders REST (read-only) ----------
+
+app.get('/api/portfolio/holdings', async (_req, res) => {
+  try {
+    const rows = await broker.getHoldings();
+    res.json({ ok: true, rows });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
+app.get('/api/portfolio/positions', async (_req, res) => {
+  try {
+    const data = await broker.getPositions();
+    res.json({ ok: true, ...data });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
+app.get('/api/orders', async (_req, res) => {
+  try {
+    const rows = await broker.getOrders();
+    res.json({ ok: true, rows });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
+app.get('/api/profile', async (_req, res) => {
+  try {
+    res.json({ ok: true, profile: await broker.getProfile() });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
+app.get('/api/margins', async (_req, res) => {
+  try {
+    res.json({ ok: true, margins: await broker.getMargins() });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
 app.get('/api/kill-switch', (_req, res) => res.json({ killSwitch: KILL_SWITCH }));
 
 app.post('/api/orders/dry-run', (req, res) => {
@@ -340,11 +398,38 @@ wss.on('connection', (ws, req) => {
       : 'Live ticks via Kite Ticker. Subject to market hours.',
   }));
 
+  // Auto-subscribe this client's default watchlist to the broker so it gets ticks
+  // immediately during market hours, without needing to send a subscribe frame.
+  if (typeof broker.ensureSubscribed === 'function') {
+    broker.ensureSubscribed(DEFAULT_SYMBOLS).catch((err) =>
+      console.error('[ws] auto-subscribe defaults failed:', err && err.message)
+    );
+  }
+
   ws.on('message', (raw) => {
-    try {
-      const msg = JSON.parse(raw.toString());
-      if (msg && msg.type === 'ping') ws.send(JSON.stringify({ type: 'pong', ts: Date.now() }));
-    } catch {}
+    let msg;
+    try { msg = JSON.parse(raw.toString()); } catch { return; }
+    if (!msg || typeof msg !== 'object') return;
+
+    if (msg.type === 'ping') {
+      ws.send(JSON.stringify({ type: 'pong', ts: Date.now() }));
+      return;
+    }
+
+    if (msg.type === 'subscribe' && Array.isArray(msg.symbols)) {
+      const symbols = msg.symbols.filter(s => typeof s === 'string').slice(0, 200);
+      if (typeof broker.ensureSubscribed === 'function') {
+        broker.ensureSubscribed(symbols)
+          .then((result) => {
+            audit('ws.subscribe', { count: symbols.length, ...result });
+            ws.send(JSON.stringify({ type: 'subscribed', symbols, ...result }));
+          })
+          .catch((err) => {
+            ws.send(JSON.stringify({ type: 'error', reason: err.message }));
+          });
+      }
+      return;
+    }
   });
 
   ws.on('close', () => {

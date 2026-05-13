@@ -82,8 +82,45 @@ class MockBroker extends BrokerGateway {
     return { ltp: s.ltp, ts: s.lastTs };
   }
 
+  async getQuotes(symbols) {
+    const out = {};
+    for (const sym of (symbols || [])) {
+      const key = sym.includes(':') ? sym : `NSE:${sym}`;
+      const bare = key.includes(':') ? key.split(':')[1] : key;
+      const s = this._state[bare];
+      if (s) out[key] = { instrument_token: 0, last_price: s.ltp, ohlc: { open: s.prev, high: s.ltp, low: s.prev, close: s.prev } };
+    }
+    return out;
+  }
+
   async listSymbols() {
     return Object.keys(this._state);
+  }
+
+  // Canned account data for the cockpit screens.
+  async getHoldings() {
+    return [
+      { symbol: 'INFY',      exchange: 'NSE', quantity: 60,  avgPrice: 1843.00, ltp: this._state['INFY'] ? this._state['INFY'].ltp : 1876.25, pnl: 0, product: 'CNC' },
+      { symbol: 'TCS',       exchange: 'NSE', quantity: 25,  avgPrice: 3920.50, ltp: this._state['TCS'] ? this._state['TCS'].ltp : 4012.55, pnl: 0, product: 'CNC' },
+      { symbol: 'HDFCBANK',  exchange: 'NSE', quantity: 80,  avgPrice: 1612.30, ltp: this._state['HDFCBANK'] ? this._state['HDFCBANK'].ltp : 1718.90, pnl: 0, product: 'CNC' },
+      { symbol: 'RELIANCE',  exchange: 'NSE', quantity: 40,  avgPrice: 2480.00, ltp: this._state['RELIANCE'] ? this._state['RELIANCE'].ltp : 2887.40, pnl: 0, product: 'CNC' },
+    ].map(h => ({ ...h, pnl: +((h.ltp - h.avgPrice) * h.quantity).toFixed(2) }));
+  }
+
+  async getPositions() {
+    return { net: [], day: [] };
+  }
+
+  async getOrders() {
+    return [];
+  }
+
+  async getProfile() {
+    return { userId: 'MOCK001', userName: 'Mock User', broker: 'mock', exchanges: ['NSE','NFO','BFO','MCX'] };
+  }
+
+  async getMargins() {
+    return { equity: { available: { cash: 100000 }, utilised: { debits: 0 } } };
   }
 
   health() {

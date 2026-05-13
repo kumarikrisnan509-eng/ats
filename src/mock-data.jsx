@@ -2,14 +2,20 @@
 /* R11 #3 — Single source of truth for demo / sample data.
    Screens currently hardcode their own arrays; they can migrate to these
    helpers gradually. Everything respects `isDemoMode()` so flipping demo
-   off uniformly empties the dataset.
+   off uniformly empties the dataset (so screens see real data from /api).
+
+   Semantics (FIXED 2026-05-13, was inverted):
+     - DEMO MODE ON  → returns the mock arrays (shows sample holdings/orders).
+     - DEMO MODE OFF → returns [] (screens must fetch from /api/portfolio/* etc).
 
    Usage:
-     const holdings = window.MockData.holdings();    // [] when demo is off
-     const symbols  = window.MockData.symbols();
+     const holdings = window.MockData.holdings();    // sample when demo, [] when live
+     const symbols  = window.MockData.symbols();     // always returns symbols (cosmetic list)
      const orders   = window.MockData.orders({ limit: 5 });
 
    Each helper returns a fresh array — safe to filter/sort downstream.
+
+   Companion: window.fetchApi(path) — small helper used by screens to load real data.
 */
 
 const __holdings = [
@@ -40,21 +46,36 @@ const __orders = [
   { id: "ORD-26042326-005", symbol: "HDFCBANK",  side: "BUY",  qty: 80,  price: 1612.30, status: "FILLED",   mode: "swing",    strategy: "Breakout" },
 ];
 
-const ifLive = (arr) => {
-  if (window.isDemoMode && window.isDemoMode()) return [];
-  return arr.slice();
+// Default to DEMO ON when the flag is missing, so first-time visitors see populated
+// screens instead of blank ones. Production users explicitly toggle demo OFF via
+// the trading-modes panel; that empties the mock arrays and screens then fetch real data.
+const isDemoOn = () => {
+  if (typeof window.isDemoMode === 'function') return !!window.isDemoMode();
+  return true; // safe default
 };
 
+const ifDemo = (arr) => (isDemoOn() ? arr.slice() : []);
+
 const MockData = {
-  holdings: () => ifLive(__holdings),
+  holdings: () => ifDemo(__holdings),
   symbols: () => __symbols.slice(),
   orders: ({ limit, status } = {}) => {
-    let r = ifLive(__orders);
+    let r = ifDemo(__orders);
     if (status) r = r.filter(o => o.status === status);
     if (limit)  r = r.slice(0, limit);
     return r;
   },
   raw: { holdings: __holdings, symbols: __symbols, orders: __orders },
+  isDemoOn,
 };
 
 window.MockData = MockData;
+
+// ---------- Tiny fetch helper for screens migrating off hardcoded arrays ----------
+// Returns parsed JSON or throws. Screens typically wrap with try/catch and fall back
+// to MockData.* when isDemoOn().
+window.fetchApi = async (path, init = {}) => {
+  const res = await fetch(path, { credentials: 'include', ...init });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return await res.json();
+};

@@ -42,6 +42,33 @@ class BrokerGateway {
   async listSymbols() { return []; }
 
   /**
+   * Add subscriptions to the SAME fan-out without registering a new callback.
+   * Used by /ws handler when a connected client opts into more symbols.
+   * Default impl is a no-op (suitable for brokers like MockBroker that already
+   * tick every symbol regardless of subscription state).
+   * @returns {Promise<{requested:number, resolved:number, newlySubscribed:number}>}
+   */
+  async ensureSubscribed(symbols) {
+    return { requested: (symbols || []).length, resolved: (symbols || []).length, newlySubscribed: 0 };
+  }
+
+  /**
+   * Bulk quote.
+   * @param {string[]} symbols
+   * @returns {Promise<object>} keyed by "EXCH:SYMBOL"
+   */
+  async getQuotes(_symbols) { return {}; }
+
+  /**
+   * Read-only account data. Default to empty so MockBroker can omit overrides.
+   */
+  async getHoldings()  { return []; }
+  async getPositions(){ return { net: [], day: [] }; }
+  async getOrders()   { return []; }
+  async getProfile()  { return { broker: this.name }; }
+  async getMargins()  { return {}; }
+
+  /**
    * Order placement is intentionally NOT on this interface.
    * Use placeDryRun to test order payloads without hitting a broker.
    */

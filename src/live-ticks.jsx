@@ -86,6 +86,21 @@
         connected = true;
         gotData = true;
         clearTimeout(fallbackTimer);
+        // Subscribe to the locally-tracked symbol set so the backend resolves
+        // them to Kite instrument tokens and starts pushing ticks for them.
+        // (Welcome itself already auto-subscribes default watchlist on backend side,
+        //  but this catches extra symbols this client cares about.)
+        try {
+          realSocket.send(JSON.stringify({
+            type: "subscribe",
+            symbols: Object.keys(SYMBOLS),
+          }));
+        } catch {}
+        return;
+      }
+      if (msg.type === "subscribed") {
+        // backend ack — log so it's visible in DevTools
+        try { console.log("[live-ticks] subscribed:", msg); } catch {}
         return;
       }
       if (msg.type === "tick" && typeof msg.symbol === "string" && typeof msg.ltp === "number") {

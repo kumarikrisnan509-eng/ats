@@ -1,15 +1,51 @@
 /* eslint-disable */
-/* Portfolio screen — long-term holdings + profit sweep waterfall */
+/* Portfolio screen — long-term holdings + profit sweep waterfall.
+   2026-05-13: equity `holdings` now loads from /api/portfolio/holdings.
+   MFs / ETFs remain hardcoded sample data — Kite has no MF/ETF holdings API
+   that we use here (MF data comes from CAMS/Karvy, ETFs would migrate to
+   real holdings table separately). */
+
+const __mockEquityHoldings = [
+  { s: "RELIANCE",   qty: 80,  avg: 2650.00, ltp: 2948.50, sector: "Energy" },
+  { s: "HDFCBANK",   qty: 150, avg: 1540.00, ltp: 1712.80, sector: "Banking" },
+  { s: "INFY",       qty: 120, avg: 1680.00, ltp: 1876.25, sector: "IT" },
+  { s: "TCS",        qty: 50,  avg: 3820.00, ltp: 4120.10, sector: "IT" },
+  { s: "ICICIBANK",  qty: 180, avg: 1120.00, ltp: 1288.90, sector: "Banking" },
+  { s: "ITC",        qty: 300, avg:  410.00, ltp:  446.80, sector: "FMCG" },
+];
 
 const PortfolioScreen = () => {
-  const holdings = [
-    { s: "RELIANCE",   qty: 80,  avg: 2650.00, ltp: 2948.50, sector: "Energy" },
-    { s: "HDFCBANK",   qty: 150, avg: 1540.00, ltp: 1712.80, sector: "Banking" },
-    { s: "INFY",       qty: 120, avg: 1680.00, ltp: 1876.25, sector: "IT" },
-    { s: "TCS",        qty: 50,  avg: 3820.00, ltp: 4120.10, sector: "IT" },
-    { s: "ICICIBANK",  qty: 180, avg: 1120.00, ltp: 1288.90, sector: "Banking" },
-    { s: "ITC",        qty: 300, avg:  410.00, ltp:  446.80, sector: "FMCG" },
-  ];
+  const [holdings, setHoldings] = React.useState(
+    (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn())
+      ? __mockEquityHoldings
+      : []
+  );
+
+  React.useEffect(() => {
+    let cancelled = false;
+    // If demo is ON, keep the sample; otherwise fetch real holdings.
+    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) {
+      setHoldings(__mockEquityHoldings);
+      return;
+    }
+    (async () => {
+      try {
+        const data = await window.fetchApi('/api/portfolio/holdings');
+        if (cancelled) return;
+        // Normalize to screen's shape.
+        const rows = (data && data.rows || []).map(r => ({
+          s: r.symbol, qty: r.quantity, avg: r.avgPrice, ltp: r.ltp,
+          sector: r.sector || '—',
+        }));
+        setHoldings(rows);
+      } catch (err) {
+        console.warn('[portfolio] /api/portfolio/holdings failed:', err.message);
+        if (!cancelled) setHoldings([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const mf = [
     { n: "Parag Parikh Flexi Cap",  t: "Flexi Cap",   sip: 15000, inv: 420000, cur: 498240, xirr: 18.4 },
     { n: "Mirae Large & Midcap",    t: "L&MC",        sip: 10000, inv: 280000, cur: 318400, xirr: 14.1 },
