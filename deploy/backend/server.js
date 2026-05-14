@@ -31,6 +31,10 @@ const { PaperTrading } = require('./paper');
 const { PnlAttribution } = require('./pnl-attribution');
 const { AutoRunner }   = require('./autorun');
 const { NewsFeed }     = require('./news');
+const { TaxPlanner }   = require('./tax');
+const { ClaudeAI }     = require('./ai');
+const { runPreflight } = require('./preflight');
+const csvImport        = require('./csv-import');
 
 // ---------- Config ----------
 const PORT            = parseInt(process.env.PORT || '8080', 10);
@@ -61,7 +65,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai;
 
 async function init() {
   broker = createBroker(process.env);
@@ -126,6 +130,15 @@ async function init() {
   });
   news.load();
   news.start();   // initial fetch + 10-min interval
+
+  tax = new TaxPlanner({
+    storePath: process.env.TAX_PATH || '/var/lib/ats/tokens/_tax.json',
+    audit,
+    getClosedTrades: () => paper ? paper.trades(2000) : [],
+  });
+  tax.load();
+
+  ai = new ClaudeAI({ audit });
 
   if (BROKER_NAME === 'zerodha') {
     if (!fs.existsSync(MASTER_KEY_PATH)) {
@@ -346,6 +359,8 @@ app.get('/api/system/info', (_req, res) => {
       pnl:       pnl       ? pnl.stats()       : null,
       autorun:   autorun   ? autorun.stats()   : null,
       news:      news      ? news.stats()      : null,
+      tax:       tax       ? tax.stats()       : null,
+      ai:        ai        ? ai.stats()        : null,
     },
     auditLog: { path: AUDIT_LOG, sizeBytes: auditSize, lastWriteTs: auditLastTs, seq: auditSeq },
     config: {
@@ -962,6 +977,96 @@ app.post('/api/news/refresh', async (_req, res) => {
 app.get('/api/news/sources', (_req, res) => {
   if (!news) return res.status(503).json({ ok:false, reason:'news_not_initialized' });
   res.json({ ok:true, sources: news.stats().sources, lastSummary: news.stats().lastSummary });
+});
+
+// ---------- Tax planning ----------
+app.get('/api/tax/goals', (_req, res) => {
+  if (!tax) return res.status(503).json({ ok:false, reason:'tax_not_initialized' });
+  res.json({ ok:true, goals: tax.getGoals() });
+});
+app.put('/api/tax/goals', (req, res) => {
+  if (!tax) return res.status(503).json({ ok:false, reason:'tax_not_initialized' });
+  try {
+    const goals = tax.setGoals((req.body && req.body.goals) || []);
+    res.json({ ok:true, goals });
+  } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
+});
+app.get('/api/tax/harvest', (_req, res) => {
+  if (!tax) return res.status(503).json({ ok:false, reason:'tax_not_initialized' });
+  res.json({ ok:true, rules: tax.getHarvestRules(), opportunities: tax.findHarvestOpportunities() });
+});
+app.put('/api/tax/harvest', (req, res) => {
+  if (!tax) return res.status(503).json({ ok:false, reason:'tax_not_initialized' });
+  try {
+    const rules = tax.setHarvestRules((req.body && req.body.rules) || {});
+    res.json({ ok:true, rules });
+  } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
+});
+app.post('/api/tax/realize', (req, res) => {
+  if (!tax) return res.status(503).json({ ok:false, reason:'tax_not_initialized' });
+  try {
+    const entry = tax.realizeHarvest((req.body && req.body.tradeIds) || [], req.body && req.body.note);
+    res.json({ ok:true, entry });
+  } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
+});
+
+// ---------- AI features (no-op if ANTHROPIC_API_KEY not set) ----------
+app.post('/api/ai/news-sentiment', async (req, res) => {
+  if (!ai || !ai.enabled()) return res.status(503).json({ ok:false, reason:'ai_disabled', detail:'set ANTHROPIC_API_KEY env to enable' });
+  try {
+    const items = Array.isArray(req.body && req.body.items) ? req.body.items : (news ? news.list({ limit: 10 }) : []);
+    const out = await ai.newsSentiment(items);
+    res.json({ ok:true, sentiments: out, stats: ai.stats() });
+  } catch (e) { res.status(500).json({ ok:false, reason:e.message }); }
+});
+app.post('/api/ai/position-review', async (_req, res) => {
+  if (!ai || !ai.enabled()) return res.status(503).json({ ok:false, reason:'ai_disabled' });
+  try {
+    const positions = paper ? paper.positions() : [];
+    const out = await ai.positionReview(positions);
+    res.json({ ok:true, review: out, stats: ai.stats() });
+  } catch (e) { res.status(500).json({ ok:false, reason:e.message }); }
+});
+app.post('/api/ai/strategy-explain', async (req, res) => {
+  if (!ai || !ai.enabled()) return res.status(503).json({ ok:false, reason:'ai_disabled' });
+  try {
+    const out = await ai.strategyExplain(req.body || {});
+    res.json({ ok:true, ...out, stats: ai.stats() });
+  } catch (e) { res.status(500).json({ ok:false, reason:e.message }); }
+});
+
+// ---------- Settlement CSV reconcile ----------
+app.post('/api/reconcile/import-csv', (req, res) => {
+  try {
+    const csv = (req.body && (req.body.csv || req.body.text)) || '';
+    if (!csv || typeof csv !== 'string') return res.status(400).json({ ok:false, reason:'csv string required in body' });
+    if (csv.length > 1024 * 1024) return res.status(400).json({ ok:false, reason:'csv too large (>1MB)' });
+    const backendOrders = paper ? paper.list() : [];
+    const result = csvImport.reconcileCsv(csv, backendOrders);
+    audit('reconcile.csv', { parsed: result.parsed, matched: result.matched, onlyInCsv: result.onlyInCsv.length });
+    res.json({ ok:true, ...result });
+  } catch (e) { res.status(500).json({ ok:false, reason:e.message }); }
+});
+
+// ---------- Going-live preflight ----------
+app.get('/api/preflight', async (_req, res) => {
+  try {
+    const result = await runPreflight({
+      broker, paper, pnl,
+      env: process.env,
+      getReconcile: async () => {
+        // Build a minimal reconcile snapshot inline (don't recurse through HTTP)
+        if (!paper) return null;
+        const stats = paper.stats();
+        const list = paper.list();
+        const paperPending = list.filter(o => o.status === 'PENDING').length;
+        let brokerPending = 0;
+        try { const o = await broker.getOrders(); brokerPending = (o || []).filter(x => String(x.status||'').toUpperCase() === 'OPEN').length; } catch {}
+        return { summary: { cashDrift: 0, brokerPendingCnt: brokerPending, paperPendingCnt: paperPending } };
+      },
+    });
+    res.json({ ok:true, ...result });
+  } catch (e) { res.status(500).json({ ok:false, reason:e.message }); }
 });
 
 // ---------- Hyperparameter tuner ----------

@@ -140,6 +140,37 @@ deploy/scripts/deploy-p3-esbuild.ps1
 DEPLOY-P3-FIX.cmd
 deploy/.deploy-p3-fix-output.txt
 deploy/scripts/deploy-p3-fix.ps1
+DEPLOY-BATCH5.cmd
+deploy/.deploy-batch5-output.txt
+deploy/scripts/deploy-batch5.ps1
+FORCE-LOGIN.cmd
+deploy/.force-login-output.txt
+deploy/scripts/force-login.ps1
+STOP-AND-COOL-DOWN.cmd
+deploy/.stop-and-cool-down-output.txt
+deploy/scripts/stop-and-cool-down.ps1
+DEPLOY-COMPLETE-WIRING.cmd
+deploy/.deploy-complete-wiring-output.txt
+deploy/scripts/deploy-complete-wiring.ps1
+DEPLOY-DEFENSIVE.cmd
+deploy/.deploy-defensive-output.txt
+deploy/scripts/deploy-defensive.ps1
+DEPLOY-PHASE2.cmd
+deploy/.deploy-phase2-output.txt
+deploy/scripts/deploy-phase2.ps1
+DEPLOY-TIER2.cmd
+deploy/.deploy-tier2-output.txt
+deploy/scripts/deploy-tier2.ps1
+DEPLOY-STATE-BACKUP.cmd
+deploy/.deploy-state-backup-output.txt
+deploy/scripts/deploy-state-backup.ps1
+# ats-archive-audit.sh is committed (small, public, audit-friendly content) - no entry
+DEPLOY-TIER2B.cmd
+deploy/.deploy-tier2b-output.txt
+deploy/scripts/deploy-tier2b.ps1
+DEPLOY-TIER3.cmd
+deploy/.deploy-tier3-output.txt
+deploy/scripts/deploy-tier3.ps1
 # set-zerodha-env.ps1 contains embedded API key+secret (after the user creates the Kite app).
 deploy/scripts/set-zerodha-env.ps1
 deploy/.vm-analysis.txt
@@ -196,3 +227,9 @@ debug.png
 # ===== OS / editor cruft =====
 *.bak
 *~
+
+# Tier 4 additions
+deploy/scripts/secrets.local.ps1
+test-e2e/node_modules/
+test-e2e/test-results/
+test-e2e/playwright-report/

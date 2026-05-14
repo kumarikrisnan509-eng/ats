@@ -1,0 +1,21 @@
+# Alertmanager config -- routes Prometheus alerts to Telegram via webhook.
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: telegram
+  group_by: ['alertname']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 6h
+
+receivers:
+  - name: telegram
+    # Replace BOT_TOKEN + CHAT_ID. Or run a tiny telegram-bridge if you want richer formatting.
+    webhook_configs:
+      - url: 'http://localhost:8888/alertmanager-to-telegram'
+        send_resolved: true
+
+# To wire telegram-bridge: run a 50-line Node script that POSTs alerts to
+# https://api.telegram.org/bot<TOKEN>/sendMessage. See deploy/monitoring/README.md.

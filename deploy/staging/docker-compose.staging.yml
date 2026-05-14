@@ -1,0 +1,43 @@
+# Staging compose file -- run alongside the prod compose on the same OCI VM.
+# Bound to a separate port (8081) + separate persistent volume.
+# BROKER=mock so it never hits real Kite (safe to break, redeploy at will).
+#
+# Install:
+#   sudo cp deploy/staging/docker-compose.staging.yml /opt/ats/staging/
+#   sudo mkdir -p /opt/ats/staging-data
+#   cd /opt/ats/staging
+#   sudo docker compose --env-file .env up -d
+#
+# .env for staging:
+#   ATS_REPO_OWNER=mohanapriya63085
+#   ATS_IMAGE_TAG=latest
+#   ATS_PORT_HOST=8081
+#   BROKER=mock
+#   ENV_NAME=staging
+#   KILL_SWITCH=true
+
+services:
+  ats-backend-staging:
+    image: ghcr.io/${ATS_REPO_OWNER}/ats-backend:${ATS_IMAGE_TAG:-latest}
+    container_name: ats-backend-staging
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${ATS_PORT_HOST:-8081}:8080"
+    environment:
+      - BROKER=${BROKER:-mock}
+      - ENV_NAME=${ENV_NAME:-staging}
+      - KILL_SWITCH=${KILL_SWITCH:-true}
+      - PAPER_PATH=/var/lib/ats/tokens/_paper.json
+      - PNL_PATH=/var/lib/ats/tokens/_pnl-daily.json
+      - AUTORUN_PATH=/var/lib/ats/tokens/_autorun.json
+      - NEWS_PATH=/var/lib/ats/tokens/_news.json
+      - TAX_PATH=/var/lib/ats/tokens/_tax.json
+    volumes:
+      - /opt/ats/staging-data:/var/lib/ats/tokens
+      - /var/log/ats-staging:/var/log/ats
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

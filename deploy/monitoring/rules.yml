@@ -1,0 +1,54 @@
+# Alert rules for ATS. Loaded by Prometheus via rule_files in prometheus.yml.
+
+groups:
+  - name: ats.broker
+    interval: 30s
+    rules:
+      - alert: BrokerDisconnected
+        expr: ats_broker_connected == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Broker disconnected from live ticks for 2+ min"
+          description: "ats.rajasekarselvam.com broker.health.connected has been 0 for 2m. Check VM, KiteTicker, network."
+
+      - alert: NoTicksRecently
+        expr: time() - ats_last_tick_seconds > 120
+        for: 3m
+        labels: { severity: warning }
+        annotations:
+          summary: "No tick received in 2+ minutes during market hours"
+
+  - name: ats.health
+    interval: 30s
+    rules:
+      - alert: BackendDown
+        expr: up{job="ats"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "ATS /metrics endpoint not responding"
+
+      - alert: HighErrorRate
+        expr: rate(ats_request_errors_total[5m]) > 0.5
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "API error rate > 0.5/s for 5 min"
+
+  - name: ats.paper
+    interval: 60s
+    rules:
+      - alert: PaperPersistFailures
+        expr: increase(ats_paper_persist_failures_total[5m]) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Paper trading state persist failed (disk full? perms?)"
+
+      - alert: ReconcileDriftAccelerating
+        expr: abs(ats_reconcile_cash_drift) > 100000
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Paper-vs-broker cash drift exceeds INR 1L for 5 min"

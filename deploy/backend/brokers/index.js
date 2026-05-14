@@ -22,7 +22,17 @@ function createBroker(env = process.env) {
     });
   }
 
-  throw new Error(`unknown BROKER="${which}". Use "mock" or "zerodha".`);
+  if (which === 'upstox') {
+    const { UpstoxBroker } = require('./upstox-broker');
+    return new UpstoxBroker({
+      apiKey:       env.UPSTOX_API_KEY,
+      apiSecret:    env.UPSTOX_API_SECRET,
+      accessToken:  env.UPSTOX_ACCESS_TOKEN,
+      redirectUrl:  env.UPSTOX_REDIRECT_URL,
+    });
+  }
+
+  throw new Error(`unknown BROKER="${which}". Use "mock", "zerodha", or "upstox".`);
 }
 
 module.exports = { createBroker };

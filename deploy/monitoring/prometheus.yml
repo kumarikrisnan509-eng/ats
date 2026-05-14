@@ -1,0 +1,30 @@
+# Prometheus scrape config for ATS.
+# Install on a separate small VM or use Grafana Cloud free tier.
+#
+# Quick-start (Docker on the same OCI VM as ATS, separate compose):
+#   docker run -d --name prom --network host -v $(pwd):/etc/prometheus prom/prometheus
+
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+  external_labels:
+    monitor: ats-prod
+
+rule_files:
+  - rules.yml
+
+scrape_configs:
+  - job_name: ats
+    metrics_path: /metrics
+    scheme: https
+    static_configs:
+      - targets: ['ats.rajasekarselvam.com']
+    # Auth via X-Metrics-Token header (set ATS_METRICS_TOKEN env on the VM)
+    bearer_token_file: /etc/prometheus/metrics_token
+    # Alternative: use the header approach
+    # external_labels: are added to ALL series for routing.
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['localhost:9093']

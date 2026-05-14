@@ -102,6 +102,18 @@ jobs:
             echo "no test script defined -- skipping"
           fi
 
+      - name: Playwright smoke tests (optional, against live URL)
+        # Only run on push to main; PRs skip to keep CI fast.
+        if: github.event_name == 'push'
+        working-directory: test-e2e
+        continue-on-error: true
+        run: |
+          if [ -f package.json ]; then
+            npm install --silent --no-audit --no-fund
+            npx playwright install --with-deps chromium
+            npx playwright test || echo "::warning::playwright smoke had failures (non-blocking)"
+          fi
+
       - name: Secret-leak guard
         run: |
           set -e
