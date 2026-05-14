@@ -2,9 +2,8 @@
 /* Market regime detector — trending / ranging / volatile → strategy switcher */
 
 const RegimeScreen = () => {
-  // ---- live regime classification from /api/regime (NIFTY 50) ----
+  // ---- live /api/regime (NIFTY 50) ----
   const [liveRegime, setLiveRegime] = React.useState(null);
-  const [liveRegimeErr, setLiveRegimeErr] = React.useState(null);
   React.useEffect(() => {
     if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
     let cancelled = false;
@@ -12,11 +11,10 @@ const RegimeScreen = () => {
       try {
         const d = await window.fetchApi('/api/regime?symbol=NIFTY+50&lookback=365');
         if (!cancelled && d && d.ok) setLiveRegime(d);
-      } catch (e) { if (!cancelled) setLiveRegimeErr(e.message); }
+      } catch (e) {}
     })();
     return () => { cancelled = true; };
   }, []);
-
   const regimes = [
     { k: "trending",   label: "Strong uptrend",    prob: 58, color: "var(--up)",   bg: "var(--up-soft)", icon: "↗", desc: "Directional momentum, break-outs, momentum plays" },
     { k: "ranging",    label: "Range-bound",        prob: 22, color: "var(--info)", bg: "var(--info-soft)", icon: "↔", desc: "Mean-reversion, iron condors, range-scalp" },
@@ -63,34 +61,6 @@ const RegimeScreen = () => {
         </div>
       </div>
 
-      {/* LIVE regime classification from /api/regime */}
-      {liveRegime && (
-        <Card style={{ marginBottom: 16, background: "var(--accent-soft, var(--info-soft))" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-            <div style={{ fontSize: 11, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>
-              Live · {liveRegime.symbol}
-            </div>
-            <div style={{ fontSize: 22, fontWeight: 700 }}>{liveRegime.regime.replace(/_/g, " ")}</div>
-            <div className="mono" style={{ fontSize: 14, color: "var(--text-2)" }}>confidence: {(liveRegime.confidence * 100).toFixed(0)}%</div>
-            <div style={{ flex: 1, minWidth: 240, fontSize: 13, color: "var(--text-2)" }}>{liveRegime.reason}</div>
-          </div>
-          <div style={{ display: "flex", gap: 18, marginTop: 12, flexWrap: "wrap", fontSize: 12, color: "var(--text-2)" }}>
-            <div>ADX: <span className="mono" style={{ color: "var(--text-1)" }}>{liveRegime.indicators.adx ?? "—"}</span></div>
-            <div>+DI: <span className="mono" style={{ color: "var(--text-1)" }}>{liveRegime.indicators.plusDi ?? "—"}</span></div>
-            <div>-DI: <span className="mono" style={{ color: "var(--text-1)" }}>{liveRegime.indicators.minusDi ?? "—"}</span></div>
-            <div>ATR%: <span className="mono" style={{ color: "var(--text-1)" }}>{liveRegime.indicators.atrPct ?? "—"}</span></div>
-            <div>close: <span className="mono" style={{ color: "var(--text-1)" }}>{liveRegime.indicators.close ?? "—"}</span></div>
-            <div>SMA50: <span className="mono" style={{ color: "var(--text-1)" }}>{liveRegime.indicators.sma50 ?? "—"}</span></div>
-            <div>SMA200: <span className="mono" style={{ color: "var(--text-1)" }}>{liveRegime.indicators.sma200 ?? "—"}</span></div>
-          </div>
-        </Card>
-      )}
-      {liveRegimeErr && !liveRegime && (
-        <Card style={{ marginBottom: 16, opacity: 0.7 }}>
-          <div style={{ fontSize: 12, color: "var(--text-3)" }}>Live regime fetch failed: {liveRegimeErr}. Showing decorative defaults below.</div>
-        </Card>
-      )}
-
       {/* Current regime headline */}
       <Card>
         <div style={{ display: "flex", gap: 24, alignItems: "center" }}>
@@ -130,40 +100,6 @@ const RegimeScreen = () => {
       {/* Indicator grid */}
       <div style={{ marginTop: 16 }}>
         <Card title="Signal indicators" sub="Market-state inputs to the classifier">
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
-            {indicators.map((ind, i) => {
-              const r = regimes.find(rg => rg.k === ind.kind);
-              return (
-                <div key={i} style={{ padding: 14, border: "1px solid var(--border)", borderRadius: "var(--r-md)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>{ind.n}</div>
-                    <Chip variant={r.k === "trending" ? "up" : r.k === "ranging" ? "info" : r.k === "volatile" ? "warn" : "down"}>{r.k}</Chip>
-                  </div>
-                  <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 6 }}>{ind.v}</div>
-                  <div style={{ fontSize: 11, color: "var(--text-2)", marginTop: 4 }}>{ind.d}</div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-      </div>
-
-      {/* Strategy allocation by regime */}
-      <div style={{ marginTop: 16 }}>
-        <Card title="Strategy allocation by regime" sub="Historical performance when this regime was active">
-          {strategyMap.map((map, i) => {
-            const r = regimes.find(rg => rg.k === map.regime);
-            return (
-              <div key={i} style={{ padding: "14px 0", borderBottom: i < strategyMap.length - 1 ? "1px solid var(--border)" : "none" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                    <div style={{ width: 36, height: 36, borderRadius: 8, background: r.bg, color: r.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 700 }}>{r.icon}</div>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>{r.label}</div>
-                      <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 2 }}>Probability: {r.prob}%</div>
-                    </div>
-                  </div>
-                  {map.regime === primary.k && <Chip variant="up">● Active now</Chip>}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
             {indicators.map((ind, i) => {
               const r = regimes.find(rg => rg.k === ind.kind);
