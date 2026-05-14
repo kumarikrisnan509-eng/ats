@@ -97,6 +97,33 @@ const TunerScreen = () => {
         </button>
       </div>
 
+      {liveTune && (
+        <div className="card" style={{ marginBottom: 16, background: "var(--info-soft, #eff6ff)", padding: 14, borderRadius: 12 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "center" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>Live tune · {liveTune.symbol} {liveTune.strategy}</div>
+            <div className="mono" style={{ fontSize: 13 }}>{liveTune.combinations} combos on {liveTune.candlesUsed} candles</div>
+          </div>
+          {Array.isArray(liveTune.top) && liveTune.top.length > 0 && (
+            <div style={{ marginTop: 12, fontSize: 12 }}>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Top params:</div>
+              {liveTune.top.slice(0, 5).map((r, i) => (
+                <div key={i} className="mono" style={{ padding: "3px 0", display: "flex", gap: 12 }}>
+                  <span style={{ minWidth: 200 }}>{JSON.stringify(r.params)}</span>
+                  <span style={{ color: r.totalPnl >= 0 ? "var(--up)" : "var(--down)" }}>pnl INR {r.totalPnl}</span>
+                  <span>winRate {r.winRate}%</span>
+                  <span>trades {r.trades}</span>
+                  <span>vs B&H INR {r.vsBuyAndHold}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      <div style={{ marginBottom: 12 }}>
+        <button onClick={runLiveTune} disabled={liveTuneBusy} className="btn btn-primary" style={{ fontSize: 12 }}>
+          {liveTuneBusy ? "Running..." : "Run live tune (RELIANCE rsi_mean_revert 27-combo)"}
+        </button>
+      </div>
       {/* Job stats */}
       <div className="grid grid-4" style={{ marginBottom: 16 }}>
         <Stat label="Active jobs"     value="1"    sub="2 queued"/>

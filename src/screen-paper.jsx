@@ -61,6 +61,33 @@ const PaperScreen = () => {
   return (
     <>
       <Wrap>
+      {livePaper && (
+        <div className="card" style={{ marginBottom: 16, background: "var(--info-soft, #eff6ff)", padding: 14, borderRadius: 12 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "center" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>Live paper account</div>
+            <div className="mono" style={{ fontSize: 15, fontWeight: 700 }}>cash INR {Number(livePaper.cash).toLocaleString("en-IN")}</div>
+            <div className="mono" style={{ fontSize: 13 }}>equity INR {Number(livePaper.totalEquity).toLocaleString("en-IN")}</div>
+            <div className="mono" style={{ fontSize: 13, color: livePaper.realizedPnl >= 0 ? "var(--up)" : "var(--down)" }}>realized INR {livePaper.realizedPnl}</div>
+            <div className="mono" style={{ fontSize: 13, color: livePaper.unrealizedPnl >= 0 ? "var(--up)" : "var(--down)" }}>unrealized INR {livePaper.unrealizedPnl}</div>
+            <div className="mono" style={{ fontSize: 13 }}>positions {livePaper.openPositions}</div>
+            <div className="mono" style={{ fontSize: 13 }}>orders {livePaper.filledOrders}/{livePaper.totalOrders}</div>
+            <div className="mono" style={{ fontSize: 13 }}>winRate {livePaper.winRate}%</div>
+          </div>
+          {Array.isArray(livePositions) && livePositions.length > 0 && (
+            <div style={{ marginTop: 12, fontSize: 12 }}>
+              {livePositions.map(p => (
+                <div key={p.symbol} style={{ display: "flex", gap: 16, padding: "4px 0" }}>
+                  <span className="mono" style={{ minWidth: 100, fontWeight: 600 }}>{p.symbol}</span>
+                  <span className="mono">qty={p.qty}</span>
+                  <span className="mono">avg=INR {p.avgPrice}</span>
+                  <span className="mono">ltp=INR {p.ltp != null ? p.ltp : "-"}</span>
+                  <span className="mono" style={{ color: p.unrealizedPnl >= 0 ? "var(--up)" : "var(--down)" }}>unrealized=INR {p.unrealizedPnl}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <div className="page-header">
         <div>
           <h1 className="page-header__title">Paper trading</h1>

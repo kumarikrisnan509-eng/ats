@@ -69,6 +69,39 @@ jobs:
           '
           rm -rf .ci-tmp
 
+      - name: Duplicate top-level const guard (.jsx)
+        run: |
+          set -e
+          # Browser script-tags share a script-level lexical environment.
+          # If two .jsx files both declare `const X = ...` at column 0, the second
+          # throws SyntaxError on page load and silently breaks that screen's
+          # window.* export (see fcefb3b: the Field/SettingsScreen blank-page bug).
+          python3 - <<'PY'
+          import os, re, collections, sys
+          locs = collections.defaultdict(list)
+          for fn in sorted(os.listdir('src')):
+              if not fn.endswith('.jsx'): continue
+              with open('src/' + fn) as f: src = f.read()
+              for m in re.finditer(r'^const ([A-Z][A-Za-z0-9_]*) =', src, flags=re.MULTILINE):
+                  locs[m.group(1)].append(fn)
+          dupes = {k:v for k,v in locs.items() if len(v) > 1}
+          if dupes:
+              for name, files in sorted(dupes.items()):
+                  print(f'!! duplicate top-level const {name!r} -> {files}', file=sys.stderr)
+              print(f'\n{len(dupes)} collision(s) -- rename or scope locally.', file=sys.stderr)
+              sys.exit(1)
+          print('no duplicate top-level const identifiers across .jsx files')
+          PY
+
+      - name: Backend unit tests (Jest)
+        working-directory: deploy/backend
+        run: |
+          if [ -f package.json ] && grep -q '"test"' package.json; then
+            npm test
+          else
+            echo "no test script defined -- skipping"
+          fi
+
       - name: Secret-leak guard
         run: |
           set -e

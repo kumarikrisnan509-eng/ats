@@ -81,6 +81,29 @@ const BenchmarkScreen = () => {
         </div>
       </div>
 
+      {liveBench && (
+        <div className="card" style={{ marginBottom: 16, background: "var(--info-soft, #eff6ff)", padding: 14, borderRadius: 12 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "center" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>Live · {liveBench.symbol} {liveBench.strategy} vs {liveBench.benchmark} (1y)</div>
+            <div className="mono" style={{ fontSize: 14, fontWeight: 700, color: liveBench.vs.alpha >= 0 ? "var(--up)" : "var(--down)" }}>alpha {liveBench.vs.alpha}%</div>
+            <div className="mono" style={{ fontSize: 13 }}>beta {liveBench.vs.beta}</div>
+            <div className="mono" style={{ fontSize: 13 }}>excess return {liveBench.vs.excessReturn}%</div>
+            <div className="mono" style={{ fontSize: 13 }}>excess sharpe {liveBench.vs.excessSharpe}</div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 10, fontSize: 12 }}>
+            <div>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>Strategy</div>
+              <div className="mono">trades {liveBench.strategy_.trades} · winRate {liveBench.strategy_.winRate}%</div>
+              <div className="mono">annual {liveBench.strategy_.annualReturn}% · sharpe {liveBench.strategy_.sharpe}</div>
+            </div>
+            <div>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>Benchmark ({liveBench.benchmark})</div>
+              <div className="mono">annual {liveBench.benchmark_.annualReturn}% · sharpe {liveBench.benchmark_.sharpe}</div>
+              <div className="mono">maxDD {liveBench.benchmark_.maxDrawdownPct}%</div>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Period tabs */}
       <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
         {periods.map(p => (
