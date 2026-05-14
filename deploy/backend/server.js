@@ -1322,6 +1322,123 @@ app.get('/api/margins', async (_req, res) => {
   }
 });
 
+// ---------- Reconciliation ----------
+// GET /api/reconcile -- side-by-side: broker live state vs backend (paper) state.
+// While KILL_SWITCH=true (paper-only mode), the broker side reflects the user's
+// real Kite account (holdings, intraday positions, today's orders, cash). Paper
+// side is the simulator. This surfaces any drift -- useful pre-go-live as a
+// sanity check, and post-go-live to catch silent mismatches between what
+// the backend thinks it placed vs what Kite actually accepted.
+app.get('/api/reconcile', async (_req, res) => {
+  if (!paper) return res.status(503).json({ ok:false, reason:'paper_not_initialized' });
+  const safe = async (fn) => {
+    try { return { ok: true, data: await fn() }; }
+    catch (e) { return { ok: false, error: e.message }; }
+  };
+
+  const [holdingsR, positionsR, ordersR, marginsR] = await Promise.all([
+    safe(() => broker.getHoldings()),
+    safe(() => broker.getPositions()),
+    safe(() => broker.getOrders()),
+    safe(() => broker.getMargins()),
+  ]);
+
+  // ---- Cash drift ----
+  let brokerCash = null;
+  if (marginsR.ok && marginsR.data) {
+    const eq = marginsR.data.equity || {};
+    const av = eq.available || {};
+    brokerCash = typeof av.cash === 'number' ? av.cash
+               : typeof av.live_balance === 'number' ? av.live_balance
+               : typeof eq.net === 'number' ? eq.net
+               : null;
+  }
+  const paperStats = paper.stats();
+
+  // ---- Holdings diff ----
+  // Broker holdings: kc.getHoldings() returns [{ tradingsymbol, quantity, average_price, last_price, ... }]
+  // Paper holdings: derived from paper.positions() (only long net positions matter for compare)
+  const brokerHoldings = holdingsR.ok && Array.isArray(holdingsR.data) ? holdingsR.data : [];
+  const paperPositions = paper.positions();
+  const holdingsBySymbol = new Map();
+  for (const h of brokerHoldings) {
+    const s = (h.tradingsymbol || h.symbol || '').toUpperCase();
+    if (!s) continue;
+    holdingsBySymbol.set(s, {
+      symbol: s,
+      brokerQty: Number(h.quantity || 0),
+      brokerAvg: Number(h.average_price || 0),
+      brokerLtp: Number(h.last_price || 0),
+      paperQty: 0,
+      paperAvg: 0,
+    });
+  }
+  for (const p of paperPositions) {
+    const s = p.symbol.toUpperCase();
+    const cur = holdingsBySymbol.get(s) || { symbol: s, brokerQty: 0, brokerAvg: 0, brokerLtp: p.ltp || 0, paperQty: 0, paperAvg: 0 };
+    cur.paperQty = p.qty;
+    cur.paperAvg = p.avgPrice;
+    holdingsBySymbol.set(s, cur);
+  }
+  const holdingsRows = Array.from(holdingsBySymbol.values()).map(r => ({
+    ...r,
+    qtyDrift: r.brokerQty - r.paperQty,
+    matches: r.brokerQty === r.paperQty,
+  }));
+
+  // ---- Pending-orders diff ----
+  // Backend (paper) pending orders: status=PENDING
+  // Broker pending: status === 'OPEN' or 'TRIGGER PENDING' (Kite values)
+  const allPaperOrders = paper.list();
+  const paperPending = allPaperOrders.filter(o => o.status === 'PENDING');
+  const brokerOrdersAll = ordersR.ok && Array.isArray(ordersR.data) ? ordersR.data : [];
+  const brokerPending = brokerOrdersAll.filter(o => {
+    const s = String(o.status || '').toUpperCase();
+    return s === 'OPEN' || s === 'TRIGGER PENDING' || s === 'PENDING';
+  });
+
+  const summary = {
+    cashDrift:        (brokerCash != null) ? +(brokerCash - paperStats.cash).toFixed(2) : null,
+    holdingsDrifts:   holdingsRows.filter(r => !r.matches).length,
+    paperPendingCnt:  paperPending.length,
+    brokerPendingCnt: brokerPending.length,
+  };
+
+  res.json({
+    ok: true,
+    asOf: new Date().toISOString(),
+    killSwitch: KILL_SWITCH,
+    brokerName: broker.name,
+    brokerConnected: !!(broker.health && broker.health().connected),
+    cash: {
+      paper:    paperStats.cash,
+      broker:   brokerCash,
+      drift:    summary.cashDrift,
+      brokerOk: marginsR.ok,
+      brokerErr: marginsR.ok ? null : marginsR.error,
+    },
+    holdings: {
+      rows:       holdingsRows,
+      brokerOk:   holdingsR.ok,
+      brokerErr:  holdingsR.ok ? null : holdingsR.error,
+    },
+    pendingOrders: {
+      paper:     paperPending,
+      broker:    brokerPending,
+      brokerOk:  ordersR.ok,
+      brokerErr: ordersR.ok ? null : ordersR.error,
+    },
+    paperStats: {
+      totalEquity:   paperStats.totalEquity,
+      realizedPnl:   paperStats.realizedPnl,
+      unrealizedPnl: paperStats.unrealizedPnl,
+      filledOrders:  paperStats.filledOrders,
+      closedTrades:  paperStats.closedTrades,
+    },
+    summary,
+  });
+});
+
 // ---------- Historical OHLCV ----------
 // GET /api/historical?symbol=RELIANCE&interval=5minute&from=2026-05-12&to=2026-05-13
 const HISTORICAL_MAX_DAYS = parseInt(process.env.HISTORICAL_MAX_DAYS || '730', 10); // 2 years
@@ -1687,7 +1804,6 @@ app.post('/api/brokers/disconnect', async (req, res) => {
   res.json({ ok: true });
 });
 
-// 404 for anything else under /api
 app.use('/api', (_req, res) => res.status(404).json({ ok: false, reason: 'not_found' }));
 
 // ---------- HTTP + WebSocket server ----------
