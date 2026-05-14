@@ -11,6 +11,18 @@
 # host-side script (deploy/scripts/auto-login.js) so this image stays small.
 # ----------------------------------------------------------------------
 
+# ---------- 0) frontend transform stage ----------
+# P3 (2026-05-13): pre-transform JSX -> JS with esbuild so the browser does
+# not download Babel (~2MB) or compile in-browser. Same 52 script tags,
+# same load order, same window globals. First paint drops ~3s.
+FROM node:20-alpine AS frontend-build
+WORKDIR /work
+RUN npm init -y >/dev/null && npm install --no-save esbuild@0.21.5
+COPY src/ ./src/
+COPY deploy/build/transform.js ./transform.js
+RUN node transform.js
+RUN test "$(ls out/src/*.js 2>/dev/null | wc -l)" -ge 30 || (echo "transform produced too few files" && exit 1)
+
 # ---------- 1) deps stage ----------
 FROM node:20-alpine AS deps
 WORKDIR /app
@@ -41,10 +53,11 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY deploy/backend/ ./
 
 # Static frontend baked in. Nginx (host or sidecar) reads from here.
+# src/ is the PRE-TRANSFORMED output from the frontend-build stage.
 RUN mkdir -p /app/static
-COPY app.html    /app/static/app.html
-COPY styles.css  /app/static/styles.css
-COPY src/        /app/static/src/
+COPY app.html                              /app/static/app.html
+COPY styles.css                            /app/static/styles.css
+COPY --from=frontend-build /work/out/src/  /app/static/src/
 
 # Tighten permissions: ats owns code; static is world-readable so a sidecar can mount it.
 RUN chown -R ats:ats /app && chmod -R a+rX /app/static

@@ -603,59 +603,59 @@ input, select, textarea { font-family: inherit; color: inherit; }
 
 <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<!-- P3 (2026-05-13): Babel-standalone removed. JSX is pre-transformed to JS at Docker image build time via esbuild. -->
 
-<script type="text/babel" src="src/market-data.jsx"></script>
-<script type="text/babel" src="src/mock-data.jsx"></script>
-<script type="text/babel" src="src/trading-modes.jsx"></script>
-<script type="text/babel" src="src/primitives.jsx"></script>
-<script type="text/babel" src="src/charts.jsx"></script>
-<script type="text/babel" src="src/live-ticks.jsx"></script>
-<script type="text/babel" src="src/modals.jsx"></script>
-<script type="text/babel" src="src/r8-primitives.jsx"></script>
-<script type="text/babel" src="src/r8-ai-assistant.jsx"></script>
-<script type="text/babel" src="src/r9-additions.jsx"></script>
-<script type="text/babel" src="src/shell.jsx"></script>
-<script type="text/babel" src="src/screen-dashboard.jsx"></script>
-<script type="text/babel" src="src/screen-signals.jsx"></script>
-<script type="text/babel" src="src/screen-strategies.jsx"></script>
-<script type="text/babel" src="src/screen-modes.jsx"></script>
-<script type="text/babel" src="src/screen-paper.jsx"></script>
-<script type="text/babel" src="src/screen-backtest.jsx"></script>
-<script type="text/babel" src="src/screen-trading.jsx"></script>
-<script type="text/babel" src="src/screen-audit.jsx"></script>
-<script type="text/babel" src="src/screen-circuits.jsx"></script>
-<script type="text/babel" src="src/screen-abtest.jsx"></script>
-<script type="text/babel" src="src/screen-tuner.jsx"></script>
-<script type="text/babel" src="src/screen-news.jsx"></script>
-<script type="text/babel" src="src/screen-portfolio.jsx"></script>
-<script type="text/babel" src="src/screen-goals.jsx"></script>
-<script type="text/babel" src="src/screen-stp-swp.jsx"></script>
-<script type="text/babel" src="src/screen-smallcase.jsx"></script>
-<script type="text/babel" src="src/screen-fixed-income.jsx"></script>
-<script type="text/babel" src="src/screen-harvest.jsx"></script>
-<script type="text/babel" src="src/screen-copy.jsx"></script>
-<script type="text/babel" src="src/screen-ai-review.jsx"></script>
-<script type="text/babel" src="src/screen-recon.jsx"></script>
-<script type="text/babel" src="src/screen-attribution.jsx"></script>
-<script type="text/babel" src="src/screen-mobile.jsx"></script>
-<script type="text/babel" src="src/screen-tax.jsx"></script>
-<script type="text/babel" src="src/screen-brokers.jsx"></script>
-<script type="text/babel" src="src/screen-risk.jsx"></script>
-<script type="text/babel" src="src/screen-compliance.jsx"></script>
-<script type="text/babel" src="src/screen-infra.jsx"></script>
-<script type="text/babel" src="src/screen-settings.jsx"></script>
-<script type="text/babel" src="src/screen-auth.jsx"></script>
-<script type="text/babel" src="src/screen-onboarding.jsx"></script>
-<script type="text/babel" src="src/screen-profile.jsx"></script>
-<script type="text/babel" src="src/screen-options-builder.jsx"></script>
-<script type="text/babel" src="src/screen-margin.jsx"></script>
-<script type="text/babel" src="src/screen-regime.jsx"></script>
-<script type="text/babel" src="src/screen-alerts-builder.jsx"></script>
-<script type="text/babel" src="src/screen-benchmark.jsx"></script>
-<script type="text/babel" src="src/command-palette.jsx"></script>
-<script type="text/babel" src="src/r10-additions.jsx"></script>
-<script type="text/babel" src="src/r11-additions.jsx"></script>
-<script type="text/babel" src="src/app.jsx"></script>
+<script src="src/market-data.js"></script>
+<script src="src/mock-data.js"></script>
+<script src="src/trading-modes.js"></script>
+<script src="src/primitives.js"></script>
+<script src="src/charts.js"></script>
+<script src="src/live-ticks.js"></script>
+<script src="src/modals.js"></script>
+<script src="src/r8-primitives.js"></script>
+<script src="src/r8-ai-assistant.js"></script>
+<script src="src/r9-additions.js"></script>
+<script src="src/shell.js"></script>
+<script src="src/screen-dashboard.js"></script>
+<script src="src/screen-signals.js"></script>
+<script src="src/screen-strategies.js"></script>
+<script src="src/screen-modes.js"></script>
+<script src="src/screen-paper.js"></script>
+<script src="src/screen-backtest.js"></script>
+<script src="src/screen-trading.js"></script>
+<script src="src/screen-audit.js"></script>
+<script src="src/screen-circuits.js"></script>
+<script src="src/screen-abtest.js"></script>
+<script src="src/screen-tuner.js"></script>
+<script src="src/screen-news.js"></script>
+<script src="src/screen-portfolio.js"></script>
+<script src="src/screen-goals.js"></script>
+<script src="src/screen-stp-swp.js"></script>
+<script src="src/screen-smallcase.js"></script>
+<script src="src/screen-fixed-income.js"></script>
+<script src="src/screen-harvest.js"></script>
+<script src="src/screen-copy.js"></script>
+<script src="src/screen-ai-review.js"></script>
+<script src="src/screen-recon.js"></script>
+<script src="src/screen-attribution.js"></script>
+<script src="src/screen-mobile.js"></script>
+<script src="src/screen-tax.js"></script>
+<script src="src/screen-brokers.js"></script>
+<script src="src/screen-risk.js"></script>
+<script src="src/screen-compliance.js"></script>
+<script src="src/screen-infra.js"></script>
+<script src="src/screen-settings.js"></script>
+<script src="src/screen-auth.js"></script>
+<script src="src/screen-onboarding.js"></script>
+<script src="src/screen-profile.js"></script>
+<script src="src/screen-options-builder.js"></script>
+<script src="src/screen-margin.js"></script>
+<script src="src/screen-regime.js"></script>
+<script src="src/screen-alerts-builder.js"></script>
+<script src="src/screen-benchmark.js"></script>
+<script src="src/command-palette.js"></script>
+<script src="src/r10-additions.js"></script>
+<script src="src/r11-additions.js"></script>
+<script src="src/app.js"></script>
 </body>
 </html>
