@@ -4,36 +4,60 @@
 const AlertsBuilderScreen = () => {
   const [activeTab, setActiveTab] = React.useState("active");
 
-  const activeAlerts = [
-    {
-      id: 1, name: "NIFTY breakout watch", enabled: true,
-      when: [{ src: "NIFTY", op: ">", val: "24,200" }, { src: "Volume (1m)", op: ">", val: "2× avg" }],
-      logic: "AND",
-      then: ["Push notification", "Trigger: Momentum AI strategy on NIFTY"],
-      triggered: 3, lastFired: "2h 14m ago",
-    },
-    {
-      id: 2, name: "Portfolio drawdown guard", enabled: true,
-      when: [{ src: "Portfolio PnL (today)", op: "<", val: "-₹25,000" }],
-      logic: "AND",
-      then: ["SMS + Email", "Freeze new entries for 1h", "Block: all Momentum strategies"],
-      triggered: 0, lastFired: "never",
-    },
-    {
-      id: 3, name: "RELIANCE news spike", enabled: true,
-      when: [{ src: "News sentiment: RELIANCE", op: ">", val: "+0.7" }, { src: "RELIANCE IV", op: ">", val: "+10%" }],
-      logic: "AND",
-      then: ["Push notification", "AI: analyze & suggest trade"],
-      triggered: 1, lastFired: "Apr 22",
-    },
-    {
-      id: 4, name: "VIX spike alert", enabled: false,
-      when: [{ src: "India VIX", op: ">", val: "20" }],
-      logic: "AND",
-      then: ["All channels", "Switch regime to 'High volatility'", "Reduce position sizing by 50%"],
-      triggered: 0, lastFired: "never",
-    },
-  ];
+  // LIVE alerts from /api/alerts. Self-managing: created here -> fires to Telegram on tick.
+  const [activeAlerts, setActiveAlerts] = React.useState([]);
+  const [createErr, setCreateErr]       = React.useState(null);
+  const [newSym, setNewSym]             = React.useState("RELIANCE");
+  const [newCond, setNewCond]           = React.useState("above");
+  const [newThresh, setNewThresh]       = React.useState("");
+  const [newMsg, setNewMsg]             = React.useState("");
+  const [newRepeat, setNewRepeat]       = React.useState(false);
+
+  const refreshAlerts = React.useCallback(async () => {
+    try {
+      const r = await window.fetchApi('/api/alerts');
+      const rows = (r && r.alerts) || [];
+      setActiveAlerts(rows.map((a) => ({
+        id: a.id,
+        name: a.message || `${a.symbol} ${a.condition} ${a.threshold}`,
+        enabled: !a.triggeredAt || !!a.repeat,
+        when: [{ src: a.symbol, op: a.condition === 'above' ? '>=' : '<=', val: String(a.threshold) }],
+        logic: "AND",
+        then: ["Telegram notification" + (a.repeat ? " (repeat)" : "")],
+        triggered: a.triggerCount || 0,
+        lastFired: a.triggeredAt ? new Date(a.triggeredAt).toLocaleString() : "never",
+        lastSeenLtp: a.lastSeenLtp,
+      })));
+    } catch (e) { /* keep last good state */ }
+  }, []);
+
+  React.useEffect(() => {
+    refreshAlerts();
+    const id = setInterval(refreshAlerts, 30000);
+    return () => clearInterval(id);
+  }, [refreshAlerts]);
+
+  window.atsCreateAlert = async () => {
+    setCreateErr(null);
+    try {
+      const res = await fetch('/api/alerts', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol: newSym.trim(), condition: newCond,
+          threshold: parseFloat(newThresh),
+          message: newMsg.trim() || undefined, repeat: !!newRepeat,
+        }),
+      });
+      const j = await res.json();
+      if (!j.ok) throw new Error(j.reason || 'create failed');
+      setNewThresh(''); setNewMsg('');
+      await refreshAlerts();
+    } catch (e) { setCreateErr(e.message); }
+  };
+  window.atsDeleteAlert = async (id) => {
+    try { await fetch('/api/alerts/' + encodeURIComponent(id), { method: 'DELETE', credentials: 'include' }); await refreshAlerts(); } catch {}
+  };
 
   const [builderRules, setBuilderRules] = React.useState([
     { src: "NIFTY", op: ">", val: "24,300" },

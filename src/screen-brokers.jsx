@@ -2,18 +2,61 @@
 /* Brokers screen — broker adapter pattern */
 
 const BrokersScreen = () => {
+  // Live status of the primary broker from /api/health + /api/profile.
+  const [zerodhaState, setZerodhaState] = React.useState({
+    connected: null, since: '--', cap: [], orders: 0, fees: 0, userId: '--', userName: '--',
+  });
+  React.useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const [h, p, ords] = await Promise.all([
+          window.fetchApi('/api/health'),
+          window.fetchApi('/api/profile').catch(() => ({ profile: null })),
+          window.fetchApi('/api/orders').catch(() => ({ rows: [] })),
+        ]);
+        if (cancelled) return;
+        const profile = p && p.profile;
+        setZerodhaState({
+          connected: !!(h && h.broker && h.broker.connected),
+          since: profile && profile.userId ? `userId ${profile.userId}` : 'unknown',
+          cap: (profile && profile.exchanges) || [],
+          orders: (ords && Array.isArray(ords.rows)) ? ords.rows.length : 0,
+          fees: 0, // not exposed by Kite — would require P&L statement
+          userId: (profile && profile.userId) || '--',
+          userName: (profile && profile.userName) || '--',
+          products: (profile && profile.products) || [],
+          subscribedInstruments: (h && h.broker && h.broker.subscribedInstruments) || 0,
+          instrumentsSize: (h && h.broker && h.broker.instruments && h.broker.instruments.size) || 0,
+          lastTickAt: (h && h.broker && h.broker.lastTickAt) || 0,
+          reconnectAttempts: (h && h.broker && h.broker.reconnectAttempts) || 0,
+        });
+      } catch (e) {
+        if (!cancelled) console.warn('[brokers] health/profile fetch failed:', e.message);
+      }
+    };
+    refresh();
+    const id = setInterval(refresh, 15000); // refresh every 15s
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
   const brokers = [
     {
       n: "Zerodha Kite",
-      st: "connected",
-      since: "Jan 14, 2025",
-      cap: ["Equity", "F&O", "MCX", "CDS", "MF"],
-      api: "kiteconnect v3",
-      orders: 2840,
-      fees: 2140,
+      st: zerodhaState.connected === null ? "loading" : (zerodhaState.connected ? "connected" : "disconnected"),
+      since: zerodhaState.since,
+      cap: zerodhaState.cap.length ? zerodhaState.cap : ["Equity", "F&O", "MCX", "CDS", "MF"],
+      api: "kiteconnect v4",
+      orders: zerodhaState.orders,
+      fees: zerodhaState.fees,
       badge: "Primary",
       logoColor: "#387ed1",
       logoLetter: "Z",
+      userName: zerodhaState.userName,
+      userId: zerodhaState.userId,
+      subscribed: zerodhaState.subscribedInstruments,
+      instrumentsSize: zerodhaState.instrumentsSize,
+      reconnectAttempts: zerodhaState.reconnectAttempts,
     },
     { n: "Upstox Pro",      st: "slot", note: "OAuth ready · adapter stub", logoLetter: "U", logoColor: "#a020f0" },
     { n: "ICICI Breeze",    st: "slot", note: "Adapter not implemented",    logoLetter: "I", logoColor: "#e25c2b" },

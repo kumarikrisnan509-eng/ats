@@ -2,20 +2,57 @@
 /* Infrastructure screen — Oracle Cloud Ubuntu Ampere */
 
 const InfraScreen = () => {
+  // Live system info from /api/system/info.
+  const [sysInfo, setSysInfo] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const j = await window.fetchApi('/api/system/info');
+        if (!cancelled) setSysInfo(j);
+      } catch (e) { /* keep previous state */ }
+    };
+    refresh();
+    const id = setInterval(refresh, 10000); // poll every 10s
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
+  const fmtUp = (sec) => {
+    if (!sec || sec < 0) return "--";
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    if (d > 0) return `${d}d ${h}h`;
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m`;
+  };
+
+  // Synthesize a "processes" list from the real running components in the backend.
+  // The Node container is one process; the components inside it (broker/alerts/scanner/watchlist)
+  // are logical subsystems we surface as rows so the UI feels alive.
+  const uptime = sysInfo && sysInfo.process ? sysInfo.process.uptimeSec : 0;
+  const broker = sysInfo && sysInfo.broker;
+  const cmp = (sysInfo && sysInfo.components) || {};
+  const memMB = sysInfo && sysInfo.process ? sysInfo.process.memMB : 0;
   const processes = [
-    { n: "trading-engine",   pid: 14221, cpu: 12.4, mem: 1840, up: "5d 14h", st: "running", modes: ["intraday","swing","options","futures"] },
-    { n: "signal-worker",    pid: 14289, cpu: 8.1,  mem: 920,  up: "5d 14h", st: "running", modes: ["intraday","swing","options","futures"] },
-    { n: "ai-router",        pid: 14301, cpu: 4.2,  mem: 640,  up: "5d 14h", st: "running", modes: ["intraday","swing","options","futures"] },
-    { n: "broker-zerodha",   pid: 14312, cpu: 2.1,  mem: 320,  up: "5d 14h", st: "running", modes: ["intraday","swing","options","futures"] },
-    { n: "risk-monitor",     pid: 14340, cpu: 1.4,  mem: 220,  up: "5d 14h", st: "running", modes: ["intraday","swing","options","futures"] },
-    { n: "options-engine",   pid: 14355, cpu: 3.6,  mem: 480,  up: "5d 14h", st: "running", modes: ["options"] },
-    { n: "futures-rollover", pid: 14360, cpu: 0.2,  mem:  80,  up: "5d 14h", st: "running", modes: ["futures"] },
-    { n: "swing-scanner",    pid: 14362, cpu: 1.1,  mem: 240,  up: "5d 14h", st: "running", modes: ["swing"] },
-    { n: "webhooks",         pid: 14402, cpu: 0.8,  mem: 180,  up: "5d 14h", st: "running", modes: [] },
-    { n: "postgres",         pid: 1221,  cpu: 3.2,  mem: 2840, up: "42d",    st: "running", modes: [] },
-    { n: "redis",            pid: 1482,  cpu: 0.4,  mem: 140,  up: "42d",    st: "running", modes: [] },
-    { n: "nginx",            pid: 1120,  cpu: 0.2,  mem: 48,   up: "42d",    st: "running", modes: [] },
-    { n: "backtest-runner",  pid: 18922, cpu: 0,    mem: 0,    up: "—",      st: "stopped", modes: [] },
+    { n: "ats-backend (node)", pid: sysInfo && sysInfo.process ? sysInfo.process.pid : "--", cpu: "n/a", mem: memMB,
+      up: fmtUp(uptime), st: "running", modes: ["intraday","swing","options","futures"] },
+    { n: "broker (" + (broker ? broker.name : "unknown") + ")", pid: "--", cpu: broker && broker.connected ? "live" : "stale",
+      mem: broker && broker.instruments ? Math.round(broker.instruments.size / 1000) + "k instr" : "--",
+      up: fmtUp(uptime), st: broker && broker.connected ? "running" : "disconnected", modes: ["intraday","swing","options","futures"] },
+    { n: "alerts evaluator", pid: "--", cpu: cmp.alerts ? (cmp.alerts.evals || 0) + " evals" : "--",
+      mem: cmp.alerts ? cmp.alerts.total + " active" : "--",
+      up: fmtUp(uptime), st: cmp.alerts ? "running" : "stopped", modes: [] },
+    { n: "scanner", pid: "--", cpu: cmp.scanner && cmp.scanner.lastRun ? "scanned " + cmp.scanner.lastRun.scanned : "--",
+      mem: cmp.scanner ? cmp.scanner.historyCount + " signals" : "--",
+      up: fmtUp(uptime), st: cmp.scanner ? "running" : "stopped", modes: [] },
+    { n: "watchlist", pid: "--", cpu: "--",
+      mem: cmp.watchlist ? cmp.watchlist.count + " symbols" : "--",
+      up: fmtUp(uptime), st: cmp.watchlist ? "running" : "stopped", modes: [] },
+    { n: "nginx (host)", pid: "--", cpu: "n/a", mem: "n/a", up: "host", st: "running", modes: [] },
+    { n: "audit log", pid: "--", cpu: sysInfo && sysInfo.auditLog ? "seq " + sysInfo.auditLog.seq : "--",
+      mem: sysInfo && sysInfo.auditLog ? Math.round((sysInfo.auditLog.sizeBytes || 0) / 1024) + " KB" : "--",
+      up: "host", st: "running", modes: [] },
   ];
 
   return (

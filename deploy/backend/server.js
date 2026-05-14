@@ -191,6 +191,45 @@ app.get('/api/summary', async (_req, res) => {
   });
 });
 
+// ---------- System info (ops dashboard aggregator) ----------
+// One call returns everything an "Infrastructure" panel needs.
+app.get('/api/system/info', (_req, res) => {
+  const fs = require('fs');
+  let auditSize = 0, auditLastTs = null;
+  try {
+    if (fs.existsSync(AUDIT_LOG)) {
+      const stat = fs.statSync(AUDIT_LOG);
+      auditSize = stat.size;
+      auditLastTs = new Date(stat.mtimeMs).toISOString();
+    }
+  } catch {}
+
+  res.json({
+    ok: true,
+    time: new Date().toISOString(),
+    env: ENV_NAME,
+    killSwitch: KILL_SWITCH,
+    process: {
+      uptimeSec: Math.floor(process.uptime()),
+      nodeVersion: process.version,
+      memMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
+      pid: process.pid,
+    },
+    broker: broker.health(),
+    components: {
+      alerts:    alerts    ? alerts.stats()    : null,
+      watchlist: watchlist ? watchlist.stats() : null,
+      scanner:   scanner   ? scanner.stats()   : null,
+    },
+    auditLog: { path: AUDIT_LOG, sizeBytes: auditSize, lastWriteTs: auditLastTs, seq: auditSeq },
+    config: {
+      maxWsClients: MAX_WS_CLIENTS,
+      defaultSymbols: DEFAULT_SYMBOLS,
+      brokerName: broker.name,
+    },
+  });
+});
+
 // Health
 app.get('/api/health', (_req, res) => {
   res.json({
