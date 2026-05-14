@@ -79,6 +79,22 @@ async function captureFailure(page, ts, label) {
   const ts = Date.now();
   console.log(`[${startedAt.toISOString()}] auto-login-host: starting`);
 
+  // 0. Self-guard: skip if broker is already connected. Avoids the "Token is invalid or
+  //    has expired" error that Kite returns when generateSession is called against an
+  //    account that already has an active session (one-session-per-api-key rule).
+  try {
+    const healthResp = await httpRequest({
+      method: 'GET',
+      url: 'http://127.0.0.1:8080/api/health',
+    });
+    if (healthResp.status === 200 && healthResp.body && healthResp.body.broker && healthResp.body.broker.connected) {
+      console.log('  broker already connected; skipping auto-login (Kite allows one session per api_key)');
+      process.exit(0);
+    }
+  } catch (_e) {
+    console.log('  health check failed; proceeding with login anyway');
+  }
+
   // 1. Get bundle
   const bundleResp = await httpRequest({
     method: 'GET',

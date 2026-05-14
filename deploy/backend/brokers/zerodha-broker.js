@@ -135,6 +135,17 @@ class ZerodhaBroker extends BrokerGateway {
       access_token: this.accessToken,
     });
 
+    // Configure KiteTicker's built-in reconnect: bounded retries, max 60s between attempts.
+    // Prevents the runaway reconnect storm that gets us rate-limited by Kite (see Task #60).
+    // Library API: autoReconnect(enable, max_retry=50, max_delay=60).
+    try {
+      if (typeof this.ticker.autoReconnect === 'function') {
+        this.ticker.autoReconnect(true, 20, 60);
+      }
+    } catch (e) {
+      console.warn('[zerodha] autoReconnect config failed:', e && e.message);
+    }
+
     this.ticker.on('connect', () => {
       this._connected = true;
       this._reconnectAttempts = 0;
@@ -152,6 +163,17 @@ class ZerodhaBroker extends BrokerGateway {
 
     this.ticker.on('reconnect', (_err, attempts) => {
       this._reconnectAttempts = attempts;
+      // Log every 5 attempts so it's visible in audit/journald.
+      if (attempts > 0 && attempts % 5 === 0) {
+        console.warn(`[zerodha] ticker reconnect attempt ${attempts}`);
+      }
+    });
+
+    // When KiteTicker gives up after max retries it emits 'noreconnect'.
+    // Surface this clearly; subsequent setAccessToken() will reset.
+    this.ticker.on('noreconnect', () => {
+      console.error('[zerodha] ticker exhausted reconnect attempts; standing down to avoid Kite rate-limit. Run auto-login to refresh.');
+      this._connected = false;
     });
 
     this.ticker.on('ticks', (ticks) => {
