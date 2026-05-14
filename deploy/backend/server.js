@@ -137,6 +137,88 @@ app.use((req, _res, next) => {
   next();
 });
 
+// ---------- Rate limit (per-IP, in-memory, /api/* only) ----------
+// Loopback + Docker private networks are whitelisted (internal auto-login flows).
+const RATE_WINDOW_MS = parseInt(process.env.RATE_WINDOW_MS || '60000', 10); // 1 minute
+const RATE_MAX       = parseInt(process.env.RATE_LIMIT     || '300',   10); // requests / window / IP
+const _rateBuckets   = new Map();
+
+function isInternalIp(ra) {
+  ra = (ra || '').replace('::ffff:', '');
+  if (ra === '127.0.0.1' || ra === '::1') return true;
+  return /^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)/.test(ra);
+}
+
+app.use('/api', (req, res, next) => {
+  const ra = (req.ip || req.connection.remoteAddress || '').replace('::ffff:', '');
+  if (isInternalIp(ra)) return next(); // never throttle internal callers
+  const now = Date.now();
+  let b = _rateBuckets.get(ra);
+  if (!b || b.resetAt < now) {
+    b = { count: 0, resetAt: now + RATE_WINDOW_MS };
+    _rateBuckets.set(ra, b);
+  }
+  b.count++;
+  // Soft GC: if map gets huge, prune expired buckets.
+  if (_rateBuckets.size > 5000) {
+    for (const [k, v] of _rateBuckets) if (v.resetAt < now) _rateBuckets.delete(k);
+  }
+  if (b.count > RATE_MAX) {
+    res.setHeader('Retry-After', Math.max(1, Math.ceil((b.resetAt - now) / 1000)));
+    res.setHeader('X-RateLimit-Limit', String(RATE_MAX));
+    res.setHeader('X-RateLimit-Window', String(Math.floor(RATE_WINDOW_MS / 1000)));
+    audit('api.rateLimit', { ip: ra, count: b.count, path: req.path });
+    return res.status(429).json({ ok: false, reason: 'rate_limit', retryAfterSec: Math.ceil((b.resetAt - now) / 1000) });
+  }
+  next();
+});
+
+// ---------- Optional bearer-token auth (env-gated) ----------
+// If ATS_OPS_KEY is set in /etc/ats/backend.env, the following routes require
+// Authorization: Bearer <ATS_OPS_KEY>. Internal IPs are exempt (auto-login flows).
+//
+// Protected:
+//   - GET  /api/audit          (operational event log)
+//   - any POST/PUT/DELETE on /api/*  (mutations: alerts CRUD, watchlist mutations,
+//     order place, scanner trigger, backtest endpoints)
+// Public:
+//   - GETs on health/quotes/symbols/historical/etc (already public, market data)
+const ATS_OPS_KEY = process.env.ATS_OPS_KEY || '';
+const AUTH_REQUIRED = !!ATS_OPS_KEY;
+
+function authMiddleware(req, res, next) {
+  if (!AUTH_REQUIRED) return next(); // dev / opt-out mode
+  const ra = (req.ip || req.connection.remoteAddress || '').replace('::ffff:', '');
+  if (isInternalIp(ra)) return next();  // internal callers always allowed
+  const h = req.headers['authorization'] || '';
+  if (!h.startsWith('Bearer ')) {
+    res.setHeader('WWW-Authenticate', 'Bearer realm="ats"');
+    return res.status(401).json({ ok: false, reason: 'missing_bearer' });
+  }
+  const token = h.slice(7).trim();
+  if (token !== ATS_OPS_KEY) {
+    audit('api.auth.fail', { ip: ra, path: req.path });
+    return res.status(403).json({ ok: false, reason: 'invalid_token' });
+  }
+  next();
+}
+
+// Apply: gate all mutating methods + /api/audit
+app.use('/api', (req, res, next) => {
+  if (req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE' || req.method === 'PATCH') {
+    return authMiddleware(req, res, next);
+  }
+  if (req.path === '/audit' || req.path.startsWith('/audit?')) {
+    return authMiddleware(req, res, next);
+  }
+  next();
+});
+
+// Tell clients whether auth is enabled (frontend uses this to know if Bearer needed).
+app.get('/api/auth-mode', (_req, res) => {
+  res.json({ ok: true, authRequired: AUTH_REQUIRED });
+});
+
 // ---------- Dashboard summary ----------
 // One call returns everything the cockpit's home view needs.
 // Failures of any single broker call degrade gracefully — partial responses
@@ -575,12 +657,24 @@ app.get('/api/strategies', (_req, res) => {
 
 // ---------- Backtest ----------
 // POST /api/backtest  body: { symbol, strategy, from, to, qty?, params? }
+const BACKTEST_MAX_DAYS = parseInt(process.env.BACKTEST_MAX_DAYS || '1825', 10); // 5 years
 app.post('/api/backtest', async (req, res) => {
   try {
     const { symbol, strategy, from, to, qty, params, interval } = req.body || {};
     if (!symbol)   return res.status(400).json({ ok:false, reason:'symbol required' });
-    if (!strategy) return res.status(400).json({ ok:false, reason:'strategy required (rsi_mean_revert | ema_cross)' });
+    if (!strategy) return res.status(400).json({ ok:false, reason:'strategy required (rsi_mean_revert | ema_cross | macd_cross | bollinger)' });
     if (!from || !to) return res.status(400).json({ ok:false, reason:'from and to required (YYYY-MM-DD)' });
+    // Bound date range.
+    const dFrom = new Date(String(from));
+    const dTo   = new Date(String(to));
+    if (!isFinite(dFrom.getTime()) || !isFinite(dTo.getTime())) {
+      return res.status(400).json({ ok: false, reason: 'from/to must be valid dates' });
+    }
+    const days = Math.floor((dTo.getTime() - dFrom.getTime()) / (86400 * 1000));
+    if (days < 0) return res.status(400).json({ ok: false, reason: 'to must be after from' });
+    if (days > BACKTEST_MAX_DAYS) {
+      return res.status(400).json({ ok: false, reason: `range too wide: ${days}d > ${BACKTEST_MAX_DAYS}d max (set BACKTEST_MAX_DAYS env to override)` });
+    }
 
     const candles = await broker.getHistorical({
       symbol, interval: interval || 'day', from, to,
@@ -787,11 +881,23 @@ app.get('/api/margins', async (_req, res) => {
 
 // ---------- Historical OHLCV ----------
 // GET /api/historical?symbol=RELIANCE&interval=5minute&from=2026-05-12&to=2026-05-13
+const HISTORICAL_MAX_DAYS = parseInt(process.env.HISTORICAL_MAX_DAYS || '730', 10); // 2 years
 app.get('/api/historical', async (req, res) => {
   try {
     const { symbol, interval, from, to, continuous, oi } = req.query;
     if (!symbol || !interval || !from || !to) {
       return res.status(400).json({ ok: false, reason: 'symbol, interval, from, to are required' });
+    }
+    // Bound the date range to avoid Kite rate-limit storms.
+    const dFrom = new Date(String(from));
+    const dTo   = new Date(String(to));
+    if (!isFinite(dFrom.getTime()) || !isFinite(dTo.getTime())) {
+      return res.status(400).json({ ok: false, reason: 'from/to must be valid dates' });
+    }
+    const days = Math.floor((dTo.getTime() - dFrom.getTime()) / (86400 * 1000));
+    if (days < 0) return res.status(400).json({ ok: false, reason: 'to must be after from' });
+    if (days > HISTORICAL_MAX_DAYS) {
+      return res.status(400).json({ ok: false, reason: `range too wide: ${days}d > ${HISTORICAL_MAX_DAYS}d max` });
     }
     const candles = await broker.getHistorical({
       symbol: String(symbol),
