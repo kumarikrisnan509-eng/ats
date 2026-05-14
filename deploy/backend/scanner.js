@@ -366,4 +366,133 @@ function bollinger(closes, period = 20, k = 2) {
   return { middle, upper, lower };
 }
 
-module.exports = { Scanner, rsi, ema, sma, stddev, macd, bollinger };
+
+function atr(candles, period) {
+  period = period || 14;
+  const out = new Array(candles.length).fill(NaN);
+  if (candles.length <= period) return out;
+  const tr = new Array(candles.length).fill(NaN);
+  tr[0] = candles[0].high - candles[0].low;
+  for (let i = 1; i < candles.length; i++) {
+    const h = candles[i].high, l = candles[i].low, pc = candles[i - 1].close;
+    tr[i] = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
+  }
+  let s = 0;
+  for (let i = 0; i < period; i++) s += tr[i];
+  out[period - 1] = s / period;
+  for (let i = period; i < candles.length; i++) {
+    out[i] = (out[i - 1] * (period - 1) + tr[i]) / period;
+  }
+  return out;
+}
+
+function adx(candles, period) {
+  period = period || 14;
+  const n = candles.length;
+  const adxArr = new Array(n).fill(NaN);
+  const plusDi = new Array(n).fill(NaN);
+  const minusDi = new Array(n).fill(NaN);
+  if (n < period * 2) return { adx: adxArr, plusDi, minusDi };
+  const tr = new Array(n).fill(0);
+  const pDm = new Array(n).fill(0);
+  const mDm = new Array(n).fill(0);
+  for (let i = 1; i < n; i++) {
+    const h = candles[i].high, l = candles[i].low;
+    const hp = candles[i - 1].high, lp = candles[i - 1].low, cp = candles[i - 1].close;
+    tr[i] = Math.max(h - l, Math.abs(h - cp), Math.abs(l - cp));
+    const upMove = h - hp, dnMove = lp - l;
+    pDm[i] = (upMove > dnMove && upMove > 0) ? upMove : 0;
+    mDm[i] = (dnMove > upMove && dnMove > 0) ? dnMove : 0;
+  }
+  let trSum = 0, pSum = 0, mSum = 0;
+  for (let i = 1; i <= period; i++) { trSum += tr[i]; pSum += pDm[i]; mSum += mDm[i]; }
+  let pDI = (pSum / Math.max(1e-9, trSum)) * 100;
+  let mDI = (mSum / Math.max(1e-9, trSum)) * 100;
+  plusDi[period] = pDI;
+  minusDi[period] = mDI;
+  const dxArr = new Array(n).fill(NaN);
+  dxArr[period] = (Math.abs(pDI - mDI) / Math.max(1e-9, pDI + mDI)) * 100;
+  for (let i = period + 1; i < n; i++) {
+    trSum = trSum - trSum / period + tr[i];
+    pSum  = pSum  - pSum  / period + pDm[i];
+    mSum  = mSum  - mSum  / period + mDm[i];
+    pDI = (pSum / Math.max(1e-9, trSum)) * 100;
+    mDI = (mSum / Math.max(1e-9, trSum)) * 100;
+    plusDi[i] = pDI;
+    minusDi[i] = mDI;
+    dxArr[i] = (Math.abs(pDI - mDI) / Math.max(1e-9, pDI + mDI)) * 100;
+  }
+  const firstDxIdx = period;
+  if (n > firstDxIdx + period) {
+    let seed = 0;
+    for (let i = firstDxIdx; i < firstDxIdx + period; i++) seed += dxArr[i];
+    adxArr[firstDxIdx + period - 1] = seed / period;
+    for (let i = firstDxIdx + period; i < n; i++) {
+      adxArr[i] = (adxArr[i - 1] * (period - 1) + dxArr[i]) / period;
+    }
+  }
+  return { adx: adxArr, plusDi, minusDi };
+}
+
+function classifyRegime(candles) {
+  if (!Array.isArray(candles) || candles.length < 50) {
+    return { regime: 'unknown', confidence: 0, reason: 'need >= 50 candles', indicators: {} };
+  }
+  const closes = candles.map(c => c.close);
+  const last = closes[closes.length - 1];
+  const a = atr(candles, 14);
+  const adxRes = adx(candles, 14);
+  const sma50  = sma(closes, 50);
+  const sma200 = candles.length >= 200 ? sma(closes, 200) : new Array(candles.length).fill(NaN);
+  const atrLast = a[a.length - 1];
+  const atrPct = Number.isFinite(atrLast) ? (atrLast / last) * 100 : NaN;
+  const adxLast    = adxRes.adx[adxRes.adx.length - 1];
+  const plusLast   = adxRes.plusDi[adxRes.plusDi.length - 1];
+  const minusLast  = adxRes.minusDi[adxRes.minusDi.length - 1];
+  const sma50Last  = sma50[sma50.length - 1];
+  const sma200Last = sma200[sma200.length - 1];
+
+  const indicators = {
+    close:  +last.toFixed(2),
+    adx:        Number.isFinite(adxLast)    ? +adxLast.toFixed(2)    : null,
+    plusDi:     Number.isFinite(plusLast)   ? +plusLast.toFixed(2)   : null,
+    minusDi:    Number.isFinite(minusLast)  ? +minusLast.toFixed(2)  : null,
+    sma50:      Number.isFinite(sma50Last)  ? +sma50Last.toFixed(2)  : null,
+    sma200:     Number.isFinite(sma200Last) ? +sma200Last.toFixed(2) : null,
+    atr:        Number.isFinite(atrLast)    ? +atrLast.toFixed(2)    : null,
+    atrPct:     Number.isFinite(atrPct)     ? +atrPct.toFixed(2)     : null,
+  };
+
+  let regime = 'range', confidence = 0.3, reason = 'default';
+  if (Number.isFinite(atrPct) && atrPct > 3.5) {
+    regime = 'high_vol';
+    confidence = Math.min(1, (atrPct - 3.5) / 3.5 + 0.5);
+    reason = 'ATR% ' + indicators.atrPct + ' > 3.5 (high volatility)';
+  } else if (Number.isFinite(adxLast) && adxLast > 25 && Number.isFinite(plusLast) && Number.isFinite(minusLast)) {
+    if (plusLast > minusLast && (!Number.isFinite(sma200Last) || last > sma200Last)) {
+      regime = 'trending_up';
+      confidence = Math.min(1, (adxLast - 25) / 25 + 0.5);
+      reason = 'ADX ' + indicators.adx + ' > 25, +DI > -DI' + (Number.isFinite(sma200Last) ? ', close > SMA200' : '');
+    } else if (minusLast > plusLast && (!Number.isFinite(sma200Last) || last < sma200Last)) {
+      regime = 'trending_down';
+      confidence = Math.min(1, (adxLast - 25) / 25 + 0.5);
+      reason = 'ADX ' + indicators.adx + ' > 25, -DI > +DI' + (Number.isFinite(sma200Last) ? ', close < SMA200' : '');
+    } else {
+      regime = 'range';
+      confidence = 0.4;
+      reason = 'ADX trending but DI/SMA200 disagree';
+    }
+  } else if (Number.isFinite(adxLast) && adxLast < 20) {
+    regime = 'range';
+    confidence = Math.min(1, (20 - adxLast) / 20 + 0.4);
+    reason = 'ADX ' + indicators.adx + ' < 20 (no clear trend)';
+  } else if (Number.isFinite(atrPct) && atrPct < 0.8) {
+    regime = 'low_vol';
+    confidence = Math.min(1, (0.8 - atrPct) / 0.8 + 0.4);
+    reason = 'ATR% ' + indicators.atrPct + ' < 0.8 (compressed)';
+  }
+
+  return { regime, confidence: +confidence.toFixed(2), reason, indicators };
+}
+
+module.exports = { Scanner, rsi, ema, sma, stddev, macd, bollinger, atr, adx, classifyRegime };

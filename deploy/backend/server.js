@@ -25,7 +25,7 @@ const { LoginVault }   = require('./login-vault');
 const { notify }       = require('./notify');
 const { Alerts }       = require('./alerts');
 const { Watchlist }    = require('./watchlist');
-const { Scanner }      = require('./scanner');
+const { Scanner, classifyRegime } = require('./scanner');
 const { runBacktest }  = require('./backtest');
 const { PaperTrading } = require('./paper');
 
@@ -935,6 +935,174 @@ app.post('/api/tune', async (req, res) => {
       combinations: combos.length,
       top: results.slice(0, top),
       worst: results.slice(-3).reverse(),
+    });
+  } catch (e) {
+    res.status(500).json({ ok:false, reason: e.message });
+  }
+});
+
+// GET /api/regime?symbol=NIFTY+50&interval=day&lookback=365
+// Classifies current market state into one of:
+//   trending_up | trending_down | range | high_vol | low_vol
+// Uses ATR (volatility), ADX (trend strength), SMA50/200 (trend direction).
+app.get('/api/regime', async (req, res) => {
+  try {
+    const symbol = req.query.symbol || 'NIFTY 50';
+    const interval = req.query.interval || 'day';
+    const lookback = Math.max(60, Math.min(800, parseInt(req.query.lookback || '365', 10) || 365));
+    const to = new Date();
+    const from = new Date(to.getTime() - lookback * 86400000);
+    const fromStr = from.toISOString().slice(0, 10);
+    const toStr   = to.toISOString().slice(0, 10);
+
+    const candles = await broker.getHistorical({ symbol, interval, from: fromStr, to: toStr });
+    if (!Array.isArray(candles) || candles.length < 50) {
+      return res.status(400).json({ ok:false, reason:`need >= 50 candles, got ${candles ? candles.length : 0}` });
+    }
+    const r = classifyRegime(candles);
+    res.json({
+      ok: true,
+      symbol, interval, from: fromStr, to: toStr,
+      candles: candles.length,
+      ...r,
+      asOf: candles[candles.length - 1].date,
+    });
+  } catch (e) {
+    res.status(500).json({ ok:false, reason: e.message });
+  }
+});
+
+// GET /api/benchmark?strategy=rsi_mean_revert&symbol=RELIANCE&from=...&to=...&qty=10&benchmark=NIFTY+50
+// Runs the strategy backtest, then fetches benchmark over the SAME window,
+// computes daily returns for both, then reports alpha + beta + Sharpe + vs-benchmark drawdown.
+app.get('/api/benchmark', async (req, res) => {
+  try {
+    const symbol    = req.query.symbol;
+    const strategy  = req.query.strategy;
+    const from      = req.query.from;
+    const to        = req.query.to;
+    const qty       = parseInt(req.query.qty || '1', 10) || 1;
+    const benchmark = req.query.benchmark || 'NIFTY 50';
+    const interval  = req.query.interval  || 'day';
+    if (!symbol)   return res.status(400).json({ ok:false, reason:'symbol required' });
+    if (!strategy) return res.status(400).json({ ok:false, reason:'strategy required' });
+    if (!from || !to) return res.status(400).json({ ok:false, reason:'from and to required' });
+
+    // Parse strategy params from query (e.g. ?period=14&entryRsi=30)
+    const params = {};
+    for (const k of ['period','entryRsi','exitRsi','fast','slow','signal','k']) {
+      if (req.query[k] != null) params[k] = Number(req.query[k]);
+    }
+
+    // Fetch both series in parallel
+    const [stratCandles, benchCandles] = await Promise.all([
+      broker.getHistorical({ symbol,    interval, from, to }),
+      broker.getHistorical({ symbol: benchmark, interval, from, to }),
+    ]);
+    if (!Array.isArray(stratCandles) || stratCandles.length < 30) {
+      return res.status(400).json({ ok:false, reason:`strategy symbol needs >= 30 candles, got ${stratCandles ? stratCandles.length : 0}` });
+    }
+    if (!Array.isArray(benchCandles) || benchCandles.length < 30) {
+      return res.status(400).json({ ok:false, reason:`benchmark symbol needs >= 30 candles, got ${benchCandles ? benchCandles.length : 0}` });
+    }
+
+    // Run strategy
+    const bt = runBacktest({ candles: stratCandles, strategy, params, qty });
+
+    // Align equity curve to benchmark by date
+    const benchByDate = new Map();
+    for (const c of benchCandles) benchByDate.set(c.date.slice(0, 10), c.close);
+
+    // Strategy equity / benchmark close per shared date
+    const aligned = [];
+    for (const e of bt.equity) {
+      const d = e.date.slice(0, 10);
+      if (benchByDate.has(d)) aligned.push({ date: d, eq: e.equity, bench: benchByDate.get(d) });
+    }
+    if (aligned.length < 30) {
+      return res.status(400).json({ ok:false, reason:`only ${aligned.length} aligned bars between symbol and benchmark` });
+    }
+
+    // Convert strategy equity into total-return basis:
+    //   strategy starts at notional = entryPrice * qty (so its % return is comparable to buy-and-hold).
+    const notional = stratCandles[0].close * qty;
+    const stratRet = []; // daily simple returns
+    const benchRet = [];
+    let prevS = notional + aligned[0].eq;
+    let prevB = aligned[0].bench;
+    for (let i = 1; i < aligned.length; i++) {
+      const sNow = notional + aligned[i].eq;
+      const bNow = aligned[i].bench;
+      stratRet.push((sNow - prevS) / prevS);
+      benchRet.push((bNow - prevB) / prevB);
+      prevS = sNow;
+      prevB = bNow;
+    }
+    const n = stratRet.length;
+    const mean = a => a.reduce((s,x)=>s+x,0) / a.length;
+    const std  = (a, m) => Math.sqrt(a.reduce((s,x)=>s+(x-m)*(x-m),0) / a.length);
+    const cov  = (a, b, ma, mb) => {
+      let s = 0; for (let i = 0; i < a.length; i++) s += (a[i]-ma)*(b[i]-mb);
+      return s / a.length;
+    };
+    const mS = mean(stratRet), mB = mean(benchRet);
+    const sS = std(stratRet, mS), sB = std(benchRet, mB);
+    const c  = cov(stratRet, benchRet, mS, mB);
+    const beta  = sB === 0 ? 0 : c / (sB * sB);
+    // Annualized using 252 trading days
+    const annStratRet = (1 + mS) ** 252 - 1;
+    const annBenchRet = (1 + mB) ** 252 - 1;
+    const alpha       = annStratRet - beta * annBenchRet;
+    // Annualized Sharpe (assume rf = 0)
+    const sharpe      = sS === 0 ? 0 : (mS / sS) * Math.sqrt(252);
+    const benchSharpe = sB === 0 ? 0 : (mB / sB) * Math.sqrt(252);
+    // Annualized volatility
+    const annVol = sS * Math.sqrt(252);
+    const benchAnnVol = sB * Math.sqrt(252);
+    // Max drawdown on strategy equity curve (reuse bt.equity values)
+    // bt.stats.maxDrawdown is in absolute units; keep that, plus compute benchmark max drawdown
+    let bPeak = -Infinity, bMaxDd = 0, bMaxDdPct = 0;
+    for (const a of aligned) {
+      if (a.bench > bPeak) bPeak = a.bench;
+      const dd = bPeak - a.bench;
+      if (dd > bMaxDd) {
+        bMaxDd = dd;
+        bMaxDdPct = bPeak !== 0 ? dd / bPeak * 100 : 0;
+      }
+    }
+    // Correlation
+    const corr = (sS === 0 || sB === 0) ? 0 : c / (sS * sB);
+
+    res.json({
+      ok: true,
+      symbol, strategy, benchmark, from, to,
+      candlesUsed: stratCandles.length,
+      benchmarkCandles: benchCandles.length,
+      alignedBars: aligned.length,
+      strategy_: {
+        trades:         bt.stats.trades,
+        winRate:        bt.stats.winRate,
+        totalPnl:       bt.stats.totalPnl,
+        annualReturn:   +(annStratRet * 100).toFixed(2),
+        annualVol:      +(annVol * 100).toFixed(2),
+        sharpe:         +sharpe.toFixed(2),
+        maxDrawdown:    bt.stats.maxDrawdown,
+        maxDrawdownPct: bt.stats.maxDrawdownPct,
+      },
+      benchmark_: {
+        annualReturn:   +(annBenchRet * 100).toFixed(2),
+        annualVol:      +(benchAnnVol * 100).toFixed(2),
+        sharpe:         +benchSharpe.toFixed(2),
+        maxDrawdown:    +bMaxDd.toFixed(2),
+        maxDrawdownPct: +bMaxDdPct.toFixed(2),
+      },
+      vs: {
+        alpha:          +(alpha * 100).toFixed(2),    // % annualized
+        beta:           +beta.toFixed(3),
+        correlation:    +corr.toFixed(3),
+        excessSharpe:   +(sharpe - benchSharpe).toFixed(2),
+        excessReturn:   +((annStratRet - annBenchRet) * 100).toFixed(2),
+      },
     });
   } catch (e) {
     res.status(500).json({ ok:false, reason: e.message });
