@@ -4,6 +4,19 @@
    Reuters India, Bloomberg Quint, social: StockTwits/Twitter (rate-limited). */
 
 const NewsScreen = () => {
+  // ---- live /api/news ----
+  const [liveNews, setLiveNews] = React.useState(null);
+  React.useEffect(() => {
+    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const d = await window.fetchApi('/api/news?limit=15');
+        if (!cancelled && d && d.ok) setLiveNews(d);
+      } catch (e) {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
   const [filter, setFilter] = React.useState("all");
   const [selectedSym, setSelectedSym] = React.useState(null);
 

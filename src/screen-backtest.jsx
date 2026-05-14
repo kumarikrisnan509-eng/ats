@@ -2,6 +2,34 @@
 /* Backtest screen — walk-forward, out-of-sample */
 
 const BacktestScreen = () => {
+  // ---- live /api/strategies + on-demand /api/backtest ----
+  const [liveStrats, setLiveStrats] = React.useState(null);
+  const [liveBacktest, setLiveBacktest] = React.useState(null);
+  const [liveBusy, setLiveBusy] = React.useState(false);
+  React.useEffect(() => {
+    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const d = await window.fetchApi('/api/strategies');
+        if (!cancelled && d && d.ok) setLiveStrats(d.strategies || []);
+      } catch (e) {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  const runLiveBacktest = async () => {
+    setLiveBusy(true);
+    try {
+      const to = new Date().toISOString().slice(0,10);
+      const from = new Date(Date.now() - 365*86400*1000).toISOString().slice(0,10);
+      const d = await window.fetchApi('/api/backtest', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ symbol:'RELIANCE', strategy:'rsi_mean_revert', from, to, qty:10,
+          params: { period:14, entryRsi:30, exitRsi:65 }}),
+      });
+      if (d && d.ok) setLiveBacktest(d);
+    } catch (e) {} finally { setLiveBusy(false); }
+  };
   const [strat, setStrat] = useState("Momentum AI");
   const [, bump] = useState(0);
   React.useEffect(() => {

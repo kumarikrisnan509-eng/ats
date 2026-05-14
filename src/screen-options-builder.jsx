@@ -2,6 +2,29 @@
 /* Options payoff builder — visual P&L diagram with Greeks */
 
 const OptionsBuilderScreen = () => {
+  // ---- live /api/option-expiries + /api/option-chain ----
+  const [liveExpiries, setLiveExpiries] = React.useState(null);
+  const [liveChain, setLiveChain] = React.useState(null);
+  React.useEffect(() => {
+    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const d = await window.fetchApi('/api/option-expiries?underlying=NIFTY');
+        if (!cancelled && d && d.ok) {
+          setLiveExpiries(d.expiries || []);
+          // Fetch chain for nearest expiry
+          if (d.expiries && d.expiries.length > 0) {
+            try {
+              const c = await window.fetchApi('/api/option-chain?underlying=NIFTY&expiry=' + encodeURIComponent(d.expiries[0]));
+              if (!cancelled && c && c.ok) setLiveChain(c);
+            } catch (e2) {}
+          }
+        }
+      } catch (e) {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
   const [legs, setLegs] = React.useState([
     { id: 1, action: "BUY",  type: "CE", strike: 24000, premium: 142, qty: 1, expiry: "25-Apr-2026" },
     { id: 2, action: "SELL", type: "CE", strike: 24200, premium: 88,  qty: 1, expiry: "25-Apr-2026" },

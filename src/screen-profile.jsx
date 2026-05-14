@@ -2,6 +2,19 @@
 /* Profile screen — expanded user profile, KYC, plan, API tokens, security */
 
 const ProfileScreen = () => {
+  // ---- live /api/profile ----
+  const [liveProfile, setLiveProfile] = React.useState(null);
+  React.useEffect(() => {
+    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const d = await window.fetchApi('/api/profile');
+        if (!cancelled && d && d.ok) setLiveProfile(d.profile || null);
+      } catch (e) {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
   const [tab, setTab] = React.useState("overview");
 
   return (

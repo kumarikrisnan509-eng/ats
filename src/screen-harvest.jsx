@@ -3,6 +3,19 @@
    suggests replacement to maintain market exposure (avoids wash sale logic). */
 
 const HarvestScreen = () => {
+  // ---- live /api/tax/harvest ----
+  const [liveHarvest, setLiveHarvest] = React.useState(null);
+  React.useEffect(() => {
+    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const d = await window.fetchApi('/api/tax/harvest');
+        if (!cancelled && d && d.ok) setLiveHarvest(d);
+      } catch (e) {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
   const [selected, setSelected] = React.useState(new Set([1, 2, 4]));
 
   const lots = [

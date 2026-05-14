@@ -3,6 +3,19 @@
    Filterable, exportable, immutable. Required for SEBI compliance + post-mortem. */
 
 const AuditScreen = () => {
+  // ---- live /api/audit ----
+  const [liveAudit, setLiveAudit] = React.useState(null);
+  React.useEffect(() => {
+    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const d = await window.fetchApi('/api/audit?limit=50');
+        if (!cancelled && d && d.ok) setLiveAudit(d);
+      } catch (e) {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
   const [filter, setFilter] = window.useUrlState ? window.useUrlState("status", "all") : React.useState("all");
   const [search, setSearch] = window.useUrlState ? window.useUrlState("q", "") : React.useState("");
   const [selected, setSelected] = React.useState(null);

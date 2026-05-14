@@ -4,6 +4,19 @@
    sweep proceeds to highest-priority under-funded goal. */
 
 const GoalsScreen = () => {
+  // ---- live /api/tax/goals ----
+  const [liveGoals, setLiveGoals] = React.useState(null);
+  React.useEffect(() => {
+    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const d = await window.fetchApi('/api/tax/goals');
+        if (!cancelled && d && d.ok) setLiveGoals(d.goals || []);
+      } catch (e) {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
   const [selected, setSelected] = React.useState("retirement");
   const [showNew, setShowNew] = React.useState(false);
 

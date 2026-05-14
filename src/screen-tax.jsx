@@ -2,6 +2,26 @@
 /* Tax & Goals screen — Stage 5: long-term investment planning + tax harvesting */
 
 const TaxScreen = () => {
+  // ---- live /api/tax/goals + /api/tax/harvest ----
+  const [liveTax, setLiveTax] = React.useState(null);
+  React.useEffect(() => {
+    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [g, h] = await Promise.all([
+          window.fetchApi('/api/tax/goals'),
+          window.fetchApi('/api/tax/harvest'),
+        ]);
+        if (!cancelled) setLiveTax({
+          goals: (g && g.goals) || [],
+          opportunities: (h && h.opportunities) || [],
+          rules: (h && h.rules) || {},
+        });
+      } catch (e) {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
   const [tab, setTab] = useState("Tax");
   const tabs = ["Tax", "Goals", "Rebalance", "AI review"];
 
