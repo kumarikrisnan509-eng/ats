@@ -22,7 +22,7 @@ const AuditScreen = () => {
   const [dateRange, setDateRange] = window.useUrlState ? window.useUrlState("range", "today") : React.useState("today");
 
   // Sample audit records — in production, immutable append-only log from order-engine
-  const records = React.useMemo(() => [
+  const __mock_records = React.useMemo(() => [
     {
       id: "ORD-2026-04-24-001847", symbol: "HDFCBANK", side: "BUY", qty: 50, price: 1718.40,
       product: "MIS", mode: "intraday", strategy: "Momentum AI v3", status: "FILLED",
@@ -86,6 +86,22 @@ const AuditScreen = () => {
       ],
     },
   ], []);
+  const records = React.useMemo(() => {
+    if (liveAudit && Array.isArray(liveAudit.entries) && liveAudit.entries.length > 0) {
+      return liveAudit.entries.slice(0, 100).map((e, i) => ({
+        id: 'A-' + (e.seq || i),
+        time: e.ts ? new Date(e.ts).toLocaleString('en-IN') : '',
+        kind: e.event || 'event',
+        symbol: (e.data && (e.data.symbol || e.data.sym)) || '-',
+        side: (e.data && e.data.side) || '',
+        status: 'live',
+        details: JSON.stringify(e.data || {}).slice(0, 200),
+        live: true,
+      }));
+    }
+    return __mock_records;
+  }, [liveAudit]);
+
 
   // R9 — Saved views: persists filter + search + dateRange between visits
   const savedViews = window.useSavedViews ? window.useSavedViews("audit", { filter: "all", search: "", dateRange: "today" }) : null;

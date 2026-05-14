@@ -20,7 +20,7 @@ const NewsScreen = () => {
   const [filter, setFilter] = React.useState("all");
   const [selectedSym, setSelectedSym] = React.useState(null);
 
-  const items = [
+  const __mock_items = [
     { sym: "INFY",       hl: "Infosys raises FY27 revenue guidance to 6-8% on AI deal momentum", src: "Mint",         when: "12m ago", senti: 0.78,  impact: "high",   summary: "Management cited 14 large AI deals signed in Q4. Operating margin guidance unchanged at 22%. Brokerages likely to upgrade." },
     { sym: "RELIANCE",   hl: "Reliance Jio crosses 500M subscribers, ARPU up 4.2% QoQ",            src: "ET",            when: "28m ago", senti: 0.62,  impact: "medium", summary: "Subscriber growth driven by 5G migrations. Tariff hike rumored for July." },
     { sym: "HDFCBANK",   hl: "RBI flags concerns on HDFC Bank's unsecured loan portfolio",         src: "Reuters",       when: "1h ago",  senti: -0.54, impact: "high",   summary: "Unsecured book grew 18% YoY vs banking sector 11%. RBI letter not formal action, but watch space." },
@@ -32,6 +32,19 @@ const NewsScreen = () => {
     { sym: "GOLD",       hl: "Gold rally pauses as Fed rate-cut bets fade after strong jobs print", src: "Reuters",      when: "6h ago",  senti: -0.32, impact: "low",    summary: "Spot gold -0.4%. MCX likely to follow. Tactical pullback not trend reversal." },
     { sym: "NIFTY",      hl: "Q4 earnings season: 78% of NIFTY-50 beat estimates so far",          src: "BloombergQuint",when: "8h ago",  senti: 0.65,  impact: "medium", summary: "IT in line, Banks beat, Auto mixed (JLR drag), FMCG soft. Margin expansion theme intact." },
   ];
+  const items = (liveNews && Array.isArray(liveNews.items) && liveNews.items.length > 0)
+    ? liveNews.items.slice(0, 12).map((n, i) => ({
+        id: n.id || i,
+        time: n.pubDate ? new Date(n.pubDate).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '',
+        source: n.source || 'RSS',
+        title: n.title,
+        summary: n.summary,
+        symbols: n.symbols || [],
+        link: n.link,
+        live: true,
+      }))
+    : __mock_items;
+
 
   const filtered = filter === "all" ? items :
     filter === "positive" ? items.filter(i => i.senti > 0.3) :

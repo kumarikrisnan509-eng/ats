@@ -22,7 +22,7 @@ const AttributionScreen = () => {
   }, []);
   const [lens, setLens] = React.useState("strategy");
 
-  const byStrategy = [
+  const __mock_byStrategy = [
     { name: "Momentum AI",     pnl: 48200, trades: 142, pct: 39 },
     { name: "Breakout",         pnl: 64800, trades: 18, pct: 52 },
     { name: "Mean Reversion",   pnl: 22400, trades: 428, pct: 18 },
@@ -30,6 +30,13 @@ const AttributionScreen = () => {
     { name: "Event-Momentum",   pnl: -8400, trades: 34, pct: -7 },
     { name: "Iron Condor",      pnl: -14200, trades: 8, pct: -11 },
   ];
+  const byStrategy = (liveByStrat && liveByStrat.length > 0)
+    ? liveByStrat.map(s => ({
+        name: s.strategy, pnl: s.realizedPnl, trades: s.trades, pct: 0,
+        winRate: s.winRate, live: true,
+      }))
+    : __mock_byStrategy;
+
 
   const byMode = [
     { name: "Positional", pnl: 64800, pct: 52 },

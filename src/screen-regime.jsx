@@ -15,12 +15,28 @@ const RegimeScreen = () => {
     })();
     return () => { cancelled = true; };
   }, []);
-  const regimes = [
+  const __mock_regimes = [
     { k: "trending",   label: "Strong uptrend",    prob: 58, color: "var(--up)",   bg: "var(--up-soft)", icon: "↗", desc: "Directional momentum, break-outs, momentum plays" },
     { k: "ranging",    label: "Range-bound",        prob: 22, color: "var(--info)", bg: "var(--info-soft)", icon: "↔", desc: "Mean-reversion, iron condors, range-scalp" },
     { k: "volatile",   label: "High volatility",    prob: 16, color: "oklch(65% 0.13 80)", bg: "var(--warn-soft)", icon: "↕", desc: "Straddles, gap-fade, reduced position sizing" },
     { k: "correction", label: "Correction risk",    prob: 4,  color: "var(--down)", bg: "var(--down-soft)", icon: "↘", desc: "Defensive, hedges, short-bias, cash hold" },
   ];
+  const regimes = (liveRegime && liveRegime.regime)
+    ? [
+        {
+          k: liveRegime.regime,
+          label: liveRegime.regime.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+          prob: Math.round((liveRegime.confidence || 0.5) * 100),
+          color: liveRegime.regime === 'trending_up' ? 'var(--up)'
+               : liveRegime.regime === 'trending_down' ? 'var(--down)'
+               : liveRegime.regime === 'high_vol' ? 'oklch(65% 0.13 80)' : 'var(--info)',
+          bg: 'var(--info-soft)', icon: '●', desc: liveRegime.reason || '',
+          live: true,
+        },
+        ...__mock_regimes.slice(1),
+      ]
+    : __mock_regimes;
+
 
   const indicators = [
     { n: "VIX",               v: "14.82", d: "-4.2% · Low volatility", kind: "trending" },
