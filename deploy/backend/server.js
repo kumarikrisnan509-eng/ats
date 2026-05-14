@@ -27,6 +27,7 @@ const { Alerts }       = require('./alerts');
 const { Watchlist }    = require('./watchlist');
 const { Scanner }      = require('./scanner');
 const { runBacktest }  = require('./backtest');
+const { PaperTrading } = require('./paper');
 
 // ---------- Config ----------
 const PORT            = parseInt(process.env.PORT || '8080', 10);
@@ -57,7 +58,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner;
+let broker, vault, sessions, alerts, watchlist, scanner, paper;
 
 async function init() {
   broker = createBroker(process.env);
@@ -86,6 +87,19 @@ async function init() {
   });
   scanner.load();
   scanner.scheduleDaily();
+
+  paper = new PaperTrading({
+    storePath:    process.env.PAPER_PATH || '/var/lib/ats/tokens/_paper.json',
+    startingCash: parseInt(process.env.PAPER_STARTING_CASH || '1000000', 10),
+    audit,
+    // Provide a tick-cache accessor so positions screen can mark-to-market.
+    lastTicks: () => {
+      if (typeof broker.getLastTicks !== 'function') return new Map();
+      const arr = broker.getLastTicks();
+      return new Map(arr.map(t => [t.symbol, t.ltp]));
+    },
+  });
+  paper.load();
 
   if (BROKER_NAME === 'zerodha') {
     if (!fs.existsSync(MASTER_KEY_PATH)) {
@@ -302,6 +316,7 @@ app.get('/api/system/info', (_req, res) => {
       alerts:    alerts    ? alerts.stats()    : null,
       watchlist: watchlist ? watchlist.stats() : null,
       scanner:   scanner   ? scanner.stats()   : null,
+      paper:     paper     ? paper.stats()     : null,
     },
     auditLog: { path: AUDIT_LOG, sizeBytes: auditSize, lastWriteTs: auditLastTs, seq: auditSeq },
     config: {
@@ -815,6 +830,114 @@ app.post('/api/backtest', async (req, res) => {
     res.json({ ok: true, symbol, from, to, ...result });
   } catch (e) {
     res.status(400).json({ ok: false, reason: e.message });
+  }
+});
+
+// ---------- Paper trading ----------
+app.get('/api/paper', (_req, res) => {
+  if (!paper) return res.status(503).json({ ok:false, reason:'paper_not_initialized' });
+  res.json({ ok:true, stats: paper.stats() });
+});
+app.get('/api/paper/orders', (_req, res) => {
+  if (!paper) return res.status(503).json({ ok:false, reason:'paper_not_initialized' });
+  res.json({ ok:true, orders: paper.list() });
+});
+app.get('/api/paper/positions', (_req, res) => {
+  if (!paper) return res.status(503).json({ ok:false, reason:'paper_not_initialized' });
+  res.json({ ok:true, positions: paper.positions() });
+});
+app.get('/api/paper/trades', (req, res) => {
+  if (!paper) return res.status(503).json({ ok:false, reason:'paper_not_initialized' });
+  const lim = parseInt(req.query.limit || '50', 10) || 50;
+  res.json({ ok:true, trades: paper.trades(lim) });
+});
+app.post('/api/paper/order', (req, res) => {
+  if (!paper) return res.status(503).json({ ok:false, reason:'paper_not_initialized' });
+  try {
+    const o = paper.placeOrder(req.body || {});
+    res.status(201).json({ ok:true, order:o });
+  } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
+});
+app.delete('/api/paper/order/:id', (req, res) => {
+  if (!paper) return res.status(503).json({ ok:false, reason:'paper_not_initialized' });
+  res.json({ ok:true, ...paper.cancelOrder(req.params.id) });
+});
+app.post('/api/paper/reset', (_req, res) => {
+  if (!paper) return res.status(503).json({ ok:false, reason:'paper_not_initialized' });
+  paper.reset();
+  res.json({ ok:true, stats: paper.stats() });
+});
+
+// ---------- Hyperparameter tuner ----------
+// POST /api/tune  body: { symbol, strategy, paramGrid, from, to, qty?, interval?, top? }
+//   paramGrid: object mapping param-name -> array of values.
+//   e.g. for rsi_mean_revert:
+//     { period:[10,14,20], entryRsi:[25,30,35], exitRsi:[65,70,75] }
+//   Returns top-N (default 10) combinations ranked by totalPnl.
+app.post('/api/tune', async (req, res) => {
+  try {
+    const { symbol, strategy, paramGrid, from, to, qty, interval } = req.body || {};
+    if (!symbol)    return res.status(400).json({ ok:false, reason:'symbol required' });
+    if (!strategy)  return res.status(400).json({ ok:false, reason:'strategy required' });
+    if (!paramGrid || typeof paramGrid !== 'object') {
+      return res.status(400).json({ ok:false, reason:'paramGrid required (object of name -> values[])' });
+    }
+    if (!from || !to) return res.status(400).json({ ok:false, reason:'from and to required' });
+    const top = Math.max(1, Math.min(50, parseInt(req.body.top || '10', 10) || 10));
+
+    // Explode grid into all combinations (cartesian product). Cap at 200 to prevent abuse.
+    const keys = Object.keys(paramGrid);
+    let combos = [{}];
+    for (const k of keys) {
+      const vals = Array.isArray(paramGrid[k]) ? paramGrid[k] : [paramGrid[k]];
+      const next = [];
+      for (const c of combos) for (const v of vals) next.push({ ...c, [k]: v });
+      combos = next;
+      if (combos.length > 200) {
+        return res.status(400).json({ ok:false, reason:`grid too large: ${combos.length} combinations (cap 200)` });
+      }
+    }
+
+    // Fetch candles ONCE; reuse across all combos.
+    const candles = await broker.getHistorical({ symbol, interval: interval || 'day', from, to });
+    if (!Array.isArray(candles) || candles.length < 30) {
+      return res.status(400).json({ ok:false, reason:`need >= 30 candles, got ${candles ? candles.length : 0}` });
+    }
+
+    const results = [];
+    for (const params of combos) {
+      try {
+        const r = runBacktest({ candles, strategy, params, qty: Number(qty) || 1 });
+        results.push({
+          params,
+          trades:        r.stats.trades,
+          winRate:       r.stats.winRate,
+          totalPnl:      r.stats.totalPnl,
+          maxDrawdown:   r.stats.maxDrawdown,
+          buyAndHoldPnl: r.stats.buyAndHoldPnl,
+          vsBuyAndHold:  r.stats.vsBuyAndHold,
+        });
+      } catch (e) {
+        results.push({ params, error: e.message });
+      }
+    }
+    // Sort: prefer totalPnl desc, tiebreak by lower drawdown
+    results.sort((a, b) => {
+      const ap = a.totalPnl || -Infinity;
+      const bp = b.totalPnl || -Infinity;
+      if (bp !== ap) return bp - ap;
+      return (a.maxDrawdown || Infinity) - (b.maxDrawdown || Infinity);
+    });
+    audit('tune.run', { symbol, strategy, combos: combos.length, bestPnl: results[0] && results[0].totalPnl });
+    res.json({
+      ok: true, symbol, strategy, from, to,
+      candlesUsed: candles.length,
+      combinations: combos.length,
+      top: results.slice(0, top),
+      worst: results.slice(-3).reverse(),
+    });
+  } catch (e) {
+    res.status(500).json({ ok:false, reason: e.message });
   }
 });
 
@@ -1382,7 +1505,9 @@ async function startBrokerFanout() {
   brokerUnsubscribe = await broker.subscribeTicks(DEFAULT_SYMBOLS, (tick) => {
     // 1. Evaluate alerts (synchronous, no I/O).
     try { if (alerts) alerts.evaluate(tick); } catch (e) { /* keep loop alive */ }
-    // 2. Fan out to /ws clients.
+    // 2. Drive paper trading fills (synchronous, debounced persist).
+    try { if (paper) paper.onTick(tick); } catch (e) { /* keep loop alive */ }
+    // 3. Fan out to /ws clients.
     const payload = JSON.stringify({ type: 'tick', ...tick });
     for (const ws of wsClients) {
       if (ws.readyState === 1) ws.send(payload);
