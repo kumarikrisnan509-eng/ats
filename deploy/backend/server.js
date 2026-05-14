@@ -40,6 +40,9 @@ const csvImport        = require('./csv-import');
 // ---------- Config ----------
 const PORT            = parseInt(process.env.PORT || '8080', 10);
 const KILL_SWITCH     = String(process.env.KILL_SWITCH || 'true').toLowerCase() === 'true';
+// Tier 11: even with KILL_SWITCH=false, live trading also requires LIVE_TRADING=true.
+// Two independent env gates so flipping one doesn't accidentally start real trading.
+const LIVE_TRADING    = String(process.env.LIVE_TRADING || 'false').toLowerCase() === 'true';
 const ENV_NAME        = process.env.ENV_NAME || 'dev';
 const AUDIT_LOG       = process.env.AUDIT_LOG || path.join(__dirname, 'audit.log');
 const MAX_WS_CLIENTS  = parseInt(process.env.MAX_WS_CLIENTS || '200', 10);
@@ -321,6 +324,7 @@ app.get('/api/summary', async (_req, res) => {
     time: new Date().toISOString(),
     env: ENV_NAME,
     killSwitch: KILL_SWITCH,
+    liveTrading: LIVE_TRADING,
     broker: broker.health(),
     profile,
     aggregates,
@@ -352,6 +356,7 @@ app.get('/api/system/info', (_req, res) => {
     time: new Date().toISOString(),
     env: ENV_NAME,
     killSwitch: KILL_SWITCH,
+    liveTrading: LIVE_TRADING,
     process: {
       uptimeSec: Math.floor(process.uptime()),
       nodeVersion: process.version,
@@ -508,6 +513,7 @@ app.get('/api/health', (_req, res) => {
     ok: true,
     env: ENV_NAME,
     killSwitch: KILL_SWITCH,
+    liveTrading: LIVE_TRADING,
     uptimeSec: Math.floor(process.uptime()),
     time: new Date().toISOString(),
     broker: broker.health(),
@@ -1446,6 +1452,7 @@ app.get('/api/config', (_req, res) => {
     env: ENV_NAME,
     features: { liveTrading: false, paperTrading: true, backtest: true, aiReview: true },
     killSwitch: KILL_SWITCH,
+    liveTrading: LIVE_TRADING,
     wsUrl: '/ws',
     broker: broker.name,
     defaultSymbols: DEFAULT_SYMBOLS,
@@ -1610,6 +1617,7 @@ app.get('/api/reconcile', async (_req, res) => {
     ok: true,
     asOf: new Date().toISOString(),
     killSwitch: KILL_SWITCH,
+    liveTrading: LIVE_TRADING,
     brokerName: broker.name,
     brokerConnected: !!(broker.health && broker.health().connected),
     cash: {
@@ -1827,8 +1835,19 @@ app.post('/api/orders/place', (req, res) => {
     });
   }
 
-  // KILL_SWITCH is off — but broker.placeOrder() is deliberately not implemented yet.
-  // Hard fail until that method is added in a separate, intentional change.
+  // Tier 11 second gate: even with KILL_SWITCH=false, also require LIVE_TRADING=true.
+  // This way operator must consciously flip TWO env vars to enable real orders.
+  if (!LIVE_TRADING) {
+    audit('order.blocked.liveTradingDisabled', normalizedPayload);
+    return res.status(503).json({
+      ok: false,
+      reason: 'LIVE_TRADING_DISABLED',
+      message: 'KILL_SWITCH is off but LIVE_TRADING env is not true. Set LIVE_TRADING=true in /etc/ats/backend.env to enable real orders.',
+      clientOrderId,
+      validatedPayload: normalizedPayload,
+    });
+  }
+
   if (typeof broker.placeOrder !== 'function') {
     audit('order.blocked.notImplemented', normalizedPayload);
     return res.status(501).json({
@@ -1850,6 +1869,28 @@ app.post('/api/orders/place', (req, res) => {
       audit('order.placeError', { clientOrderId, msg: err.message });
       res.status(502).json({ ok: false, reason: err.message, clientOrderId });
     });
+});
+
+// Tier 11: cancel a working order. Same dual gating as place.
+app.post('/api/orders/cancel', async (req, res) => {
+  const body = req.body || {};
+  const orderId = String(body.orderId || '').trim();
+  const variety = String(body.variety || 'regular').toLowerCase();
+  if (!orderId) return res.status(400).json({ ok: false, reason: 'missing:orderId' });
+  if (KILL_SWITCH)  { audit('order.cancel.blocked.killSwitch', { orderId }); return res.status(503).json({ ok:false, reason:'KILL_SWITCH_ON' }); }
+  if (!LIVE_TRADING){ audit('order.cancel.blocked.liveTradingDisabled', { orderId }); return res.status(503).json({ ok:false, reason:'LIVE_TRADING_DISABLED' }); }
+  if (typeof broker.cancelOrder !== 'function') {
+    audit('order.cancel.blocked.notImplemented', { orderId });
+    return res.status(501).json({ ok: false, reason: 'CANCEL_ORDER_NOT_IMPLEMENTED' });
+  }
+  try {
+    const r = await broker.cancelOrder({ orderId, variety });
+    audit('order.cancelled', { orderId, result: r });
+    res.json({ ok: true, ...r });
+  } catch (e) {
+    audit('order.cancelError', { orderId, msg: e.message });
+    res.status(502).json({ ok: false, reason: e.message, orderId });
+  }
 });
 
 app.post('/api/orders/dry-run', (req, res) => {
@@ -2044,6 +2085,7 @@ wss.on('connection', (ws, req) => {
     type: 'welcome',
     broker: broker.name,
     killSwitch: KILL_SWITCH,
+    liveTrading: LIVE_TRADING,
     symbols: merged,
     defaultSymbols: DEFAULT_SYMBOLS,
     watchlist: userSaved,

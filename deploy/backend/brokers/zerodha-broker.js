@@ -474,6 +474,75 @@ class ZerodhaBroker extends BrokerGateway {
     return out;
   }
 
+  /**
+   * Place a real order via Kite Connect.
+   *
+   * SAFETY: this method exists but is ONLY called by server.js when KILL_SWITCH=false
+   * AND the explicit env LIVE_TRADING=true is set. server.js gates this on every call.
+   *
+   * Payload comes pre-validated by server.js /api/orders/place handler:
+   *   { strategyTag, symbol, exchange, side, quantity, product, orderType,
+   *     variety, validity, price?, triggerPrice?, clientOrderId }
+   *
+   * Returns: { orderId, status, raw } -- broker-issued order id + status snapshot.
+   * Throws: any kiteconnect error (auth, margin, circuit, etc.) -- caller catches.
+   */
+  async placeOrder(payload) {
+    if (!this.accessToken) throw new Error('not authenticated');
+    if (!payload || !payload.symbol) throw new Error('symbol required');
+
+    // Resolve to Kite trading symbol + exchange. We accept either:
+    //   - { exchange:"NSE", symbol:"RELIANCE" }
+    //   - { symbol:"NSE:RELIANCE" }  (compound form)
+    let exchange = (payload.exchange || 'NSE').toUpperCase();
+    let tradingsymbol = String(payload.symbol).trim();
+    if (tradingsymbol.includes(':')) {
+      const [ex, sym] = tradingsymbol.split(':');
+      exchange = ex.toUpperCase();
+      tradingsymbol = sym;
+    }
+
+    // Kite expects lowercase variety strings; everything else uppercase.
+    const variety = (payload.variety || 'regular').toLowerCase();
+    const kiteParams = {
+      tradingsymbol,
+      exchange,
+      transaction_type: payload.side,
+      quantity: payload.quantity,
+      product: payload.product,
+      order_type: payload.orderType,
+      validity: payload.validity || 'DAY',
+      tag: (payload.strategyTag || 'ats').slice(0, 20),
+    };
+    if (payload.orderType === 'LIMIT' && payload.price != null) {
+      kiteParams.price = payload.price;
+    }
+    if ((payload.orderType === 'SL' || payload.orderType === 'SL-M') && payload.triggerPrice != null) {
+      kiteParams.trigger_price = payload.triggerPrice;
+    }
+
+    // kiteconnect returns { order_id: "..." }
+    const result = await this.kc.placeOrder(variety, kiteParams);
+    return {
+      orderId: result.order_id,
+      status: 'submitted',
+      variety,
+      params: kiteParams,
+      raw: result,
+    };
+  }
+
+  /**
+   * Cancel a working order by Kite order id. Variety must match the original placement.
+   */
+  async cancelOrder({ orderId, variety }) {
+    if (!this.accessToken) throw new Error('not authenticated');
+    if (!orderId) throw new Error('orderId required');
+    const v = (variety || 'regular').toLowerCase();
+    const result = await this.kc.cancelOrder(v, orderId);
+    return { orderId: result.order_id || orderId, status: 'cancelled', raw: result };
+  }
+
   /** Health snapshot for /api/health */
   health() {
     return {
