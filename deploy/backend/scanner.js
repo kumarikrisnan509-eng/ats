@@ -286,4 +286,84 @@ class Scanner {
   }
 }
 
-module.exports = { Scanner, rsi, ema };
+// ---------- More indicators (used by backtest module too) ----------
+
+/** Simple moving average aligned to closes. NaN until index = period-1. */
+function sma(closes, period) {
+  const out = new Array(closes.length).fill(NaN);
+  if (closes.length < period) return out;
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += closes[i];
+  out[period - 1] = sum / period;
+  for (let i = period; i < closes.length; i++) {
+    sum += closes[i] - closes[i - period];
+    out[i] = sum / period;
+  }
+  return out;
+}
+
+/** Population standard deviation over a rolling window. */
+function stddev(closes, period) {
+  const out = new Array(closes.length).fill(NaN);
+  if (closes.length < period) return out;
+  for (let i = period - 1; i < closes.length; i++) {
+    let sum = 0;
+    for (let j = i - period + 1; j <= i; j++) sum += closes[j];
+    const mean = sum / period;
+    let varSum = 0;
+    for (let j = i - period + 1; j <= i; j++) varSum += (closes[j] - mean) ** 2;
+    out[i] = Math.sqrt(varSum / period);
+  }
+  return out;
+}
+
+/**
+ * MACD(fast, slow, signal). Returns {line, sig, hist} aligned to closes.
+ * line = EMA(fast) - EMA(slow)
+ * sig  = EMA of line (with `signal` period)
+ * hist = line - sig
+ */
+function macd(closes, fast = 12, slow = 26, signal = 9) {
+  const fastE = ema(closes, fast);
+  const slowE = ema(closes, slow);
+  const line = new Array(closes.length).fill(NaN);
+  for (let i = 0; i < closes.length; i++) {
+    if (Number.isFinite(fastE[i]) && Number.isFinite(slowE[i])) {
+      line[i] = fastE[i] - slowE[i];
+    }
+  }
+  const firstValid = line.findIndex(x => Number.isFinite(x));
+  const sig = new Array(closes.length).fill(NaN);
+  const hist = new Array(closes.length).fill(NaN);
+  if (firstValid >= 0) {
+    const macdValid = line.slice(firstValid);
+    const sigOfValid = ema(macdValid, signal);
+    for (let i = 0; i < sigOfValid.length; i++) {
+      if (Number.isFinite(sigOfValid[i])) {
+        sig[firstValid + i] = sigOfValid[i];
+        hist[firstValid + i] = line[firstValid + i] - sigOfValid[i];
+      }
+    }
+  }
+  return { line, sig, hist };
+}
+
+/**
+ * Bollinger Bands(period, k). Returns {middle, upper, lower} aligned to closes.
+ * middle = SMA(period); upper = middle + k*stddev; lower = middle - k*stddev.
+ */
+function bollinger(closes, period = 20, k = 2) {
+  const middle = sma(closes, period);
+  const stdev  = stddev(closes, period);
+  const upper = new Array(closes.length).fill(NaN);
+  const lower = new Array(closes.length).fill(NaN);
+  for (let i = 0; i < closes.length; i++) {
+    if (Number.isFinite(middle[i]) && Number.isFinite(stdev[i])) {
+      upper[i] = middle[i] + k * stdev[i];
+      lower[i] = middle[i] - k * stdev[i];
+    }
+  }
+  return { middle, upper, lower };
+}
+
+module.exports = { Scanner, rsi, ema, sma, stddev, macd, bollinger };

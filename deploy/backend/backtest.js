@@ -8,7 +8,7 @@
 // records entry/exit + P&L. Final report includes win-rate, max drawdown,
 // and the equity curve (one point per bar).
 
-const { rsi, ema } = require('./scanner');
+const { rsi, ema, macd, bollinger } = require('./scanner');
 
 const DEFAULT_QTY = 1;
 
@@ -33,6 +33,10 @@ function runBacktest({ candles, strategy, params, qty }) {
     signal = signalRsiMeanRevert(closes, params);
   } else if (strategy === 'ema_cross') {
     signal = signalEmaCross(closes, params);
+  } else if (strategy === 'macd_cross') {
+    signal = signalMacdCross(closes, params);
+  } else if (strategy === 'bollinger') {
+    signal = signalBollinger(closes, params);
   } else {
     throw new Error(`unknown strategy: ${strategy}`);
   }
@@ -162,6 +166,46 @@ function signalEmaCross(closes, params) {
     const crossedDown = cNow < eNow && cPrev >= ePrev;
     if (crossedUp)   out[i] = 'BUY';
     if (crossedDown) out[i] = 'SELL';
+  }
+  return out;
+}
+
+/** MACD line crossing the signal line. Classic trend follower. */
+function signalMacdCross(closes, params) {
+  const fast   = params.fast   || 12;
+  const slow   = params.slow   || 26;
+  const signal = params.signal || 9;
+  const { line, sig } = macd(closes, fast, slow, signal);
+  const out = new Array(closes.length).fill(null);
+  for (let i = slow + signal + 1; i < closes.length; i++) {
+    const lNow = line[i], lPrev = line[i - 1];
+    const sNow = sig[i],  sPrev = sig[i - 1];
+    if (!Number.isFinite(lNow) || !Number.isFinite(sNow) || !Number.isFinite(lPrev) || !Number.isFinite(sPrev)) continue;
+    if (lNow > sNow && lPrev <= sPrev) out[i] = 'BUY';
+    else if (lNow < sNow && lPrev >= sPrev) out[i] = 'SELL';
+  }
+  return out;
+}
+
+/**
+ * Bollinger Bands mean-reversion. Long-only:
+ *   BUY  when close crosses BELOW lower band (oversold)
+ *   SELL when close crosses ABOVE middle band (return to mean) OR touches upper.
+ */
+function signalBollinger(closes, params) {
+  const period = params.period || 20;
+  const k      = params.k      || 2;
+  const { middle, upper, lower } = bollinger(closes, period, k);
+  const out = new Array(closes.length).fill(null);
+  for (let i = period + 1; i < closes.length; i++) {
+    const cNow = closes[i], cPrev = closes[i - 1];
+    const lNow = lower[i],  lPrev = lower[i - 1];
+    const mNow = middle[i], mPrev = middle[i - 1];
+    if (!Number.isFinite(lNow) || !Number.isFinite(mNow) || !Number.isFinite(lPrev) || !Number.isFinite(mPrev)) continue;
+    // BUY when price crosses below lower band
+    if (cNow < lNow && cPrev >= lPrev) out[i] = 'BUY';
+    // SELL when price crosses above middle band
+    else if (cNow > mNow && cPrev <= mPrev) out[i] = 'SELL';
   }
   return out;
 }

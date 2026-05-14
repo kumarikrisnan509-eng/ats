@@ -333,24 +333,95 @@ app.get('/api/option-expiries', (req, res) => {
   }
 });
 
-// GET /api/option-chain?symbol=NIFTY&expiry=2026-05-29
-app.get('/api/option-chain', (req, res) => {
+// GET /api/option-chain?symbol=NIFTY&expiry=2026-05-29&includeQuotes=true&strikes=10&spot=23400
+app.get('/api/option-chain', async (req, res) => {
   try {
     const underlying = String(req.query.symbol || req.query.underlying || '').trim();
     const expiry     = String(req.query.expiry || '').trim();
     if (!underlying || !expiry) return res.status(400).json({ ok: false, reason: 'symbol and expiry required' });
+    const includeQuotes = req.query.includeQuotes === '1' || req.query.includeQuotes === 'true';
+    const strikesAround = Math.max(1, Math.min(50, parseInt(req.query.strikes || '10', 10) || 10));
+
     const chain = broker.getOptionChain(underlying, expiry);
 
-    // Best-effort spot from the in-memory tick cache (works for indices like NIFTY 50)
+    // Spot resolution order: explicit ?spot query > in-memory tick cache > REST quote (indices) > null.
     let spot = null;
-    try {
-      const ticks = broker.getLastTicks ? broker.getLastTicks() : [];
-      // Map common underlyings to index symbols on /ws
-      const indexSymbolMap = { 'NIFTY':'NIFTY 50', 'BANKNIFTY':'NIFTY BANK', 'FINNIFTY':'NIFTY FIN SERVICE' };
-      const want = indexSymbolMap[underlying.toUpperCase()] || underlying;
-      const hit = ticks.find(t => t.symbol === want);
-      if (hit) spot = hit.ltp;
-    } catch {}
+    if (req.query.spot) {
+      const s = Number(req.query.spot);
+      if (Number.isFinite(s) && s > 0) spot = s;
+    }
+    if (spot == null) {
+      try {
+        const ticks = broker.getLastTicks ? broker.getLastTicks() : [];
+        const indexSymbolMap = { 'NIFTY':'NIFTY 50', 'BANKNIFTY':'NIFTY BANK', 'FINNIFTY':'NIFTY FIN SERVICE' };
+        const want = indexSymbolMap[underlying.toUpperCase()] || underlying;
+        const hit = ticks.find(t => t.symbol === want);
+        if (hit) spot = hit.ltp;
+      } catch {}
+    }
+
+    // If still no spot, try REST quote for indices (needs "NSE:NIFTY 50" key).
+    if (spot == null && typeof broker.getQuotes === 'function') {
+      try {
+        const indexSymbolMap = { 'NIFTY':'NIFTY 50', 'BANKNIFTY':'NIFTY BANK', 'FINNIFTY':'NIFTY FIN SERVICE' };
+        const idxSym = indexSymbolMap[underlying.toUpperCase()];
+        if (idxSym) {
+          const q = await broker.getQuotes([idxSym]);
+          const v = q && (q[`NSE:${idxSym}`] || q[idxSym]);
+          if (v && typeof v.last_price === 'number') spot = v.last_price;
+        }
+      } catch {}
+    }
+
+    // Quote enrichment for top-N strikes around ATM.
+    let enrichedCount = 0;
+    if (includeQuotes && chain.strikes.length > 0) {
+      let atmIdx = Math.floor(chain.strikes.length / 2);
+      if (spot != null) {
+        let bestDiff = Infinity;
+        for (let i = 0; i < chain.strikes.length; i++) {
+          const diff = Math.abs(chain.strikes[i].strike - spot);
+          if (diff < bestDiff) { bestDiff = diff; atmIdx = i; }
+        }
+      }
+      const lo = Math.max(0, atmIdx - strikesAround);
+      const hi = Math.min(chain.strikes.length - 1, atmIdx + strikesAround);
+
+      const symbols = [];
+      for (let i = lo; i <= hi; i++) {
+        const r = chain.strikes[i];
+        if (r.ce) symbols.push(`NFO:${r.ce.tradingsymbol}`);
+        if (r.pe) symbols.push(`NFO:${r.pe.tradingsymbol}`);
+      }
+      if (symbols.length > 0) {
+        try {
+          const quotes = await broker.getQuotes(symbols);
+          for (let i = lo; i <= hi; i++) {
+            const r = chain.strikes[i];
+            const decorate = (leg) => {
+              if (!leg) return;
+              const k = `NFO:${leg.tradingsymbol}`;
+              const v = quotes[k];
+              if (v) {
+                leg.ltp = v.last_price;
+                leg.oi = v.oi;
+                leg.volume = v.volume;
+                leg.netChange = v.net_change;
+                if (v.ohlc) leg.ohlc = v.ohlc;
+                enrichedCount++;
+              }
+            };
+            decorate(r.ce);
+            decorate(r.pe);
+          }
+        } catch (e) {
+          // Don't fail the whole request -- return the structure without quotes.
+          console.warn('[option-chain] quote enrichment failed:', e.message);
+        }
+      }
+      chain.atmIndex = atmIdx;
+      chain.enriched = { from: lo, to: hi, legsQuoted: enrichedCount };
+    }
 
     res.json({ ok: true, spot, ...chain });
   } catch (e) {
@@ -434,6 +505,27 @@ const STRATEGIES = [
     bias: 'trending markets',
     params: [
       { name: 'period', type: 'int', default: 20, min: 2, max: 200 },
+    ],
+  },
+  {
+    id: 'macd_cross',
+    name: 'MACD signal cross',
+    description: 'Long-only: BUY when MACD(fast,slow) line crosses above signal line; SELL on opposite cross.',
+    bias: 'trending markets, momentum',
+    params: [
+      { name: 'fast',   type: 'int', default: 12, min: 2,  max: 50 },
+      { name: 'slow',   type: 'int', default: 26, min: 3,  max: 200 },
+      { name: 'signal', type: 'int', default: 9,  min: 2,  max: 50 },
+    ],
+  },
+  {
+    id: 'bollinger',
+    name: 'Bollinger band mean reversion',
+    description: 'Long-only: BUY when close crosses below lower band (oversold); SELL when close crosses above middle band.',
+    bias: 'mean-reverting markets, range-bound',
+    params: [
+      { name: 'period', type: 'int',   default: 20, min: 5,    max: 200 },
+      { name: 'k',      type: 'float', default: 2,  min: 0.5,  max: 5 },
     ],
   },
 ];
