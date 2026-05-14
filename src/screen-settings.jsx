@@ -40,10 +40,10 @@ const SettingsScreen = () => {
                   <div className="muted" style={{ fontSize: 12 }}>rajasekarselvam.com · Principal</div>
                 </div>
               </div>
-              <Field label="Name" value="Rajasekar Selvam"/>
-              <Field label="Email" value="hello@rajasekarselvam.com"/>
-              <Field label="Trading account" value="Zerodha · XB1234 (linked)"/>
-              <Field label="Timezone" value="Asia/Kolkata (IST)"/>
+              <SettingsField label="Name" value="Rajasekar Selvam"/>
+              <SettingsField label="Email" value="hello@rajasekarselvam.com"/>
+              <SettingsField label="Trading account" value="Zerodha · XB1234 (linked)"/>
+              <SettingsField label="Timezone" value="Asia/Kolkata (IST)"/>
             </div>
           </Card>
 
@@ -123,9 +123,9 @@ const SettingsScreen = () => {
         <div className="grid grid-2">
           <Card title="Broker — primary data & execution" sub="Zerodha Kite Connect · all market data sourced here">
             <div className="col" style={{ gap: 12 }}>
-              <Field label="API key" value="••••••••••••a7d2" mono/>
-              <Field label="API secret" value="••••••••••••••••••••" mono/>
-              <Field label="Access token" value="valid · rotates 06:00 IST" mono/>
+              <SettingsField label="API key" value="••••••••••••a7d2" mono/>
+              <SettingsField label="API secret" value="••••••••••••••••••••" mono/>
+              <SettingsField label="Access token" value="valid · rotates 06:00 IST" mono/>
               <div className="row" style={{ gap: 8, marginTop: 4 }}>
                 <button className="btn btn--sm">Rotate</button>
                 <button className="btn btn--sm">Test call</button>
@@ -134,12 +134,12 @@ const SettingsScreen = () => {
           </Card>
           <Card title="Data feeds (from broker adapter)" sub="Ticks, candles, depth — all via Zerodha today; portable to any connected broker">
             <div className="col" style={{ gap: 12 }}>
-              <Field label="Live ticks (WebSocket)" value="Zerodha Kite WS · 14ms avg · 3000 symbols cap" mono/>
-              <Field label="Historical candles" value="Zerodha /instruments · cached in Redis (VPS)" mono/>
-              <Field label="Market depth (L5)" value="Zerodha Kite WS · top 5 bids/asks" mono/>
-              <Field label="Positions + holdings" value="Zerodha REST · polled 5s" mono/>
+              <SettingsField label="Live ticks (WebSocket)" value="Zerodha Kite WS · 14ms avg · 3000 symbols cap" mono/>
+              <SettingsField label="Historical candles" value="Zerodha /instruments · cached in Redis (VPS)" mono/>
+              <SettingsField label="Market depth (L5)" value="Zerodha Kite WS · top 5 bids/asks" mono/>
+              <SettingsField label="Positions + holdings" value="Zerodha REST · polled 5s" mono/>
               <div className="divider"/>
-              <Field label="News feed (non-broker)" value="Moneycontrol RSS + ET API (supplementary)" mono/>
+              <SettingsField label="News feed (non-broker)" value="Moneycontrol RSS + ET API (supplementary)" mono/>
               <div className="muted" style={{ fontSize: 11 }}>All feeds abstracted by the broker adapter — switching to Upstox/Dhan routes data through the new provider without strategy code changes.</div>
             </div>
           </Card>
@@ -297,7 +297,7 @@ const SettingsScreen = () => {
   );
 };
 
-const Field = ({ label, value, mono }) => (
+const SettingsField = ({ label, value, mono }) => (
   <div>
     <div className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>{label}</div>
     <div style={{ padding: "8px 10px", border: "1px solid var(--border)", borderRadius: "var(--r-md)", background: "var(--bg-soft)", fontFamily: mono ? "var(--mono)" : "inherit", fontSize: 13 }}>{value}</div>
