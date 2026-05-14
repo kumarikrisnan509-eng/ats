@@ -142,6 +142,36 @@ const SignalsScreen = () => {
 
       <ModeGateBanner/>
 
+      {/* Tier 7: Live Scanner from /api/scanner -- real RSI/EMA20 hits on watchlist */}
+      {Array.isArray(realSignals) && realSignals.length > 0 ? (
+        <div className="card" style={{ marginBottom: 16, padding: 14, background: "var(--info-soft, #eff6ff)", borderRadius: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>
+              Live Scanner ({realSignals.length} signal{realSignals.length === 1 ? '' : 's'} from /api/scanner/history)
+            </div>
+            <button onClick={() => window.atsTriggerScan && window.atsTriggerScan()} className="btn btn-ghost" style={{ fontSize: 11 }}>Trigger scan</button>
+            {scannerStats && scannerStats.lastRun ? (
+              <span className="mono" style={{ fontSize: 11, color: "var(--text-3)" }}>last run: {new Date(scannerStats.lastRun.at).toLocaleString('en-IN')} ({scannerStats.lastRun.scanned} scanned, {scannerStats.lastRun.fired} fired)</span>
+            ) : null}
+          </div>
+          <div style={{ marginTop: 10, fontSize: 12 }}>
+            {realSignals.slice(0, 10).map((s, i) => (
+              <div key={i} style={{ display: "flex", gap: 12, padding: "6px 0", borderTop: i > 0 ? "1px solid var(--border)" : "none" }}>
+                <span className="mono" style={{ minWidth: 120, fontWeight: 600 }}>{s.symbol}</span>
+                <span className="mono" style={{ minWidth: 180, color: (s.signal && (s.signal.indexOf('OVERSOLD') >= 0 || s.signal.indexOf('CROSS_UP') >= 0)) ? 'var(--up)' : (s.signal && (s.signal.indexOf('OVERBOUGHT') >= 0 || s.signal.indexOf('CROSS_DOWN') >= 0)) ? 'var(--down)' : 'var(--text-2)' }}>{s.signal}</span>
+                <span className="mono" style={{ minWidth: 80 }}>{typeof s.value === 'number' ? s.value.toFixed(2) : (s.value || '-')}</span>
+                <span style={{ flex: 1, fontSize: 11, color: "var(--text-2)" }}>{s.message || ''}</span>
+                <span className="mono" style={{ fontSize: 11, color: "var(--text-3)" }}>{s.ts ? new Date(s.ts).toLocaleTimeString('en-IN') : ''}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="card" style={{ marginBottom: 16, padding: 12, background: "var(--bg-soft)", borderRadius: 12, fontSize: 11, color: "var(--text-3)" }}>
+          Live Scanner has no signals yet -- the daily watchlist scan runs at 15:35 IST (Mon-Fri). Trigger a manual scan: <button onClick={() => window.atsTriggerScan && window.atsTriggerScan()} className="btn btn-ghost" style={{ fontSize: 11 }}>Run now</button>
+        </div>
+      )}
+
       <div className="grid grid-4" style={{ marginBottom: 16 }}>
         <Card><Stat label="Signals today" value="47" delta="+12 vs yday" deltaKind="up" sub="across 6 sources"/></Card>
         <Card><Stat label="Paper → Live rate" value="28%" delta="+4pp" deltaKind="up" sub="30-day"/></Card>

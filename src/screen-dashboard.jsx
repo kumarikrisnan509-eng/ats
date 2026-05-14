@@ -10,13 +10,72 @@ const TodaysRun = () => {
     return () => clearInterval(id);
   }, []);
 
-  const items = [
+  // Tier 7: live KPI strip from multiple endpoints
+  const [liveKpi, setLiveKpi] = React.useState(null);
+  React.useEffect(() => {
+    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const [paper, scan, ordersRes, paperOrdersRes, auditRes, ar] = await Promise.all([
+          window.fetchApi('/api/paper').catch(() => null),
+          window.fetchApi('/api/scanner/history?limit=1').catch(() => null),
+          window.fetchApi('/api/orders').catch(() => null),
+          window.fetchApi('/api/paper/orders').catch(() => null),
+          window.fetchApi('/api/audit?limit=200').catch(() => null),
+          window.fetchApi('/api/autorun').catch(() => null),
+        ]);
+        if (cancelled) return;
+        const sigEntry = scan && scan.history && scan.history[0];
+        const allOrders = (paperOrdersRes && paperOrdersRes.orders) || (ordersRes && ordersRes.rows) || [];
+        const lastOrder = allOrders[0];
+        const errCount = auditRes && Array.isArray(auditRes.entries)
+          ? auditRes.entries.filter(e => /error|fail|reject/i.test(String(e.event || ''))).length
+          : 0;
+        const cash = paper && paper.stats && paper.stats.cash;
+        const realized = paper && paper.stats && paper.stats.realizedPnl;
+        setLiveKpi({
+          lastSignal: sigEntry
+            ? { value: new Date(sigEntry.ts || Date.now()).toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit'}),
+                sub: `${sigEntry.symbol} · ${sigEntry.signal}` }
+            : null,
+          lastOrder: lastOrder
+            ? { value: lastOrder.createdAt ? new Date(lastOrder.createdAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) : 'recent',
+                sub: `${lastOrder.side || ''} ${lastOrder.symbol || ''} ${lastOrder.strategy ? '· ' + lastOrder.strategy : ''}` }
+            : null,
+          autorun: ar && ar.config
+            ? { value: ar.config.enabled ? `every ${ar.config.intervalMinutes}m` : 'disabled',
+                sub: `${ar.config.symbol} · ${ar.config.strategy}` }
+            : null,
+          riskBudget: typeof cash === 'number'
+            ? { value: 'INR ' + Math.round(cash/1000) + 'k', sub: 'paper cash · live' }
+            : null,
+          errors: { value: String(errCount), sub: errCount === 0 ? 'all systems nominal' : 'check audit log' },
+          realized: typeof realized === 'number'
+            ? { value: (realized >= 0 ? '+' : '') + 'INR ' + realized.toFixed(0), sub: 'realized P&L (paper)' }
+            : null,
+        });
+      } catch (e) {}
+    };
+    refresh();
+    const id = setInterval(refresh, 30000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
+  const __mock_items = [
     { label: "Last signal",  value: "2m ago",    sub: "HDFCBANK · Claude · 82%", href: "#signals",  dot: "var(--up)" },
     { label: "Last order",   value: "14m ago",   sub: "BUY INFY · Momentum AI",  href: "#trading",  dot: "var(--info)" },
     { label: "Next sweep",   value: "May 1",     sub: "10:00 IST · auto",        href: "#portfolio",dot: "var(--vio)" },
     { label: "Risk budget",  value: "32% used",  sub: "₹4.8k / ₹15k today",      href: "#risk",     dot: "var(--up)" },
     { label: "Errors (24h)", value: "0",         sub: "all systems nominal",     href: "#infra",    dot: "var(--up)" },
   ];
+  const items = liveKpi ? [
+    liveKpi.lastSignal ? { label: 'Last signal', value: liveKpi.lastSignal.value, sub: liveKpi.lastSignal.sub, href: '#signals', dot: 'var(--up)', live: true } : __mock_items[0],
+    liveKpi.lastOrder  ? { label: 'Last order',  value: liveKpi.lastOrder.value,  sub: liveKpi.lastOrder.sub,  href: '#trading', dot: 'var(--info)', live: true } : __mock_items[1],
+    liveKpi.autorun    ? { label: 'Autorun',     value: liveKpi.autorun.value,    sub: liveKpi.autorun.sub,    href: '#strategies', dot: 'var(--vio)', live: true } : __mock_items[2],
+    liveKpi.riskBudget ? { label: 'Cash · paper', value: liveKpi.riskBudget.value, sub: liveKpi.riskBudget.sub, href: '#paper', dot: 'var(--up)', live: true } : __mock_items[3],
+    { label: 'Errors (24h)', value: liveKpi.errors.value, sub: liveKpi.errors.sub, href: '#audit', dot: (parseInt(liveKpi.errors.value)||0) === 0 ? 'var(--up)' : 'var(--warn)', live: true },
+  ] : __mock_items;
 
   return (
     <div style={{ display: "flex", gap: 0, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-md)", padding: "2px", marginBottom: 16, overflowX: "auto" }}>
