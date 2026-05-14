@@ -26,9 +26,10 @@ const { notify }       = require('./notify');
 const { Alerts }       = require('./alerts');
 const { Watchlist }    = require('./watchlist');
 const { Scanner, classifyRegime } = require('./scanner');
-const { runBacktest }  = require('./backtest');
+const { runBacktest, computeSignal } = require('./backtest');
 const { PaperTrading } = require('./paper');
 const { PnlAttribution } = require('./pnl-attribution');
+const { AutoRunner }   = require('./autorun');
 
 // ---------- Config ----------
 const PORT            = parseInt(process.env.PORT || '8080', 10);
@@ -59,7 +60,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun;
 
 async function init() {
   broker = createBroker(process.env);
@@ -110,6 +111,13 @@ async function init() {
   });
   pnl.load();
   pnl.start();   // initial snapshot + recurring every 6h
+
+  autorun = new AutoRunner({
+    broker, paper, computeSignal, audit,
+    storePath: process.env.AUTORUN_PATH || '/var/lib/ats/tokens/_autorun.json',
+  });
+  autorun.load();
+  autorun.start();   // re-arms timer if config is enabled
 
   if (BROKER_NAME === 'zerodha') {
     if (!fs.existsSync(MASTER_KEY_PATH)) {
@@ -328,6 +336,7 @@ app.get('/api/system/info', (_req, res) => {
       scanner:   scanner   ? scanner.stats()   : null,
       paper:     paper     ? paper.stats()     : null,
       pnl:       pnl       ? pnl.stats()       : null,
+      autorun:   autorun   ? autorun.stats()   : null,
     },
     auditLog: { path: AUDIT_LOG, sizeBytes: auditSize, lastWriteTs: auditLastTs, seq: auditSeq },
     config: {
@@ -896,6 +905,35 @@ app.post('/api/pnl/snapshot', (_req, res) => {
   if (!pnl) return res.status(503).json({ ok:false, reason:'pnl_not_initialized' });
   const row = pnl.snapshot();
   res.json({ ok:true, row });
+});
+
+// ---------- Strategy auto-runner ----------
+// GET /api/autorun -- current config + last 25 runs + stats
+app.get('/api/autorun', (_req, res) => {
+  if (!autorun) return res.status(503).json({ ok:false, reason:'autorun_not_initialized' });
+  res.json({ ok:true, config: autorun.config(), stats: autorun.stats(), history: autorun.history(25) });
+});
+// PUT /api/autorun  body: { enabled, strategy, symbol, params, qty, interval, intervalMinutes, candleLookbackDays }
+app.put('/api/autorun', (req, res) => {
+  if (!autorun) return res.status(503).json({ ok:false, reason:'autorun_not_initialized' });
+  try {
+    const cfg = autorun.setConfig(req.body || {});
+    res.json({ ok:true, config: cfg, stats: autorun.stats() });
+  } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
+});
+// POST /api/autorun/run -- manual evaluation trigger
+app.post('/api/autorun/run', async (_req, res) => {
+  if (!autorun) return res.status(503).json({ ok:false, reason:'autorun_not_initialized' });
+  try {
+    const run = await autorun.runOnce({ source: 'manual' });
+    res.json({ ok:true, run });
+  } catch (e) { res.status(500).json({ ok:false, reason:e.message }); }
+});
+// DELETE /api/autorun -- clear config + stop timer
+app.delete('/api/autorun', (_req, res) => {
+  if (!autorun) return res.status(503).json({ ok:false, reason:'autorun_not_initialized' });
+  autorun.clearConfig();
+  res.json({ ok:true, stats: autorun.stats() });
 });
 
 // ---------- Hyperparameter tuner ----------

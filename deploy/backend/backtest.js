@@ -210,4 +210,16 @@ function signalBollinger(closes, params) {
   return out;
 }
 
-module.exports = { runBacktest };
+
+function computeSignal({ candles, strategy, params }) {
+  if (!Array.isArray(candles) || candles.length < 30) return [];
+  const closes = candles.map(c => c.close);
+  params = params || {};
+  if (strategy === 'rsi_mean_revert') return signalRsiMeanRevert(closes, params);
+  if (strategy === 'ema_cross')       return signalEmaCross(closes, params);
+  if (strategy === 'macd_cross')      return signalMacdCross(closes, params);
+  if (strategy === 'bollinger')       return signalBollinger(closes, params);
+  throw new Error('unknown strategy: ' + strategy);
+}
+
+module.exports = { runBacktest, computeSignal };
