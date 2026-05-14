@@ -30,6 +30,7 @@ const { runBacktest, computeSignal } = require('./backtest');
 const { PaperTrading } = require('./paper');
 const { PnlAttribution } = require('./pnl-attribution');
 const { AutoRunner }   = require('./autorun');
+const { NewsFeed }     = require('./news');
 
 // ---------- Config ----------
 const PORT            = parseInt(process.env.PORT || '8080', 10);
@@ -60,7 +61,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news;
 
 async function init() {
   broker = createBroker(process.env);
@@ -118,6 +119,13 @@ async function init() {
   });
   autorun.load();
   autorun.start();   // re-arms timer if config is enabled
+
+  news = new NewsFeed({
+    watchlist, audit,
+    storePath: process.env.NEWS_PATH || '/var/lib/ats/tokens/_news.json',
+  });
+  news.load();
+  news.start();   // initial fetch + 10-min interval
 
   if (BROKER_NAME === 'zerodha') {
     if (!fs.existsSync(MASTER_KEY_PATH)) {
@@ -337,6 +345,7 @@ app.get('/api/system/info', (_req, res) => {
       paper:     paper     ? paper.stats()     : null,
       pnl:       pnl       ? pnl.stats()       : null,
       autorun:   autorun   ? autorun.stats()   : null,
+      news:      news      ? news.stats()      : null,
     },
     auditLog: { path: AUDIT_LOG, sizeBytes: auditSize, lastWriteTs: auditLastTs, seq: auditSeq },
     config: {
@@ -934,6 +943,25 @@ app.delete('/api/autorun', (_req, res) => {
   if (!autorun) return res.status(503).json({ ok:false, reason:'autorun_not_initialized' });
   autorun.clearConfig();
   res.json({ ok:true, stats: autorun.stats() });
+});
+
+// ---------- News feed ----------
+// GET /api/news?limit=50&symbol=RELIANCE&source=Moneycontrol
+app.get('/api/news', (req, res) => {
+  if (!news) return res.status(503).json({ ok:false, reason:'news_not_initialized' });
+  const items = news.list({ limit: req.query.limit, symbol: req.query.symbol, source: req.query.source });
+  res.json({ ok:true, items, stats: news.stats() });
+});
+// POST /api/news/refresh -- manual fetch trigger (returns summary)
+app.post('/api/news/refresh', async (_req, res) => {
+  if (!news) return res.status(503).json({ ok:false, reason:'news_not_initialized' });
+  const summary = await news.refresh();
+  res.json({ ok:true, summary, stats: news.stats() });
+});
+// GET /api/news/sources -- configured sources + last-fetch counts
+app.get('/api/news/sources', (_req, res) => {
+  if (!news) return res.status(503).json({ ok:false, reason:'news_not_initialized' });
+  res.json({ ok:true, sources: news.stats().sources, lastSummary: news.stats().lastSummary });
 });
 
 // ---------- Hyperparameter tuner ----------
