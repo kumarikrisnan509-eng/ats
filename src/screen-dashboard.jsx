@@ -349,6 +349,57 @@ const PipelineFlow = () => {
 const DashboardScreen = () => {
   const [tf, setTf] = useState("1D");
   const [demo] = window.useDemoMode();
+
+  // Tier 8: live dashboard metrics
+  const [liveDash, setLiveDash] = React.useState(null);
+  const [liveProfile, setLiveProfile] = React.useState(null);
+  React.useEffect(() => {
+    if (demo) return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const [holdings, paper, pnlDaily, pnlBy, profile] = await Promise.all([
+          window.fetchApi('/api/portfolio/holdings').catch(() => null),
+          window.fetchApi('/api/paper').catch(() => null),
+          window.fetchApi('/api/pnl/daily?days=30').catch(() => null),
+          window.fetchApi('/api/pnl/by-strategy').catch(() => null),
+          window.fetchApi('/api/profile').catch(() => null),
+        ]);
+        if (cancelled) return;
+        // Compute portfolio value from real holdings
+        const rows = (holdings && holdings.rows) || [];
+        const portfolioValue = rows.reduce((s, h) => s + (h.quantity || 0) * (h.ltp || h.last_price || 0), 0);
+        const portfolioPnl   = rows.reduce((s, h) => s + (h.pnl || 0), 0);
+        const portfolioInvested = rows.reduce((s, h) => s + (h.quantity || 0) * (h.average_price || h.avgPrice || 0), 0);
+        const portfolioPnlPct = portfolioInvested > 0 ? (portfolioPnl / portfolioInvested) * 100 : 0;
+        // Paper P&L
+        const paperRealized   = (paper && paper.stats && paper.stats.realizedPnl) || 0;
+        const paperUnrealized = (paper && paper.stats && paper.stats.unrealizedPnl) || 0;
+        const paperEquity     = (paper && paper.stats && paper.stats.totalEquity) || 0;
+        // Win rate from paper trades
+        const strats = (pnlBy && pnlBy.strategies) || [];
+        const totalTrades = strats.reduce((s, x) => s + (x.trades || 0), 0);
+        const totalWins   = strats.reduce((s, x) => s + (x.wins || 0), 0);
+        const winRate     = totalTrades > 0 ? (totalWins / totalTrades) * 100 : null;
+        // Equity series from daily snapshots
+        const dailyRows   = (pnlDaily && pnlDaily.rows) || [];
+        setLiveDash({
+          portfolioValue, portfolioPnl, portfolioPnlPct,
+          paperEquity, paperRealized, paperUnrealized,
+          paperTotalPnl: paperRealized + paperUnrealized,
+          winRate, totalTrades,
+          dailyEquity: dailyRows.map(r => ({ x: r.date, y: r.totalEquity })),
+          asOf: new Date().toISOString(),
+          holdingsCount: rows.length,
+        });
+        if (profile && profile.ok) setLiveProfile(profile.profile);
+      } catch (e) {}
+    };
+    refresh();
+    const id = setInterval(refresh, 30000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [demo]);
+  const fmtDate = () => new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   // R8.C3 — close-position confirmation. Closing routes a market order at LTP; never silent.
   const [closing, setClosing] = React.useState(null);   // { sym, qty, avg, ltp, pnl, strat }
   const equitySeries = useMemo(() => {
@@ -507,7 +558,7 @@ const DashboardScreen = () => {
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-header__title" style={{ fontSize: 24, marginBottom: 4 }}>Welcome back, Rajasekar · <span className="muted" style={{ fontWeight: 400 }}>Fri 24 Apr 2026</span></h1>
+          <h1 className="page-header__title" style={{ fontSize: 24, marginBottom: 4 }}>Welcome back, {liveProfile && liveProfile.userName ? liveProfile.userName.split(' ')[0] : 'Rajasekar'} · <span className="muted" style={{ fontWeight: 400 }}>{fmtDate()}</span></h1>
           <div className="page-header__sub">{demo ? "Demo mode · clean slate · no live data" : "Markets are live · 3 strategies running · 2 AI signals awaiting review"}</div>
         </div>
         <div className="page-header__right">
@@ -531,7 +582,7 @@ const DashboardScreen = () => {
       {/* KPI row */}
       <div className="grid grid-4" style={{ marginBottom: 16 }}>
         <Card>
-          <Stat label="Portfolio value" value={inrCompact(4827340)} delta={pct(2.14)} deltaKind="up" sub="today"/>
+          <Stat label="Portfolio value" value={inrCompact((liveDash && liveDash.portfolioValue) || 4827340)} delta={pct((liveDash && liveDash.portfolioPnlPct) || 2.14)} deltaKind={(liveDash && liveDash.portfolioPnl >= 0) ? "up" : "down"} sub={liveDash ? (liveDash.holdingsCount + " holdings") : "today"}/>
           <div style={{ marginTop: 10 }}>
             <LiveSparkline symbol="NIFTY" seed={1} color="var(--up)"/>
           </div>
@@ -539,7 +590,7 @@ const DashboardScreen = () => {
         <Card>
           <Stat
             label="Today's P&L"
-            value={<><CountUp value={18420 + livePnL.total} format={v => inr(Math.round(v))}/></>}
+            value={<><CountUp value={((liveDash && liveDash.paperTotalPnl) || 18420) + livePnL.total} format={v => inr(Math.round(v))}/></>}
             delta={pct((18420 + livePnL.total) / 4827340 * 100)}
             deltaKind={(18420 + livePnL.total) >= 0 ? "up" : "down"}
             sub={<>realized + MTM <StaleIndicator/></>}/>
@@ -548,12 +599,12 @@ const DashboardScreen = () => {
           </div>
         </Card>
         <Card>
-          <Stat label="Deployed capital" value={inrCompact(2840000)} delta="59%" deltaKind="muted" sub="of ₹48.3L"/>
+          <Stat label="Deployed capital" value={inrCompact((liveDash && liveDash.paperEquity) || 2840000)} delta={liveDash ? "paper" : "59%"} deltaKind="muted" sub={liveDash ? "totalEquity" : "of INR 48.3L"}/>
           <div style={{ marginTop: 14 }}><Progress value={59} kind="info"/></div>
         </Card>
         <Card>
-          <Stat label="Win rate (30d)" value="64.2%" delta="+3.1pp" deltaKind="up" sub="vs 30-d ago"/>
-          <div style={{ marginTop: 14 }}><Progress value={64.2} kind="up"/></div>
+          <Stat label="Win rate (30d)" value={(liveDash && liveDash.winRate != null) ? (liveDash.winRate.toFixed(1) + "%") : "64.2%"} delta={(liveDash && liveDash.totalTrades != null) ? (liveDash.totalTrades + " trades") : "+3.1pp"} deltaKind="up" sub={liveDash ? "paper trades" : "vs 30-d ago"}/>
+          <div style={{ marginTop: 14 }}><Progress value={(liveDash && liveDash.winRate != null) ? Math.max(0, Math.min(100, liveDash.winRate)) : 64.2} kind="up"/></div>
         </Card>
       </div>
 
