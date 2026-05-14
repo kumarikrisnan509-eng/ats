@@ -4,6 +4,29 @@
 
 const AIReviewScreen = () => {
   const [month, setMonth] = React.useState("2026-03");
+  // Tier 6: live Claude integration helpers
+  const [aiBusy, setAiBusy] = React.useState(false);
+  const [aiOutput, setAiOutput] = React.useState(null);
+  const [aiError, setAiError] = React.useState(null);
+  const [aiStats, setAiStats] = React.useState(null);
+  const askLiveAI = async () => {
+    setAiBusy(true); setAiError(null);
+    try {
+      const r = await window.fetchApi('/api/ai/strategy-explain', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          strategy: 'rsi_mean_revert', symbol: 'RELIANCE',
+          params: { period: 14, entryRsi: 30, exitRsi: 65 },
+          stats: { totalPnl: 1246, winRate: 100, maxDrawdownPct: 12 },
+        }),
+      });
+      if (r && r.ok) { setAiOutput(r.summary); setAiStats(r.stats); }
+      else { setAiError((r && r.reason) || 'AI call failed'); }
+    } catch (e) { setAiError(String(e.message || e)); }
+    finally { setAiBusy(false); }
+  };
+  // Also expose globally so anyone can trigger from devtools
+  window.atsAskLiveAI = askLiveAI;
 
   const months = [
     { v: "2026-03", label: "March 2026" },

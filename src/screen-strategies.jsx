@@ -38,7 +38,20 @@ const StrategiesScreen = () => {
 
   // Read from the canonical catalog (MODE_META → STRATEGY_CATALOG)
   // This is the same data the Trading Modes screen shows — single source of truth.
-  const strats = window.STRATEGY_CATALOG;
+  // Tier 6: prefer live /api/strategies (in backendStrats state) over local catalog
+  const strats = (Array.isArray(backendStrats) && backendStrats.length > 0)
+    ? backendStrats.map(s => ({
+        id: s.id || s.name,
+        name: s.name || s.id,
+        mode: 'live',
+        stage: 'live',
+        sharpe: null, winR: null, pnl30d: 0,
+        signals24h: 0, status: 'live',
+        params: s.params || {}, defaults: s.defaults || {},
+        description: s.description || s.name,
+        live: true,
+      }))
+    : (window.STRATEGY_CATALOG || []);
   const stBadge = {
     live:   { kind: "up",   txt: "LIVE" },
     paper:  { kind: "info", txt: "PAPER" },
