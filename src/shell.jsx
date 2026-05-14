@@ -106,6 +106,7 @@ const NAV_GROUPS = [
     label: "Wealth loop",
     items: [
       { id: "signals",    label: "AI Signals",     icon: I.brain,    badge: { text: "LIVE", kind: "live" } },
+      { id: "lab",        label: "Strategy Lab",   icon: I.code,     badge: { text: "NEW" } },
       { id: "paper",      label: "Paper trading",  icon: I.flame },
       { id: "trading",    label: "Live trading",   icon: I.trade },
       { id: "money",      label: "Money",          icon: I.coin,     badge: { text: "NEW", kind: "live" } },

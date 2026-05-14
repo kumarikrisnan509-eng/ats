@@ -40,6 +40,7 @@ const TITLES = {
   apidocs:    ["System",       "API & Webhooks"],
   compare:    ["Automate",     "Compare strategies"],
   money:      ["Wealth",       "Money (profits → long-term)"],
+  lab:        ["Validate",     "Strategy Lab"],
 };
 
 // Pre-auth hash routes — bypass the whole shell
@@ -175,6 +176,7 @@ function App() {
     apidocs:    window.ApiDocsScreen ? <window.ApiDocsScreen/> : null,
     compare:    window.StrategyCompare ? <window.StrategyCompare/> : null,
     money:      window.MoneyScreen ? <window.MoneyScreen/> : null,
+    lab:        window.StrategyLabScreen ? <window.StrategyLabScreen/> : null,
   };
 
   const [crumb, title] = TITLES[route] || TITLES.dashboard;
@@ -242,4 +244,4 @@ function App() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+ReactDOM.createRoot(document.getElementById("root")).r
