@@ -5,6 +5,25 @@
 const TunerScreen = () => {
   const [job, setJob] = React.useState("momentum-rsi-tuning");
   const [showNew, setShowNew] = React.useState(false);
+  // ---- live POST /api/tune (default: RELIANCE rsi_mean_revert 27-combo grid) ----
+  const [liveTune, setLiveTune] = React.useState(null);
+  const [liveTuneBusy, setLiveTuneBusy] = React.useState(false);
+  const runLiveTune = async () => {
+    setLiveTuneBusy(true);
+    try {
+      const to = new Date().toISOString().slice(0,10);
+      const from = new Date(Date.now() - 365*86400*1000).toISOString().slice(0,10);
+      const d = await window.fetchApi('/api/tune', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol: 'RELIANCE', strategy: 'rsi_mean_revert', from, to, qty: 10, interval: 'day', top: 5,
+          paramGrid: { period: [10,14,20], entryRsi: [25,30,35], exitRsi: [65,70,75] },
+        }),
+      });
+      if (d && d.ok) setLiveTune(d);
+    } catch (e) { /* surface via UI later */ } finally { setLiveTuneBusy(false); }
+  };
 
   const jobs = [
     {
@@ -282,7 +301,6 @@ const TunerScreen = () => {
             <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>New tuning job</div>
             <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 18 }}>Pick a strategy. We'll auto-detect tunable params.</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <Field label="Strategy"><select className="input"><option>Momentum AI v3</option><option>Iron Condor Weekly</option><option>Mean Reversion v2</option></select></Field>
               <Field label="Objective"><select className="input"><option>Maximize Sharpe ratio</option><option>Maximize Sortino ratio</option><option>Maximize total P&L</option><option>Minimize max drawdown</option></select></Field>
               <Field label="Backtest window"><select className="input"><option>1 year (rolling)</option><option>6 months</option><option>2 years</option></select></Field>
               <Field label="Iteration budget"><select className="input"><option>50 iterations (~1h)</option><option>100 iterations (~2h)</option><option>200 iterations (~5h)</option></select></Field>

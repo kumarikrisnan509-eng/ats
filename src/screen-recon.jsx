@@ -5,6 +5,20 @@
 const ReconScreen = () => {
   const [date, setDate] = React.useState("2026-04-23");
   const [filter, setFilter] = React.useState("all");
+  // ---- live /api/reconcile ----
+  const [liveRecon, setLiveRecon] = React.useState(null);
+  const [liveReconErr, setLiveReconErr] = React.useState(null);
+  React.useEffect(() => {
+    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const d = await window.fetchApi('/api/reconcile');
+        if (!cancelled && d && d.ok) setLiveRecon(d);
+      } catch (e) { if (!cancelled) setLiveReconErr(e.message); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const summary = {
     ours: { trades: 42, grossPnL: 18400, fees: 624, netPnL: 17776 },
@@ -39,6 +53,125 @@ const ReconScreen = () => {
     <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
         <div>
+          <div style={{ fontSize: 12, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>
+            Operations · Broker reconciliation
+          </div>
+          <div style={{ fontSize: 13, color: "var(--text-2)", marginTop: 4, maxWidth: 720 }}>
+            Daily match between our internal trade log and Zerodha contract notes. Runs automatically at 6 PM IST after market close. Mismatches must be resolved before books are closed for the day.
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input type="date" className="input" value={date} onChange={e => setDate(e.target.value)} style={{ width: 150 }}/>
+          <button className="btn btn-ghost">Re-run match</button>
+          <button className="btn btn-primary">Download contract note PDF</button>
+        </div>
+      </div>
+
+      {/* LIVE reconcile from /api/reconcile */}
+      {liveRecon && (
+        <Card style={{ marginBottom: 16, background: "var(--info-soft)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>
+              Live · broker={liveRecon.brokerName} {liveRecon.brokerConnected ? "● connected" : "○ disconnected"}
+            </div>
+            <div className="mono" style={{ fontSize: 13 }}>asOf: {new Date(liveRecon.asOf).toLocaleTimeString()}</div>
+            <div className="mono" style={{ fontSize: 13 }}>killSwitch: {String(liveRecon.killSwitch)}</div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginTop: 12 }}>
+            <div>
+              <div style={{ fontSize: 11, color: "var(--text-3)", textTransform: "uppercase", fontWeight: 700 }}>Cash drift</div>
+              <div className="mono" style={{ fontSize: 18, fontWeight: 700, color: (liveRecon.summary.cashDrift === 0 ? "var(--up)" : "var(--warn)") }}>₹{(liveRecon.summary.cashDrift ?? 0).toLocaleString("en-IN")}</div>
+              <div style={{ fontSize: 11, color: "var(--text-3)" }}>paper ₹{liveRecon.cash.paper.toLocaleString("en-IN")} · broker ₹{(liveRecon.cash.broker ?? 0).toLocaleString("en-IN")}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: "var(--text-3)", textTransform: "uppercase", fontWeight: 700 }}>Holdings drifts</div>
+              <div className="mono" style={{ fontSize: 18, fontWeight: 700, color: (liveRecon.summary.holdingsDrifts === 0 ? "var(--up)" : "var(--warn)") }}>{liveRecon.summary.holdingsDrifts}</div>
+              <div style={{ fontSize: 11, color: "var(--text-3)" }}>of {liveRecon.holdings.rows.length} merged rows</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: "var(--text-3)", textTransform: "uppercase", fontWeight: 700 }}>Paper pending</div>
+              <div className="mono" style={{ fontSize: 18, fontWeight: 700 }}>{liveRecon.summary.paperPendingCnt}</div>
+              <div style={{ fontSize: 11, color: "var(--text-3)" }}>open paper orders</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: "var(--text-3)", textTransform: "uppercase", fontWeight: 700 }}>Broker pending</div>
+              <div className="mono" style={{ fontSize: 18, fontWeight: 700 }}>{liveRecon.summary.brokerPendingCnt}</div>
+              <div style={{ fontSize: 11, color: "var(--text-3)" }}>open Kite orders</div>
+            </div>
+          </div>
+          {liveRecon.holdings.rows.length > 0 && (
+            <div style={{ marginTop: 14, overflowX: "auto" }}>
+              <table className="data-table" style={{ width: "100%", fontSize: 12 }}>
+                <thead>
+                  <tr><th>Symbol</th><th>Paper qty @ avg</th><th>Broker qty @ avg</th><th>LTP</th><th>Drift</th></tr>
+                </thead>
+                <tbody>
+                  {liveRecon.holdings.rows.map(r => (
+                    <tr key={r.symbol} style={{ background: r.matches ? "transparent" : "var(--warn-soft)" }}>
+                      <td className="mono">{r.symbol}</td>
+                      <td className="mono">{r.paperQty} @ ₹{r.paperAvg.toFixed(2)}</td>
+                      <td className="mono">{r.brokerQty} @ ₹{r.brokerAvg.toFixed(2)}</td>
+                      <td className="mono">₹{r.brokerLtp.toFixed(2)}</td>
+                      <td className="mono" style={{ color: r.matches ? "var(--up)" : "var(--warn)" }}>{r.qtyDrift}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      )}
+      {liveReconErr && !liveRecon && (
+        <Card style={{ marginBottom: 16, opacity: 0.7 }}>
+          <div style={{ fontSize: 12, color: "var(--text-3)" }}>Live reconcile fetch failed: {liveReconErr}. Showing decorative defaults below.</div>
+        </Card>
+      )}
+
+      {/* Match summary */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
+        <Card>
+          <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Trades matched</div>
+          <div className="mono" style={{ fontSize: 28, fontWeight: 700, marginTop: 6, color: "var(--up)" }}>{summary.matched}<span style={{ fontSize: 14, color: "var(--text-3)", fontWeight: 500 }}> / {summary.ours.trades}</span></div>
+          <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>{Math.round(summary.matched / summary.ours.trades * 100)}% match rate</div>
+        </Card>
+        <Card>
+          <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Mismatched</div>
+          <div className="mono" style={{ fontSize: 28, fontWeight: 700, marginTop: 6, color: "oklch(65% 0.13 80)" }}>{summary.mismatched}</div>
+          <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>Needs review before close</div>
+        </Card>
+        <Card>
+          <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Net PnL (ours)</div>
+          <div className="mono" style={{ fontSize: 28, fontWeight: 700, marginTop: 6 }}>+₹{summary.ours.netPnL.toLocaleString("en-IN")}</div>
+          <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>after ₹{summary.ours.fees} fees</div>
+        </Card>
+        <Card>
+          <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Net PnL (broker)</div>
+          <div className="mono" style={{ fontSize: 28, fontWeight: 700, marginTop: 6, color: "var(--down)" }}>+₹{summary.broker.netPnL.toLocaleString("en-IN")}</div>
+          <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>Diff: ₹{summary.ours.netPnL - summary.broker.netPnL} (fee undercount)</div>
+        </Card>
+      </div>
+
+      {/* Trade-level match */}
+      <Card title="Trade-level match" sub={`${filtered.length} trades · ${summary.mismatched} flagged for review`}>
+        <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
+          {["all", "mismatch", "matched"].map(f => (
+            <button key={f} className={filter === f ? "btn btn-primary" : "btn btn-ghost"} style={{ fontSize: 11, padding: "4px 10px", textTransform: "capitalize" }} onClick={() => setFilter(f)}>
+              {f === "all" ? `All (${rows.length})` : f === "mismatch" ? `Mismatched (${summary.mismatched})` : `Matched (${summary.matched})`}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "120px 140px 1fr 60px 60px 100px 100px 90px 90px 110px", padding: "8px 12px", borderBottom: "1px solid var(--border)", fontSize: 10, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600 }}>
+          <div>Our ID</div><div>Broker ID</div><div>Symbol</div><div>Side</div><div style={{ textAlign: "right" }}>Qty</div><div style={{ textAlign: "right" }}>Our price</div><div style={{ textAlign: "right" }}>Broker px</div><div style={{ textAlign: "right" }}>Our fee</div><div style={{ textAlign: "right" }}>Broker fee</div><div>Status</div>
+        </div>
+        {filtered.map((r, i) => {
+          const priceOk = r.ours === r.broker;
+          const feeOk = r.feeOur === r.feeBk;
+          return (
+            <div key={i} style={{
+              display: "grid", gridTemplateColumns: "120px 140px 1fr 60px 60px 100px 100px 90px 90px 110px",
+              padding: "10px 12px", borderBottom: i < filtered.length - 1 ? "1px solid var(--border)" : "none",
+              alignItems: "center", fontSize: 11, background: r.status !== "matched" ? "var(--warn-soft)" : "transparent",
           <div style={{ fontSize: 12, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>
             Operations · Broker reconciliation
           </div>

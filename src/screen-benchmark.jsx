@@ -3,6 +3,21 @@
 
 const BenchmarkScreen = () => {
   const [period, setPeriod] = React.useState("ytd");
+  // ---- live /api/benchmark for RELIANCE rsi_mean_revert vs NIFTY 50 (1y) ----
+  const [liveBench, setLiveBench] = React.useState(null);
+  React.useEffect(() => {
+    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
+    let cancelled = false;
+    const to = new Date().toISOString().slice(0,10);
+    const from = new Date(Date.now() - 365*86400*1000).toISOString().slice(0,10);
+    (async () => {
+      try {
+        const d = await window.fetchApi('/api/benchmark?symbol=RELIANCE&strategy=rsi_mean_revert&from=' + from + '&to=' + to + '&qty=10&period=14&entryRsi=30&exitRsi=65');
+        if (!cancelled && d && d.ok) setLiveBench(d);
+      } catch (e) { /* fall back to mock */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const periods = [
     { k: "1m", l: "1M" }, { k: "3m", l: "3M" }, { k: "ytd", l: "YTD" }, { k: "1y", l: "1Y" }, { k: "all", l: "All" },
@@ -202,7 +217,6 @@ const BenchmarkScreen = () => {
             ].map((row, i) => (
               <React.Fragment key={i}>
                 <div style={{ fontSize: 12, fontWeight: 500, padding: "8px 0" }}>{row.n}</div>
-                {row.results.map((r, j) => (
                   <div key={j} style={{ padding: 10, background: r ? "var(--up-soft)" : "var(--down-soft)", color: r ? "var(--up)" : "var(--down)", borderRadius: "var(--r-sm)", textAlign: "center", fontSize: 14, fontWeight: 700 }}>
                     {r ? "✓" : "×"}
                   </div>

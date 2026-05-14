@@ -9,6 +9,28 @@ const PaperScreen = () => {
     window.addEventListener("modes-changed", h);
     return () => window.removeEventListener("modes-changed", h);
   }, []);
+  // ---- live paper trading state from /api/paper, /paper/positions, /paper/orders ----
+  const [livePaper, setLivePaper] = React.useState(null);
+  const [livePositions, setLivePositions] = React.useState(null);
+  const [liveOrders, setLiveOrders] = React.useState(null);
+  React.useEffect(() => {
+    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [s, p, o] = await Promise.all([
+          window.fetchApi('/api/paper'),
+          window.fetchApi('/api/paper/positions'),
+          window.fetchApi('/api/paper/orders'),
+        ]);
+        if (cancelled) return;
+        if (s && s.ok) setLivePaper(s.stats);
+        if (p && p.ok) setLivePositions(p.positions || []);
+        if (o && o.ok) setLiveOrders(o.orders || o.list || []);
+      } catch (e) { /* fall back to mock */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
   const accounts = [
     { id: "10L", cap: 1000000, used: 412000, pnl: 18420,   trades: 34,  winR: 62 },
     { id: "25L", cap: 2500000, used: 1180000, pnl: 52840,  trades: 67,  winR: 66 },

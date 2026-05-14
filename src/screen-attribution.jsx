@@ -3,6 +3,24 @@
 
 const AttributionScreen = () => {
   const [lens, setLens] = React.useState("strategy");
+  // ---- live /api/pnl/by-strategy + /api/pnl/daily ----
+  const [liveByStrat, setLiveByStrat] = React.useState(null);
+  const [liveDaily, setLiveDaily] = React.useState(null);
+  React.useEffect(() => {
+    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [a, b] = await Promise.all([
+          window.fetchApi('/api/pnl/by-strategy'),
+          window.fetchApi('/api/pnl/daily?days=30'),
+        ]);
+        if (!cancelled && a && a.ok) setLiveByStrat(a.strategies || []);
+        if (!cancelled && b && b.ok) setLiveDaily({ rows: b.rows || [], stats: b.stats });
+      } catch (e) { /* fall back to mock */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const byStrategy = [
     { name: "Momentum AI",     pnl: 48200, trades: 142, pct: 39 },
@@ -68,6 +86,38 @@ const AttributionScreen = () => {
             ...byAlpha.map(a => ({ lens: "alpha-source", name: a.src, pnl: a.pnl, trades: "", pct: a.pct })),
           ]}/>
         </div>
+      )}
+
+      {/* LIVE paper-trading P&L from /api/pnl */}
+      {(liveByStrat || liveDaily) && (
+        <Card style={{ marginBottom: 16, background: "var(--info-soft)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>Live · paper trading</div>
+            {liveDaily && liveDaily.stats && liveDaily.stats.latest && (
+              <>
+                <div className="mono" style={{ fontSize: 13 }}>equity: ₹{liveDaily.stats.latest.totalEquity.toLocaleString("en-IN")}</div>
+                <div className="mono" style={{ fontSize: 13, color: liveDaily.stats.latest.realizedPnl >= 0 ? "var(--up)" : "var(--down)" }}>realized: ₹{liveDaily.stats.latest.realizedPnl.toFixed(2)}</div>
+                <div className="mono" style={{ fontSize: 13 }}>closed trades: {liveDaily.stats.latest.closedTrades}</div>
+              </>
+            )}
+          </div>
+          {liveByStrat && liveByStrat.length > 0 && (
+            <div style={{ marginTop: 10, fontSize: 12 }}>
+              {liveByStrat.map(s => (
+                <div key={s.strategy} style={{ display: "flex", gap: 12, padding: "4px 0" }}>
+                  <span className="mono" style={{ minWidth: 160, fontWeight: 600 }}>{s.strategy}</span>
+                  <span className="mono">trades={s.trades}</span>
+                  <span className="mono">winRate={s.winRate}%</span>
+                  <span className="mono" style={{ color: s.realizedPnl >= 0 ? "var(--up)" : "var(--down)" }}>realized=₹{s.realizedPnl.toFixed(2)}</span>
+                  <span className="mono">avg=₹{s.avgPnl.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {liveByStrat && liveByStrat.length === 0 && (
+            <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 8 }}>No closed paper trades yet. Place a BUY+SELL round-trip with a strategy tag to populate.</div>
+          )}
+        </Card>
       )}
 
       {/* Net PnL headline */}
@@ -184,7 +234,6 @@ const AttributionScreen = () => {
                     <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: "var(--down)" }}>₹{(s.pnl / 1000).toFixed(1)}k</div>
                   </div>
                 ))}
-                <div style={{ marginTop: 16, padding: 12, background: "var(--warn-soft)", borderRadius: "var(--r-sm)", fontSize: 11, color: "oklch(40% 0.12 80)" }}>
                   Both detractors share a high-volatility profile. AI suggests adding a volatility filter to signal gen.
                 </div>
               </div>
