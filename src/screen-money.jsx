@@ -322,52 +322,52 @@ const MoneyScreen = () => {
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <Field label="Cadence">
+              <MoneyField label="Cadence">
                 <select value={draft.cadence} onChange={e => setDraft({ ...draft, cadence: e.target.value })} style={selStyle}>
                   <option value="daily">Daily</option>
                   <option value="weekly">Weekly</option>
                   <option value="monthly">Monthly</option>
                 </select>
-              </Field>
-              <Field label="Min profit (₹)">
+              </MoneyField>
+              <MoneyField label="Min profit (₹)">
                 <input type="number" value={draft.minProfitINR} onChange={e => setDraft({ ...draft, minProfitINR: Number(e.target.value) || 0 })} style={inpStyle}/>
-              </Field>
+              </MoneyField>
 
-              <Field label="Sweep mode">
+              <MoneyField label="Sweep mode">
                 <select value={draft.sweepMode} onChange={e => setDraft({ ...draft, sweepMode: e.target.value })} style={selStyle}>
                   <option value="pct">Percent of excess</option>
                   <option value="absolute">Absolute (₹)</option>
                   <option value="all_above">Everything above threshold</option>
                 </select>
-              </Field>
+              </MoneyField>
               {draft.sweepMode === 'pct' && (
-                <Field label="Percent (%)">
+                <MoneyField label="Percent (%)">
                   <input type="number" value={draft.sweepPct} onChange={e => setDraft({ ...draft, sweepPct: Number(e.target.value) || 0 })} style={inpStyle}/>
-                </Field>
+                </MoneyField>
               )}
               {draft.sweepMode === 'absolute' && (
-                <Field label="Absolute (₹)">
+                <MoneyField label="Absolute (₹)">
                   <input type="number" value={draft.sweepAbsINR} onChange={e => setDraft({ ...draft, sweepAbsINR: Number(e.target.value) || 0 })} style={inpStyle}/>
-                </Field>
+                </MoneyField>
               )}
               {draft.sweepMode === 'all_above' && <div/>}
 
-              <Field label="Target symbol">
+              <MoneyField label="Target symbol">
                 <input value={draft.target} onChange={e => setDraft({ ...draft, target: e.target.value })} placeholder="NIFTYBEES" style={inpStyle}/>
-              </Field>
-              <Field label="Target kind">
+              </MoneyField>
+              <MoneyField label="Target kind">
                 <select value={draft.targetKind} onChange={e => setDraft({ ...draft, targetKind: e.target.value })} style={selStyle}>
                   <option value="etf">ETF</option>
                   <option value="sip">SIP / MF</option>
                   <option value="smallcase">Smallcase</option>
                   <option value="manual">Manual reminder</option>
                 </select>
-              </Field>
+              </MoneyField>
             </div>
 
-            <Field label="Notes (optional)">
+            <MoneyField label="Notes (optional)">
               <input value={draft.notes || ''} onChange={e => setDraft({ ...draft, notes: e.target.value })} placeholder="e.g., retirement bucket" style={inpStyle}/>
-            </Field>
+            </MoneyField>
 
             <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-3)', padding: 8, background: 'var(--bg-soft)', borderRadius: 6 }}>
               Preview: when {draft.cadence} profit &gt; ₹{Number(draft.minProfitINR || 0).toLocaleString('en-IN')}, sweep{' '}
@@ -392,7 +392,7 @@ const MoneyScreen = () => {
 
 const inpStyle = { width: '100%', padding: '6px 10px', fontSize: 13, background: 'var(--bg-soft)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-1)' };
 const selStyle = { ...inpStyle };
-const Field = ({ label, children }) => (
+const MoneyField = ({ label, children }) => (
   <div style={{ marginTop: 10 }}>
     <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4 }}>{label}</div>
     {children}
