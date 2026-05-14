@@ -82,7 +82,7 @@ class PaperTrading {
     }, 2000).unref();
   }
 
-  placeOrder({ symbol, side, qty, type, price }) {
+  placeOrder({ symbol, side, qty, type, price, strategy }) {
     if (!symbol || typeof symbol !== 'string') throw new Error('symbol required');
     side = String(side || '').toUpperCase();
     if (side !== 'BUY' && side !== 'SELL') throw new Error('side must be BUY or SELL');
@@ -95,16 +95,18 @@ class PaperTrading {
       p = Number(price);
       if (!Number.isFinite(p) || p <= 0) throw new Error('LIMIT order needs price > 0');
     }
+    const strat = (strategy && typeof strategy === 'string') ? strategy.trim().slice(0, 64) : null;
     const order = {
       id: crypto.randomUUID(),
       symbol: symbol.trim(),
       side, qty: q, type, price: p,
+      strategy: strat,
       status: 'PENDING',
       createdAt: new Date().toISOString(),
       filledAt: null, filledPrice: null,
     };
     this._orders.push(order);
-    this.audit('paper.order.placed', { id: order.id, symbol: order.symbol, side, qty: q, type, price: p });
+    this.audit('paper.order.placed', { id: order.id, symbol: order.symbol, side, qty: q, type, price: p, strategy: strat });
     this._schedulePersist();
     return order;
   }
@@ -174,6 +176,7 @@ class PaperTrading {
           openedAt: pos.openedAt, closedAt: order.filledAt,
           qty: closingQty, openPrice: pos.avgPrice, closePrice: price,
           realizedPnl: +realized.toFixed(2),
+          strategy: order.strategy || null,
         });
         const newQty = pos.qty + sign * order.qty;
         if (Math.abs(newQty) < 1e-9) {

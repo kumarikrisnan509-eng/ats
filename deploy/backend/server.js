@@ -28,6 +28,7 @@ const { Watchlist }    = require('./watchlist');
 const { Scanner, classifyRegime } = require('./scanner');
 const { runBacktest }  = require('./backtest');
 const { PaperTrading } = require('./paper');
+const { PnlAttribution } = require('./pnl-attribution');
 
 // ---------- Config ----------
 const PORT            = parseInt(process.env.PORT || '8080', 10);
@@ -58,7 +59,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl;
 
 async function init() {
   broker = createBroker(process.env);
@@ -100,6 +101,15 @@ async function init() {
     },
   });
   paper.load();
+
+  pnl = new PnlAttribution({
+    getStats:  () => paper.stats(),
+    getTrades: (n) => paper.trades(n),
+    storePath: process.env.PNL_PATH || '/var/lib/ats/tokens/_pnl-daily.json',
+    audit,
+  });
+  pnl.load();
+  pnl.start();   // initial snapshot + recurring every 6h
 
   if (BROKER_NAME === 'zerodha') {
     if (!fs.existsSync(MASTER_KEY_PATH)) {
@@ -317,6 +327,7 @@ app.get('/api/system/info', (_req, res) => {
       watchlist: watchlist ? watchlist.stats() : null,
       scanner:   scanner   ? scanner.stats()   : null,
       paper:     paper     ? paper.stats()     : null,
+      pnl:       pnl       ? pnl.stats()       : null,
     },
     auditLog: { path: AUDIT_LOG, sizeBytes: auditSize, lastWriteTs: auditLastTs, seq: auditSeq },
     config: {
@@ -866,6 +877,25 @@ app.post('/api/paper/reset', (_req, res) => {
   if (!paper) return res.status(503).json({ ok:false, reason:'paper_not_initialized' });
   paper.reset();
   res.json({ ok:true, stats: paper.stats() });
+});
+
+// ---------- P&L Attribution ----------
+// GET /api/pnl/daily?days=30 -- equity time series
+app.get('/api/pnl/daily', (req, res) => {
+  if (!pnl) return res.status(503).json({ ok:false, reason:'pnl_not_initialized' });
+  const days = Math.max(1, Math.min(730, parseInt(req.query.days || '30', 10) || 30));
+  res.json({ ok:true, days, rows: pnl.history(days), stats: pnl.stats() });
+});
+// GET /api/pnl/by-strategy -- aggregated closed-trade ledger
+app.get('/api/pnl/by-strategy', (_req, res) => {
+  if (!pnl) return res.status(503).json({ ok:false, reason:'pnl_not_initialized' });
+  res.json({ ok:true, strategies: pnl.byStrategy() });
+});
+// POST /api/pnl/snapshot -- manual snapshot trigger (ops endpoint)
+app.post('/api/pnl/snapshot', (_req, res) => {
+  if (!pnl) return res.status(503).json({ ok:false, reason:'pnl_not_initialized' });
+  const row = pnl.snapshot();
+  res.json({ ok:true, row });
 });
 
 // ---------- Hyperparameter tuner ----------
@@ -1746,7 +1776,6 @@ wss.on('connection', (ws, req) => {
 // ---------- Boot ----------
 (async () => {
   try {
-    await init();
     await startBrokerFanout();
     // Bind 0.0.0.0 inside the container; host exposure is restricted by docker-compose port mapping to 127.0.0.1.
 server.listen(PORT, '0.0.0.0', () => {
