@@ -1776,9 +1776,10 @@ wss.on('connection', (ws, req) => {
 // ---------- Boot ----------
 (async () => {
   try {
+    await init();
     await startBrokerFanout();
     // Bind 0.0.0.0 inside the container; host exposure is restricted by docker-compose port mapping to 127.0.0.1.
-server.listen(PORT, '0.0.0.0', () => {
+    server.listen(PORT, '0.0.0.0', () => {
       audit('server.start', { port: PORT, env: ENV_NAME, killSwitch: KILL_SWITCH, broker: broker.name });
       console.log(`ats-backend listening on 127.0.0.1:${PORT} (env=${ENV_NAME}, broker=${broker.name}, killSwitch=${KILL_SWITCH})`);
     });
@@ -1808,5 +1809,7 @@ process.on('unhandledRejection', (r) => {
 process.on('uncaughtException', (e) => {
   audit('error.uncaughtException', { message: e.message, stack: e.stack });
   console.error('uncaughtException:', e);
+  process.exit(1);
+});
   process.exit(1);
 });
