@@ -94,92 +94,79 @@ const KillSwitchButton = () => {
 
 const NAV_GROUPS = [
   {
-    // Zero-group: Dashboard floats above everything as the "home"
+    // Tier 9 IA streamline: 4-step wealth loop is the spine
+    //   AI Signal -> Paper trade -> Live trade -> Money (profits -> reinvest)
+    // Dashboard is the home. Everything else moves to overflow or sub-groups.
     label: null,
     items: [
-      { id: "dashboard",  label: "Dashboard",   icon: I.dashboard, badge: { text: "LIVE", kind: "live" } },
+      { id: "dashboard",  label: "Dashboard",      icon: I.dashboard, badge: { text: "LIVE", kind: "live" } },
     ],
   },
   {
-    // Hierarchy: Modes → Strategies → Signals
+    label: "Wealth loop",
+    items: [
+      { id: "signals",    label: "AI Signals",     icon: I.brain,    badge: { text: "LIVE", kind: "live" } },
+      { id: "paper",      label: "Paper trading",  icon: I.flame },
+      { id: "trading",    label: "Live trading",   icon: I.trade },
+      { id: "money",      label: "Money",          icon: I.coin,     badge: { text: "NEW", kind: "live" } },
+    ],
+  },
+  {
     label: "Automate",
     items: [
-      { id: "modes",      label: "Trading modes", icon: I.layers },
-      { id: "strategies", label: "Strategies",    icon: I.strategy,  badge: { text: "8" } },
-      { id: "signals",    label: "AI Signals",    icon: I.brain,     badge: { text: "12" } },
-      { id: "abtest",     label: "A/B testing",   icon: I.code,      badge: { text: "2" } },
-      { id: "compare",    label: "Compare",       icon: I.scale },
-      { id: "tuner",      label: "Auto-tuner",    icon: I.sparkle,   badge: { text: "1" } },
-      { id: "news",       label: "News & sentiment", icon: I.globe,  badge: { text: "8" } },
-      { id: "regime",     label: "Market regime",    icon: I.compass,   badge: { text: "trend" } },
-      { id: "alerts",     label: "Alerts builder",   icon: I.pulse,     badge: { text: "3", overflow: true } },
-      { id: "options",    label: "Options builder",  icon: I.options, overflow: true },
+      { id: "modes",      label: "Trading modes",  icon: I.layers },
+      { id: "strategies", label: "Strategies",     icon: I.strategy,  badge: { text: "8" } },
+      // moved to overflow -- still reachable, just not in the primary scan path
+      { id: "abtest",     label: "A/B testing",       icon: I.code,    overflow: true },
+      { id: "compare",    label: "Compare",           icon: I.scale,   overflow: true },
+      { id: "tuner",      label: "Auto-tuner",        icon: I.sparkle, overflow: true },
+      { id: "news",       label: "News & sentiment",  icon: I.globe,   overflow: true },
+      { id: "regime",     label: "Market regime",     icon: I.compass, overflow: true },
+      { id: "alerts",     label: "Alerts builder",    icon: I.pulse,   overflow: true },
+      { id: "options",    label: "Options builder",   icon: I.options, overflow: true },
+      { id: "backtest",   label: "Backtest lab",      icon: I.code,    overflow: true },
+      { id: "circuits",   label: "Circuit breakers",  icon: I.gauge,   overflow: true },
+      { id: "audit",      label: "Audit trail",       icon: I.check,   overflow: true },
+      { id: "margin",     label: "Margin calc",       icon: I.scale,   overflow: true },
     ],
   },
   {
-    label: "Validate",
-    items: [
-      { id: "backtest",   label: "Backtest lab",  icon: I.code },
-      { id: "paper",      label: "Paper trading", icon: I.flame,    badge: { text: "₹50L" } },
-      { id: "circuits",   label: "Circuit breakers", icon: I.gauge,  badge: { text: "13" } },
-    ],
-  },
-  {
-    label: "Execute",
-    items: [
-      { id: "trading",    label: "Live trading",  icon: I.trade },
-      { id: "audit",      label: "Audit trail",   icon: I.check },
-      { id: "margin",     label: "Margin calculator", icon: I.scale },
-    ],
-  },
-  {
-    // Wealth — regrouped: core → long-term plans → tax → social → brokers
-    label: "Wealth",
+    // Wealth & long-term — Money screen is the primary hub. Portfolio is here
+    // for the read-only holdings view. The rest moved to overflow as mock-heavy.
+    label: "Long-term",
     items: [
       { id: "portfolio",  label: "Portfolio",            icon: I.portfolio },
-      { id: "benchmark",  label: "Benchmarking",         icon: I.trendUp,   badge: { text: "top 18%" } },
-      { id: "copy",       label: "Copy trading",         icon: I.user,      badge: { text: "2" } },
-    ],
-  },
-  {
-    label: "Long-term plans",
-    items: [
-      { id: "goals",      label: "Life goals",           icon: I.target,    badge: { text: "5" } },
-      { id: "stpswp",     label: "STP / SWP plans",      icon: I.refresh,   badge: { text: "3" } },
-      { id: "smallcase",  label: "Smallcases",           icon: I.basket },
-      { id: "fixed",      label: "Fixed income & REITs", icon: I.coin },
-    ],
-  },
-  {
-    label: "Tax",
-    items: [
-      { id: "harvest",    label: "Tax-loss harvest",     icon: I.leaf,      badge: { text: "6" } },
-      { id: "tax",        label: "Tax &amp; ITR",        icon: I.calc },
-    ],
-  },
-  {
-    label: "Connections",
-    items: [
-      { id: "brokers",    label: "Brokers",              icon: I.broker,    badge: { text: "3/5" } },
+      // overflow: still works, just less screen real estate by default
+      { id: "goals",      label: "Life goals",           icon: I.target,    overflow: true },
+      { id: "stpswp",     label: "STP / SWP plans",      icon: I.refresh,   overflow: true },
+      { id: "smallcase",  label: "Smallcases",           icon: I.basket,    overflow: true },
+      { id: "fixed",      label: "Fixed income & REITs", icon: I.coin,      overflow: true },
+      { id: "benchmark",  label: "Benchmarking",         icon: I.trendUp,   overflow: true },
+      { id: "copy",       label: "Copy trading",         icon: I.user,      overflow: true },
+      { id: "harvest",    label: "Tax-loss harvest",     icon: I.leaf,      overflow: true },
+      { id: "tax",        label: "Tax & ITR",            icon: I.calc,      overflow: true },
     ],
   },
   {
     label: "Operations",
     items: [
-      { id: "review",      label: "AI monthly review", icon: I.report,    badge: { text: "MAR" } },
-      { id: "recon",       label: "Reconciliation",    icon: I.sync,      badge: { text: "2" } },
-      { id: "attribution", label: "PnL attribution",   icon: I.breakdown },
+      { id: "brokers",    label: "Brokers",           icon: I.broker, badge: { text: "3/5" } },
+      // overflow
+      { id: "review",      label: "AI monthly review", icon: I.report,    overflow: true },
+      { id: "recon",       label: "Reconciliation",    icon: I.sync,      overflow: true },
+      { id: "attribution", label: "PnL attribution",   icon: I.breakdown, overflow: true },
     ],
   },
   {
     label: "System",
     items: [
-      { id: "risk",       label: "Risk",          icon: I.shield },
-      { id: "compliance", label: "Compliance",    icon: I.shieldCheck, badge: { text: "SEBI" } },
-      { id: "infra",      label: "Infrastructure",icon: I.server },
-      { id: "mobile",     label: "Mobile app",    icon: I.phone,   badge: { text: "preview" } },
-      { id: "apidocs",    label: "API & Webhooks",icon: I.code,    badge: { text: "v1" } },
-      { id: "settings",   label: "Settings",      icon: I.settings },
+      { id: "settings",   label: "Settings",       icon: I.settings },
+      // overflow
+      { id: "risk",       label: "Risk",           icon: I.shield,      overflow: true },
+      { id: "compliance", label: "Compliance",     icon: I.shieldCheck, overflow: true },
+      { id: "infra",      label: "Infrastructure", icon: I.server,      overflow: true },
+      { id: "mobile",     label: "Mobile app",     icon: I.phone,       overflow: true },
+      { id: "apidocs",    label: "API & Webhooks", icon: I.code,        overflow: true },
     ],
   },
 ];
@@ -544,4 +531,4 @@ const ProfileMenu = ({ setRoute }) => {
   );
 };
 
-Object.assign(window, { Sidebar, TopBar });
+Object.assign(window, { Sidebar, TopBar }); 

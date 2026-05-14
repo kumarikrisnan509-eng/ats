@@ -33,6 +33,7 @@ const { AutoRunner }   = require('./autorun');
 const { NewsFeed }     = require('./news');
 const { TaxPlanner }   = require('./tax');
 const { ClaudeAI }     = require('./ai');
+const { SweepEngine }  = require('./sweep');
 const { runPreflight } = require('./preflight');
 const csvImport        = require('./csv-import');
 
@@ -65,7 +66,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep;
 
 async function init() {
   broker = createBroker(process.env);
@@ -139,6 +140,13 @@ async function init() {
   tax.load();
 
   ai = new ClaudeAI({ audit });
+
+  sweep = new SweepEngine({
+    getPaperStats: () => paper ? paper.stats() : {},
+    audit,
+    storePath: process.env.SWEEP_PATH || '/var/lib/ats/tokens/_sweep.json',
+  });
+  sweep.load();
 
   if (BROKER_NAME === 'zerodha') {
     if (!fs.existsSync(MASTER_KEY_PATH)) {
@@ -361,6 +369,7 @@ app.get('/api/system/info', (_req, res) => {
       news:      news      ? news.stats()      : null,
       tax:       tax       ? tax.stats()       : null,
       ai:        ai        ? ai.stats()        : null,
+      sweep:     sweep     ? sweep.stats()     : null,
     },
     auditLog: { path: AUDIT_LOG, sizeBytes: auditSize, lastWriteTs: auditLastTs, seq: auditSeq },
     config: {
@@ -1008,6 +1017,28 @@ app.post('/api/tax/realize', (req, res) => {
     const entry = tax.realizeHarvest((req.body && req.body.tradeIds) || [], req.body && req.body.note);
     res.json({ ok:true, entry });
   } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
+});
+
+// ---------- Sweep (profit -> long-term) ----------
+app.get('/api/sweep', (_req, res) => {
+  if (!sweep) return res.status(503).json({ ok:false, reason:'sweep_not_initialized' });
+  res.json({ ok:true, rules: sweep.getRules(), history: sweep.history(50), stats: sweep.stats() });
+});
+app.put('/api/sweep', (req, res) => {
+  if (!sweep) return res.status(503).json({ ok:false, reason:'sweep_not_initialized' });
+  try {
+    const rules = sweep.setRules((req.body && req.body.rules) || []);
+    res.json({ ok:true, rules });
+  } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
+});
+app.get('/api/sweep/evaluate', (_req, res) => {
+  if (!sweep) return res.status(503).json({ ok:false, reason:'sweep_not_initialized' });
+  res.json({ ok:true, ...sweep.evaluate() });
+});
+app.post('/api/sweep/execute', (_req, res) => {
+  if (!sweep) return res.status(503).json({ ok:false, reason:'sweep_not_initialized' });
+  const r = sweep.execute();
+  res.json({ ok:true, ...r });
 });
 
 // ---------- AI features (no-op if ANTHROPIC_API_KEY not set) ----------

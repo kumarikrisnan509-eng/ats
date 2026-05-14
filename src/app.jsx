@@ -39,6 +39,7 @@ const TITLES = {
   profile:    ["Account",      "Profile"],
   apidocs:    ["System",       "API & Webhooks"],
   compare:    ["Automate",     "Compare strategies"],
+  money:      ["Wealth",       "Money (profits → long-term)"],
 };
 
 // Pre-auth hash routes — bypass the whole shell
@@ -173,6 +174,7 @@ function App() {
     profile:    <ProfileScreen/>,
     apidocs:    window.ApiDocsScreen ? <window.ApiDocsScreen/> : null,
     compare:    window.StrategyCompare ? <window.StrategyCompare/> : null,
+    money:      window.MoneyScreen ? <window.MoneyScreen/> : null,
   };
 
   const [crumb, title] = TITLES[route] || TITLES.dashboard;
