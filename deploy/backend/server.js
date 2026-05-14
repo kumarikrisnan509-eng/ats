@@ -1811,5 +1811,4 @@ process.on('uncaughtException', (e) => {
   console.error('uncaughtException:', e);
   process.exit(1);
 });
-  process.exit(1);
-});
+ 
