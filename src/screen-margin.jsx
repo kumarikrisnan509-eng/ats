@@ -9,6 +9,27 @@ const MarginScreen = () => {
     { id: 4, sym: "BANKNIFTY 25APR 50000 PE", action: "SELL", qty: 25, price: 320, spanPct: 0.09, expPct: 0.035 },
   ]);
 
+  // Real available cash from Kite via /api/margins. Falls back to hardcoded if endpoint fails.
+  const [availableCash, setAvailableCash] = React.useState(null);
+  const [utilisedDebit, setUtilisedDebit] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const j = await window.fetchApi('/api/margins');
+        if (cancelled) return;
+        const eq = (j && j.margins && j.margins.equity) || null;
+        if (eq) {
+          setAvailableCash(eq.available && typeof eq.available.cash === 'number' ? eq.available.cash : (eq.available && eq.available.live_balance) || null);
+          setUtilisedDebit(eq.utilised && typeof eq.utilised.debits === 'number' ? eq.utilised.debits : null);
+        }
+      } catch (e) { /* fall back to hardcoded */ }
+    };
+    refresh();
+    const id = setInterval(refresh, 60000); // refresh every 60s
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
   const calcMargin = (l) => {
     if (l.fullPremium) {
       return { span: 0, exp: 0, premium: l.qty * l.price, total: l.qty * l.price };
@@ -59,8 +80,12 @@ const MarginScreen = () => {
         </Card>
         <Card>
           <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Available capital</div>
-          <div className="mono" style={{ fontSize: 22, fontWeight: 700, marginTop: 6 }}>₹4,18,400</div>
-          <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4, color: "var(--up)" }}>✓ Sufficient</div>
+          <div className="mono" style={{ fontSize: 22, fontWeight: 700, marginTop: 6 }}>
+            {availableCash != null ? `₹${Math.round(availableCash).toLocaleString("en-IN")}` : "₹4,18,400"}
+          </div>
+          <div style={{ fontSize: 11, marginTop: 4, color: availableCash != null && availableCash >= total.net ? "var(--up)" : "var(--text-3)" }}>
+            {availableCash != null ? (availableCash >= total.net ? "✓ Sufficient (live Kite balance)" : "⚠ Below required margin") : "(static fallback)"}
+          </div>
         </Card>
       </div>
 

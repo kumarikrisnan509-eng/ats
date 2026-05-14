@@ -2,6 +2,40 @@
 /* Strategies screen — mode is the primary grouping dimension */
 
 const StrategiesScreen = () => {
+  // Real backend strategy registry + watchlist backtest trigger, exposed via window helpers.
+  const [backendStrats, setBackendStrats] = React.useState([]);
+  const [runStatus, setRunStatus]         = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const j = await window.fetchApi('/api/strategies');
+        if (!cancelled) setBackendStrats((j && j.strategies) || []);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  window.atsBacktestWatchlist = async (stratId) => {
+    setRunStatus({ running: true, stratId });
+    const today = new Date().toISOString().slice(0, 10);
+    const ago   = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+    try {
+      const res = await fetch('/api/backtest/watchlist', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ strategy: stratId, from: ago, to: today, qty: 10, interval: 'day' }),
+      });
+      const j = await res.json();
+      setRunStatus({ running: false, stratId, result: j });
+      return j;
+    } catch (e) {
+      setRunStatus({ running: false, stratId, error: e.message });
+      return null;
+    }
+  };
+  window.atsBackendStrats = backendStrats;
+  window.atsRunStatus     = runStatus;
+
   // Read from the canonical catalog (MODE_META → STRATEGY_CATALOG)
   // This is the same data the Trading Modes screen shows — single source of truth.
   const strats = window.STRATEGY_CATALOG;

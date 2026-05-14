@@ -45,6 +45,34 @@ const SignalsScreen = () => {
     window.addEventListener("modes-changed", h);
     return () => window.removeEventListener("modes-changed", h);
   }, []);
+
+  // Real signals from /api/scanner/history. Polled every 30s.
+  const [realSignals, setRealSignals] = React.useState([]);
+  const [scannerStats, setScannerStats] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const [hist, stats] = await Promise.all([
+          window.fetchApi('/api/scanner/history?limit=20'),
+          window.fetchApi('/api/scanner'),
+        ]);
+        if (cancelled) return;
+        setRealSignals((hist && hist.history) || []);
+        setScannerStats(stats || null);
+      } catch (e) { /* keep last state */ }
+    };
+    refresh();
+    const id = setInterval(refresh, 30000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
+  const triggerScan = async () => {
+    try { await fetch('/api/scanner/run', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body:'{}' }); } catch {}
+  };
+  window.atsTriggerScan = triggerScan;
+  window.atsScannerStats = scannerStats;
+  window.atsRealSignals = realSignals;
   const cols = [
     {
       title: "1 · Signal",

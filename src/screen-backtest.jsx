@@ -26,9 +26,50 @@ const BacktestScreen = () => {
   };
   const constraints = modeConstraints[mode];
 
-  // Equity curves: in-sample vs out-of-sample
-  const eqIS  = seriesRandom(11, 60, 100, 184, 1.2);
-  const eqOOS = seriesRandom(13, 60, 100, 172, 1.0);
+  // REAL backtest from /api/backtest. Maps cockpit strategy names to backend strategy ids.
+  const stratIdMap = {
+    "Momentum AI":         "ema_cross",
+    "Mean Reversion v2":   "rsi_mean_revert",
+    "Iron Condor Weekly":  "bollinger",
+    "Grid Trader":         "bollinger",
+    "Trend Follow":        "macd_cross",
+    "NIFTY Futures Trend": "macd_cross",
+  };
+  const [eqIS,    setEqIS]    = React.useState(seriesRandom(11, 60, 100, 184, 1.2));
+  const [eqOOS,   setEqOOS]   = React.useState(seriesRandom(13, 60, 100, 172, 1.0));
+  const [btStats, setBtStats] = React.useState(null);
+  const [btErr,   setBtErr]   = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const stratId = stratIdMap[strat] || "rsi_mean_revert";
+      const today = new Date().toISOString().slice(0, 10);
+      const ago   = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+      try {
+        const res = await fetch('/api/backtest', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol: 'RELIANCE', strategy: stratId, from: ago, to: today, qty: 10, interval: 'day' }),
+        });
+        const j = await res.json();
+        if (cancelled) return;
+        if (j && j.ok && Array.isArray(j.equity)) {
+          const base = 100;
+          const curve = j.equity.map((p) => base + p.equity); // p.equity is cumulative INR pnl
+          const splitIdx = Math.max(5, Math.floor(curve.length * 0.7));
+          setEqIS(curve.slice(0, splitIdx));
+          setEqOOS(curve.slice(splitIdx).length >= 3 ? curve.slice(splitIdx) : curve.slice(-Math.min(20, curve.length)));
+          setBtStats(j.stats);
+          setBtErr(null);
+        } else {
+          setBtErr(j && j.reason ? j.reason : 'unknown');
+        }
+      } catch (e) { if (!cancelled) setBtErr(e.message); }
+    })();
+    return () => { cancelled = true; };
+  }, [strat]);
+  window.atsBacktestStats = btStats;
+  window.atsBacktestErr   = btErr;
 
   // Walk-forward windows
   const windows = [

@@ -43,12 +43,61 @@ const CircuitsScreen = () => {
     return ratio > 0.8 && ratio < 1;
   }).length;
 
-  const recentHalts = [
+  // Real recent halts/events from /api/audit. Falls back to mock if endpoint fails.
+  const __mockHalts = [
     { when: "Yesterday 14:42", who: "intraday-loss", what: "Intraday halted at -₹7,840 (limit -₹7,500)", action: "Auto-resumed today 09:15", color: "var(--warn)" },
     { when: "Apr 22 11:42",    who: "broker-disconnect", what: "Zerodha WS down 8s", action: "No orders missed · resumed in 8.3s", color: "var(--info)" },
     { when: "Apr 18 13:20",    who: "concentration", what: "HDFCBANK exposure hit 10.2%", action: "Blocked add-to · existing position kept", color: "var(--warn)" },
     { when: "Apr 4 09:18",     who: "vix-spike", what: "India VIX > 20 (geopolitical news)", action: "Intraday cap halved for the session", color: "var(--warn)" },
   ];
+  const [recentHalts, setRecentHalts] = React.useState(
+    (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) ? __mockHalts : []
+  );
+  React.useEffect(() => {
+    const _isDemo = window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn();
+    if (_isDemo) { setRecentHalts(__mockHalts); return; }
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        // Pull last 100 audit events and filter for circuit-like events.
+        const j = await window.fetchApi('/api/audit?limit=100');
+        if (cancelled) return;
+        // Events of interest for a circuit-breaker view:
+        //   order.blocked.*  (kill switch, validation, etc)
+        //   alert.fire      (price threshold breached)
+        //   internal.rejected (loopback security)
+        //   server.stop/start (uptime gaps)
+        const INTERESTING = /^(order\.blocked|alert\.fire|internal\.rejected|server\.stop|server\.start|autologin\.exchange\.error|broker\.rehydrate)/;
+        const matched = (j.rows || []).filter(r => INTERESTING.test(r.event || ''));
+        const fmtTime = (iso) => {
+          if (!iso) return '--';
+          const d = new Date(iso);
+          const now = new Date();
+          const sameDay = d.toDateString() === now.toDateString();
+          return sameDay ? d.toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' })
+                         : d.toLocaleString('en-IN',  { month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+        };
+        const colorFor = (ev) =>
+          ev.startsWith('alert.fire')           ? 'var(--accent)' :
+          ev.startsWith('order.blocked')        ? 'var(--down)'   :
+          ev.startsWith('autologin.exchange')   ? 'var(--warn)'   :
+          ev.startsWith('internal.rejected')    ? 'var(--warn)'   :
+          'var(--info)';
+        setRecentHalts(matched.slice(0, 10).map(r => ({
+          when:   fmtTime(r.ts),
+          who:    r.event,
+          what:   typeof r.data === 'object' ? JSON.stringify(r.data).slice(0, 80) : String(r.data || ''),
+          action: 'Recorded in audit log',
+          color:  colorFor(r.event || ''),
+        })));
+      } catch (e) {
+        if (!cancelled) setRecentHalts([]);
+      }
+    };
+    refresh();
+    const id = setInterval(refresh, 30000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
 
   const overrideCircuit = (c) => {
     setConfirm({
