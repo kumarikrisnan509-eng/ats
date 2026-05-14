@@ -312,6 +312,128 @@ app.get('/api/system/info', (_req, res) => {
   });
 });
 
+// ---------- Prometheus /metrics ----------
+// Plain text exposition format (no client lib). Scrapeable by Prometheus / Datadog / VictoriaMetrics.
+// Loopback or internal IPs only -- public exposure of internal counters is a small info leak.
+app.get('/metrics', (req, res) => {
+  const ra = (req.ip || req.connection.remoteAddress || '').replace('::ffff:', '');
+  if (!isInternalIp(ra)) {
+    // Allow GH Actions + monitoring tools that pass a shared metrics token if configured.
+    const tok = process.env.ATS_METRICS_TOKEN || '';
+    if (!tok || req.headers['x-metrics-token'] !== tok) {
+      return res.status(403).type('text/plain').send('forbidden');
+    }
+  }
+  const lines = [];
+  const push = (help, type, name, value, labels) => {
+    lines.push(`# HELP ${name} ${help}`);
+    lines.push(`# TYPE ${name} ${type}`);
+    const lbl = labels ? '{' + Object.entries(labels).map(([k,v]) => `${k}="${String(v).replace(/"/g,'')}"`).join(',') + '}' : '';
+    lines.push(`${name}${lbl} ${value}`);
+  };
+  const b = broker.health();
+  push('Broker connection (1=connected)',        'gauge', 'ats_broker_connected',              b.connected ? 1 : 0);
+  push('Subscribed Kite instrument tokens',      'gauge', 'ats_broker_subscribed_instruments', b.subscribedInstruments || 0);
+  push('Active /ws subscribers',                 'gauge', 'ats_broker_ws_subscribers',         b.subscribers || 0);
+  push('Ticker reconnect attempts (cumulative)', 'gauge', 'ats_broker_reconnect_attempts',     b.reconnectAttempts || 0);
+  push('Has access token cached',                'gauge', 'ats_broker_has_access_token',       b.hasAccessToken ? 1 : 0);
+  push('Last tick epoch (ms)',                   'gauge', 'ats_broker_last_tick_ms',           b.lastTickAt || 0);
+  push('Tick lag in ms',                         'gauge', 'ats_broker_lag_ms',                 b.lagMs || 0);
+  push('Instruments master size',                'gauge', 'ats_instruments_count',             (b.instruments && b.instruments.size) || 0);
+  if (alerts) {
+    const a = alerts.stats();
+    push('Total alerts',     'gauge',   'ats_alerts_total',     a.total || 0);
+    push('Active alerts',    'gauge',   'ats_alerts_active',    a.active || 0);
+    push('Triggered alerts', 'gauge',   'ats_alerts_triggered', a.triggered || 0);
+    push('Alert eval count', 'counter', 'ats_alerts_evals_total', a.evals || 0);
+    push('Alert fire count', 'counter', 'ats_alerts_fires_total', a.fires || 0);
+  }
+  if (watchlist) {
+    push('Watchlist symbol count', 'gauge', 'ats_watchlist_count', watchlist.stats().count || 0);
+  }
+  if (scanner) {
+    const s = scanner.stats();
+    push('Scanner history count',  'gauge', 'ats_scanner_history_count',   s.historyCount || 0);
+    push('Scanner debounce keys',  'gauge', 'ats_scanner_debounce_keys',   s.debounceKeys || 0);
+  }
+  push('Audit log seq number',           'counter', 'ats_audit_seq_total',     auditSeq);
+  push('Active /ws client connections',  'gauge',   'ats_ws_clients',          wsClients.size);
+  push('Process uptime seconds',         'counter', 'ats_process_uptime_seconds', Math.floor(process.uptime()));
+  push('Process RSS bytes',              'gauge',   'ats_process_rss_bytes',   process.memoryUsage().rss);
+  push('KILL_SWITCH active (1=killed)',  'gauge',   'ats_kill_switch',         KILL_SWITCH ? 1 : 0);
+  res.type('text/plain; version=0.0.4').send(lines.join('\n') + '\n');
+});
+
+// ---------- Kite order postback webhook ----------
+// Kite calls this URL when order events fire (FILLED, REJECTED, CANCELLED, MODIFIED, etc).
+// Configure the URL in the Kite developer dashboard: https://developers.kite.trade/apps/
+// Set "Postback URL" to:  https://ats.rajasekarselvam.com/api/brokers/zerodha/postback
+//
+// Kite signs the payload with sha256(order_id + status + api_secret).
+// We verify, audit, fan out to /ws clients, and Telegram-notify on FILLED/REJECTED.
+app.post('/api/brokers/zerodha/postback', (req, res) => {
+  const body = req.body || {};
+  if (!body.order_id || !body.status || !body.checksum) {
+    audit('postback.invalid', { reason: 'missing_required_fields', body });
+    return res.status(400).json({ ok: false, reason: 'missing required fields' });
+  }
+  // HMAC verification
+  const expected = crypto
+    .createHash('sha256')
+    .update(String(body.order_id) + String(body.status) + (process.env.ZERODHA_API_SECRET || process.env.KITE_API_SECRET || ''))
+    .digest('hex');
+  if (expected !== String(body.checksum).toLowerCase()) {
+    audit('postback.invalid', { reason: 'checksum_mismatch', orderId: body.order_id, status: body.status });
+    return res.status(401).json({ ok: false, reason: 'checksum mismatch' });
+  }
+  // Verified — audit it.
+  audit('postback.received', {
+    orderId: body.order_id,
+    status: body.status,
+    symbol: body.tradingsymbol,
+    side: body.transaction_type,
+    qty: body.filled_quantity,
+    avg: body.average_price,
+  });
+
+  // Fan out to /ws clients so the UI can update order tables in real time.
+  const payload = JSON.stringify({
+    type: 'order_update',
+    orderId:     body.order_id,
+    status:      body.status,
+    symbol:      body.tradingsymbol,
+    exchange:    body.exchange,
+    side:        body.transaction_type,
+    quantity:    body.quantity,
+    filledQty:   body.filled_quantity,
+    pendingQty:  body.pending_quantity,
+    price:       body.price,
+    avgPrice:    body.average_price,
+    statusMsg:   body.status_message,
+    ts:          Date.now(),
+  });
+  for (const ws of wsClients) {
+    if (ws.readyState === 1) ws.send(payload);
+  }
+
+  // Telegram notification on terminal states.
+  const terminal = ['COMPLETE', 'REJECTED', 'CANCELLED'];
+  if (terminal.includes(String(body.status).toUpperCase())) {
+    const emoji = body.status === 'COMPLETE' ? 'success' : 'warn';
+    notify(emoji, `Order ${body.status}: ${body.tradingsymbol}`, {
+      body: body.status_message || '',
+      fields: {
+        orderId:  body.order_id,
+        side:     body.transaction_type,
+        qty:      `${body.filled_quantity || 0} / ${body.quantity || 0}`,
+        avgPrice: body.average_price || '-',
+      },
+    }).catch(() => {});
+  }
+
+  res.json({ ok: true, received: true });
+});
+
 // Health
 app.get('/api/health', (_req, res) => {
   res.json({
