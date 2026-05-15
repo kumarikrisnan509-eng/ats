@@ -2447,6 +2447,117 @@ app.post('/api/me/broker-test', withAuth(async (req, res) => {
   }
 }));
 
+// ---------- Tier 62: per-user Kite OAuth flow ----------
+// HMAC-signed state token so callback can identify the user without trusting URL query.
+// state = base64url(userId).base64url(nonce).hex(HMAC_SHA256(userId|nonce, masterKey))
+const _pendingNonces = new Map(); // nonce -> { userId, exp }
+
+function _b64u(buf) { return Buffer.from(buf).toString('base64').replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
+function _b64uDecode(s) { s = s.replace(/-/g,'+').replace(/_/g,'/'); while (s.length % 4) s += '='; return Buffer.from(s, 'base64'); }
+
+function _signState(userId) {
+  const nonce = crypto.randomBytes(12).toString('hex');
+  // Master key lives at MASTER_KEY_PATH; use the vault's key as HMAC secret.
+  // We don't expose the key; we just read it once.
+  const keyBuf = require('fs').readFileSync(MASTER_KEY_PATH || '/var/lib/ats/master.key');
+  const payload = `${userId}|${nonce}`;
+  const sig = crypto.createHmac('sha256', keyBuf).update(payload).digest('hex');
+  _pendingNonces.set(nonce, { userId, exp: Date.now() + 5 * 60 * 1000 });
+  // Periodic cleanup
+  if (_pendingNonces.size > 100) {
+    const now = Date.now();
+    for (const [k, v] of _pendingNonces) if (v.exp < now) _pendingNonces.delete(k);
+  }
+  return `${_b64u(String(userId))}.${_b64u(nonce)}.${sig}`;
+}
+
+function _verifyState(state) {
+  if (!state || typeof state !== 'string') return null;
+  const parts = state.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const userId = parseInt(_b64uDecode(parts[0]).toString('utf8'), 10);
+    const nonce = _b64uDecode(parts[1]).toString('utf8');
+    const sig = parts[2];
+    if (!Number.isFinite(userId)) return null;
+    const keyBuf = require('fs').readFileSync(MASTER_KEY_PATH || '/var/lib/ats/master.key');
+    const expected = crypto.createHmac('sha256', keyBuf).update(`${userId}|${nonce}`).digest('hex');
+    if (!crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(expected, 'hex'))) return null;
+    const rec = _pendingNonces.get(nonce);
+    if (!rec || rec.userId !== userId || rec.exp < Date.now()) return null;
+    _pendingNonces.delete(nonce); // single use
+    return userId;
+  } catch (_) { return null; }
+}
+
+// GET /api/me/broker/oauth-url -> { ok, url }
+// Builds the Kite login URL using the user's own api_key.
+app.get('/api/me/broker-oauth-url', withAuth(async (req, res) => {
+  try {
+    const row = db.brokers.getByBroker(req.user.id, 'zerodha');
+    if (!row || !row.api_key) {
+      return res.status(412).json({ ok: false, reason: 'no_credentials', detail: 'Save api_key + api_secret first.' });
+    }
+    const apiKey = await vault.open(row.api_key);
+    const state = _signState(req.user.id);
+    // Kite Connect login URL: append ?api_key=...&v=3 and ?state= (Kite passes state back unchanged)
+    const url = `https://kite.zerodha.com/connect/login?api_key=${encodeURIComponent(apiKey)}&v=3&state=${encodeURIComponent(state)}`;
+    res.json({ ok: true, url, expiresInSec: 300 });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: 'url_build_failed', detail: e.message });
+  }
+}));
+
+// Per-user callback. If state is present, prefer per-user flow over legacy global.
+// Kite redirects with ?request_token=...&action=login&status=success&state=...
+app.get('/api/me/broker-callback', async (req, res) => {
+  const rt = req.query.request_token;
+  const state = req.query.state;
+  if (!rt) return res.status(400).send('Missing request_token.');
+  const userId = _verifyState(state);
+  if (!userId) return res.status(400).send('Invalid or expired state token. Please retry from the Brokers screen.');
+  try {
+    const row = db.brokers.getByBroker(userId, 'zerodha');
+    if (!row) return res.status(404).send('No Zerodha credentials on file for this user.');
+    const apiKey    = row.api_key      ? await vault.open(row.api_key)      : null;
+    const apiSecret = row.refresh_token ? await vault.open(row.refresh_token) : null;
+    if (!apiKey || !apiSecret) return res.status(412).send('Incomplete credentials.');
+
+    // Build a one-shot KiteConnect for this user to exchange the request_token.
+    const { KiteConnect } = require('kiteconnect');
+    const kc = new KiteConnect({ api_key: apiKey });
+    const session = await kc.generateSession(rt, apiSecret);
+    const sealedAccessToken = await vault.seal(session.access_token);
+    // Tokens issued today expire at ~6:00 AM IST the next morning.
+    const now = new Date();
+    const expiresAt = new Date(now);
+    expiresAt.setUTCHours(0, 30, 0, 0); // 06:00 IST = 00:30 UTC
+    if (expiresAt < now) expiresAt.setUTCDate(expiresAt.getUTCDate() + 1);
+    db.brokers.updateTokens(row.id, userId, sealedAccessToken, now.toISOString(), expiresAt.toISOString());
+    // Also persist client_id (broker_user_id) if Kite gave us one
+    if (session.user_id && !row.broker_user_id) {
+      db._conn.prepare('UPDATE broker_accounts SET broker_user_id = ? WHERE id = ?').run(session.user_id, row.id);
+    }
+    // Invalidate cached per-user broker instance so next request rebuilds with new token.
+    try { _brokerResolver.invalidate(userId); } catch (_) {}
+
+    audit('zerodha.connected.per-user', { userId, kiteUserId: session.user_id });
+
+    // Pretty redirect page that closes the popup and pings the opener.
+    res.set('Content-Type', 'text/html');
+    res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Zerodha connected</title>
+<style>body{font-family:-apple-system,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#f8fafc;color:#0f172a}.card{padding:32px;border-radius:12px;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.08);text-align:center}.ok{color:#059669;font-size:48px}h1{font-size:18px;margin:12px 0 4px}.muted{color:#64748b;font-size:13px}</style>
+</head><body><div class="card"><div class="ok">&#10003;</div><h1>Zerodha connected</h1><div class="muted">You can close this window. Returning to ATS...</div></div>
+<script>
+  try { if (window.opener) window.opener.postMessage({ type: 'ats-broker-connected', broker: 'zerodha' }, '*'); } catch (e) {}
+  setTimeout(() => { try { window.close(); } catch (e) {} window.location.href = '/#brokers?connected=1'; }, 1200);
+</script></body></html>`);
+  } catch (e) {
+    audit('zerodha.callback.per-user.error', { userId, msg: e.message });
+    res.status(500).set('Content-Type', 'text/html').send(`<!DOCTYPE html><html><body style="font-family:sans-serif;padding:24px"><h2>Connection failed</h2><p>${(e.message || 'unknown').replace(/[<>&]/g, '')}</p><p><a href="/#brokers">Back to Brokers</a></p></body></html>`);
+  }
+});
+
 // ---------- Tier 50/51: auth endpoints (signup, login, logout, verify, reset) ----------
 app.post('/api/auth/signup', async (req, res) => {
   if (!auth) return res.status(503).json({ ok:false, reason:'auth_not_initialized' });

@@ -132,6 +132,31 @@ const BrokersScreen = () => {
   const myZerodha = myBrokers.find(b => b.broker === 'zerodha');
   const [testResult, setTestResult] = React.useState(null);
   const [testing, setTesting] = React.useState(false);
+  const startReauth = async () => {
+    setTestResult({ ok: null, msg: 'Opening Kite login window...' });
+    try {
+      const r = await fetch('/api/me/broker-oauth-url', { credentials: 'include' });
+      const j = await r.json();
+      if (!r.ok || !j.ok) {
+        setTestResult({ ok: false, msg: j.detail || j.reason || `HTTP ${r.status}` });
+        return;
+      }
+      const popup = window.open(j.url, 'kite-reauth', 'width=520,height=720,popup=1');
+      if (!popup) { setTestResult({ ok: false, msg: 'Popup blocked. Allow popups for this site and retry.' }); return; }
+      const onMsg = (ev) => {
+        if (ev.data && ev.data.type === 'ats-broker-connected') {
+          window.removeEventListener('message', onMsg);
+          setTestResult({ ok: true, msg: 'Kite connected. Access token refreshed.' });
+          refreshMyBrokers();
+        }
+      };
+      window.addEventListener('message', onMsg);
+      // Auto-cleanup if popup closes without reaching the callback
+      const watch = setInterval(() => { if (popup.closed) { clearInterval(watch); window.removeEventListener('message', onMsg); } }, 800);
+    } catch (e) {
+      setTestResult({ ok: false, msg: e.message || 'OAuth start failed' });
+    }
+  };
   const testConnection = async () => {
     setTesting(true); setTestResult(null);
     try {
@@ -308,7 +333,7 @@ const BrokersScreen = () => {
                     <button
                       className="btn btn--sm"
                       style={{ flex: 1, minWidth: 70, justifyContent: "center" }}
-                      onClick={() => window.location.href = '/api/brokers/zerodha/login'}
+                      onClick={() => startReauth()}
                     >Reauth</button>
                     <button
                       className="btn btn--sm"
