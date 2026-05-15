@@ -1,22 +1,12 @@
 #!/usr/bin/env node
-// auto-login-host.js — runs on the VM HOST (not in container).
-// Driven by /etc/cron.d/ats-auto-login at 08:50 IST.
+// auto-login-host.js (Tier 30.1) -- runs on the VM HOST (not in container).
+// Driven by /etc/cron.d/ats-auto-login at 06:10 IST.
 //
-// Flow:
-//   1. GET  http://127.0.0.1:8080/api/brokers/zerodha/auto-login/bundle
-//      → receives loginUrl + userId + password + totpSeed
-//   2. Launch headless Chromium (Playwright)
-//   3. Fill user_id + password + TOTP
-//   4. Capture redirect to /api/brokers/zerodha/callback?request_token=...
-//   5. POST http://127.0.0.1:8080/api/brokers/zerodha/auto-login/exchange
-//      with the captured request_token
-//   6. Backend exchanges + seals + notifies (notify.js → Telegram)
+// Hardened for Oracle Cloud Ampere A1 (ARM64). Adds:
+//   - per-step logging so a hang reveals which await is stuck
+//   - explicit launch timeout (60s) so a hang is observable, not infinite
+//   - additional Chromium flags known to fix ARM64 launch hangs
 //
-// Host setup:
-//   apt install -y nodejs npm
-//   sudo npm install -g playwright otplib
-//   sudo npx playwright install --with-deps chromium
-
 'use strict';
 
 const http  = require('http');
@@ -29,8 +19,10 @@ try { otplib = require('otplib'); } catch (e) { console.error('Missing otplib:',
 try { ({ chromium } = require('playwright')); } catch (e) { console.error('Missing playwright:', e.message); process.exit(2); }
 
 const FAIL_DIR = '/var/log/ats/autologin-failures';
-const TIMEOUT  = 90_000;
 
+function step(label) {
+  console.log(`[${new Date().toISOString()}] STEP: ${label}`);
+}
 function jitter(b, s) { return b + Math.floor(Math.random() * s); }
 function sleep(ms)    { return new Promise(r => setTimeout(r, ms)); }
 
@@ -77,25 +69,24 @@ async function captureFailure(page, ts, label) {
 (async () => {
   const startedAt = new Date();
   const ts = Date.now();
-  console.log(`[${startedAt.toISOString()}] auto-login-host: starting`);
+  step('starting');
 
-  // 0. Self-guard: skip if broker is already connected. Avoids the "Token is invalid or
-  //    has expired" error that Kite returns when generateSession is called against an
-  //    account that already has an active session (one-session-per-api-key rule).
+  // 0. Self-guard: skip if broker is already connected.
   try {
     const healthResp = await httpRequest({
       method: 'GET',
       url: 'http://127.0.0.1:8080/api/health',
     });
     if (healthResp.status === 200 && healthResp.body && healthResp.body.broker && healthResp.body.broker.connected) {
-      console.log('  broker already connected; skipping auto-login (Kite allows one session per api_key)');
+      step('already connected -- skipping');
       process.exit(0);
     }
   } catch (_e) {
-    console.log('  health check failed; proceeding with login anyway');
+    step('health check failed -- proceeding anyway');
   }
 
   // 1. Get bundle
+  step('fetching auto-login bundle');
   const bundleResp = await httpRequest({
     method: 'GET',
     url: 'http://127.0.0.1:8080/api/brokers/zerodha/auto-login/bundle',
@@ -105,21 +96,41 @@ async function captureFailure(page, ts, label) {
     process.exit(3);
   }
   const { loginUrl, userId, password, totpSeed } = bundleResp.body;
-  console.log(`  bundle ok: userId=${userId}, loginUrl length=${loginUrl.length}`);
+  step(`bundle ok: userId=${userId}, loginUrl length=${loginUrl.length}`);
 
   // 2. Drive Kite UI
   let browser, page;
   let captured = null;
   try {
+    step('calling chromium.launch() -- ARM64-hardened args, 60s timeout');
     browser = await chromium.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-blink-features=AutomationControlled', '--disable-dev-shm-usage'],
+      timeout: 60_000,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-blink-features=AutomationControlled',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-software-rasterizer',
+        '--disable-accelerated-2d-canvas',
+        '--no-zygote',
+        '--no-first-run',
+        '--disable-extensions',
+        '--disable-background-networking',
+        '--disable-default-apps',
+      ],
     });
+    step('chromium launched');
+
     const context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
       viewport: { width: 1280, height: 800 },
     });
+    step('context created');
+
     page = await context.newPage();
+    step('page created');
 
     page.on('request', (req) => {
       const u = req.url();
@@ -128,29 +139,29 @@ async function captureFailure(page, ts, label) {
       }
     });
 
-    console.log('  navigating to Kite login');
+    step('navigating to Kite login');
     await page.goto(loginUrl, { waitUntil: 'networkidle', timeout: 20_000 });
+    step('Kite login page loaded');
 
-    // user_id + password
     await page.waitForSelector('input[type=text], input#userid', { timeout: 10_000 });
     await page.fill('input[type=text], input#userid', userId, { timeout: 5_000 });
     await sleep(jitter(150, 300));
     await page.fill('input[type=password]', password, { timeout: 5_000 });
     await sleep(jitter(150, 300));
-    console.log('  filled user_id + password');
+    step('filled user_id + password');
 
     await Promise.any([
       page.click('button[type=submit]'),
       page.click('button:has-text("Login")'),
     ]).catch(() => {});
+    step('submitted login form');
 
-    // TOTP
     await page.waitForSelector(
       'input[label*="TOTP" i], input[placeholder*="TOTP" i], input[label*="External TOTP" i], input[type=number], input[maxlength="6"]',
       { timeout: 10_000 }
     );
     const code = otplib.authenticator.generate(totpSeed);
-    console.log(`  generated TOTP (${code.length} digits)`);
+    step(`generated TOTP (${code.length} digits)`);
     await sleep(jitter(200, 400));
     await page.fill(
       'input[label*="TOTP" i], input[placeholder*="TOTP" i], input[label*="External TOTP" i], input[type=number], input[maxlength="6"]',
@@ -162,8 +173,8 @@ async function captureFailure(page, ts, label) {
       page.click('button:has-text("Continue")'),
       page.waitForURL(/request_token=/, { timeout: 12_000 }),
     ]).catch(() => {});
+    step('submitted TOTP, waiting for request_token redirect');
 
-    // Wait for the redirect-with-request_token, captured by page.on('request') above.
     const waitStart = Date.now();
     while (!captured && Date.now() - waitStart < 20_000) await sleep(250);
 
@@ -172,16 +183,17 @@ async function captureFailure(page, ts, label) {
       console.error('FAIL: no request_token captured. screenshot:', shot);
       process.exit(4);
     }
-    console.log(`  captured request_token (length=${captured.length})`);
+    step(`captured request_token (length=${captured.length})`);
   } catch (err) {
     const shot = page ? await captureFailure(page, ts, 'exception') : null;
-    console.error('FAIL exception:', err.message, 'screenshot:', shot);
+    console.error('FAIL exception:', err.message, 'stack:', err.stack, 'screenshot:', shot);
     process.exit(5);
   } finally {
     try { if (browser) await browser.close(); } catch (_) {}
   }
 
-  // 3. POST request_token back to the backend for exchange + sealing.
+  // 3. POST request_token back to backend for exchange + sealing.
+  step('posting request_token to /auto-login/exchange');
   const ex = await httpRequest({
     method: 'POST',
     url: 'http://127.0.0.1:8080/api/brokers/zerodha/auto-login/exchange',
@@ -191,7 +203,7 @@ async function captureFailure(page, ts, label) {
     console.error('Exchange failed:', ex.status, ex.body);
     process.exit(6);
   }
-  console.log(`OK: ${ex.body.userId} logged in. Backend will start KiteTicker.`);
+  step(`OK: ${ex.body.userId} logged in. Backend will start KiteTicker.`);
 })().catch((err) => {
   console.error('UNCAUGHT:', err);
   process.exit(99);

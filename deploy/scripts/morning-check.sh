@@ -34,7 +34,7 @@ if [ "$CONNECTED" = "True" ] || [ "$CONNECTED" = "true" ]; then
 fi
 
 log "running auto-login-host.js"
-/usr/bin/node /opt/ats/scripts/auto-login-host.js
+/usr/bin/timeout --signal=KILL 180s /usr/bin/node /opt/ats/scripts/auto-login-host.js
 RC=$?
 log "auto-login exit code: $RC"
 exit $RC
