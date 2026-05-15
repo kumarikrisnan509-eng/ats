@@ -38,6 +38,7 @@ const { LongTerm }     = require('./longterm');
 const { Wealth }       = require('./wealth');
 const { MPT }          = require('./mpt');
 const { FactorTilt }   = require('./factor-tilt');
+const { WormAudit }    = require('./worm-audit');
 const { Rebalance }    = require('./rebalance');
 const { Replay }       = require('./replay');
 const { EmailAlerts }  = require('./email-alerts');
@@ -83,6 +84,9 @@ function _orderRateRecord() {
 
 function audit(event, data) {
   auditSeq += 1;
+  // Tier 32: mirror into the WORM (tamper-evident) log if initialized.
+  // Failure here never breaks the primary audit.log stream below.
+  try { if (wormAudit && wormAudit._initialized) wormAudit.append(event, data); } catch (_e) {}
   try {
     fs.mkdirSync(path.dirname(AUDIT_LOG), { recursive: true });
     fs.appendFileSync(AUDIT_LOG, JSON.stringify({
@@ -95,7 +99,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, rebalance, replay, emailAlerts, whatsAppAlerts;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, rebalance, replay, emailAlerts, whatsAppAlerts;
 
 async function init() {
   broker = createBroker(process.env);
@@ -192,6 +196,23 @@ async function init() {
 
   // Tier 31: factor-tilt portfolio construction (momentum / value / quality / low-vol / size).
   factorTilt = new FactorTilt();
+
+  // Tier 32: Write-Once-Read-Many tamper-evident audit log.
+  wormAudit = new WormAudit({
+    path: process.env.WORM_PATH || '/var/log/ats/audit.worm.jsonl',
+    merkleEvery: Number(process.env.WORM_MERKLE_EVERY) || 100,
+    onMerkle: (label, root, range) => {
+      try { console.log(JSON.stringify({ level:'info', t:Date.now(), event:label, root, range })); }
+      catch (_) {}
+    },
+  });
+  const _wormInit = wormAudit.init();
+  if (!_wormInit.ok) {
+    console.error(`!! WORM audit chain BROKEN at entry ${_wormInit.brokenAt} (${_wormInit.count} total)`);
+    audit('worm.init.broken', { brokenAt: _wormInit.brokenAt, count: _wormInit.count });
+  } else {
+    console.log(`worm-audit: ${_wormInit.fresh ? 'fresh log' : 'resumed'} (count=${_wormInit.count})`);
+  }
 
   // Tier 23: bucket-target rebalancing engine.
   rebalance = new Rebalance();
@@ -2101,6 +2122,28 @@ app.post('/api/portfolio/factor-tilt', (req, res) => {
   } catch (e) {
     res.status(400).json({ ok:false, reason:e.message });
   }
+});
+
+// ---------- Tier 32: WORM tamper-evident audit log ----------
+// GET /api/audit/root    -- chain head hash, head seq, merkle root, entry count.
+//                          fast: O(file size) once per call; cache-friendly.
+// GET /api/audit/verify  -- walks the entire chain, recomputes every hash.
+//                          slower; for periodic integrity audits.
+// GET /api/audit/tail?n  -- last N entries (read-only, default 100, max 10000).
+app.get('/api/audit/root', (_req, res) => {
+  if (!wormAudit) return res.status(503).json({ ok:false, reason:'worm_not_initialized' });
+  try { res.json({ ok:true, ...wormAudit.root() }); }
+  catch (e) { res.status(500).json({ ok:false, reason:e.message }); }
+});
+app.get('/api/audit/verify', (_req, res) => {
+  if (!wormAudit) return res.status(503).json({ ok:false, reason:'worm_not_initialized' });
+  try { res.json(wormAudit.verify()); }
+  catch (e) { res.status(500).json({ ok:false, reason:e.message }); }
+});
+app.get('/api/audit/tail', (req, res) => {
+  if (!wormAudit) return res.status(503).json({ ok:false, reason:'worm_not_initialized' });
+  try { res.json({ ok:true, entries: wormAudit.tail(Number(req.query.n) || 100) }); }
+  catch (e) { res.status(500).json({ ok:false, reason:e.message }); }
 });
 
 // Tier 23: rebalance suggestions. Auto-derives buckets + holdings + paper equity + cash if not in body.
