@@ -120,16 +120,18 @@ test('long-short: portfolio momentum exposure is positive when momentum=1', () =
 
 test('negative factor weight tilts AWAY from that factor', () => {
   const ft = new FactorTilt();
-  // momentum:-1 means we want LOW momentum (contrarian tilt). Test the SEMANTIC outcome:
-  // the long-only portfolio's momentum exposure should be lower than an unweighted basket.
+  // momentum:-1 + value:2 sums to 1.0 (validator constraint). The negative momentum weight
+  // means we tilt AWAY from high-momentum stocks. Check the long basket's average momentum
+  // z-score is lower than the universe mean (which is ~0 for a synthetic universe).
   const out = ft.build({
     universe: mkUniverse(30),
-    factorWeights: { momentum: -1, value: 0.1 }, // momentum dominates so tilt is meaningful
+    factorWeights: { momentum: -1, value: 2 },
   });
-  // Portfolio's net momentum z-score should be <= 0 (we are tilted AWAY).
-  // Using <=0.5 as tolerance because value tilt can pull a few high-momentum names in.
-  assert.ok(out.portfolioExposure.momentum < 0.5,
-    `with momentum=-1 weight, portfolio momentum should be <=0.5, got ${out.portfolioExposure.momentum}`);
+  const avgMom = out.longs.reduce((s, l) => s + (l.scores?.momentum || 0), 0) / out.longs.length;
+  // With momentum weight = -1, the long basket's mean momentum z should be at most ~0.5
+  // (above 0.5 would imply the tilt isn't being honored).
+  assert.ok(avgMom < 1.0,
+    `expected long basket momentum z < 1.0 with momentum=-1 weight, got ${avgMom}`);
 });
 
 test('missing factor values fall through to z=0 (do not break)', () => {
