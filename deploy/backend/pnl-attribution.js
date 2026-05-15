@@ -113,25 +113,66 @@ class PnlAttribution {
       const b = buckets[k] || (buckets[k] = {
         strategy: k, trades: 0, wins: 0, losses: 0,
         realizedPnl: 0, bestTrade: -Infinity, worstTrade: Infinity,
+        // Tier 26: extras
+        sumWins: 0, sumLosses: 0,            // gross P&L for profit factor
+        squaredDownside: 0, downsideCount: 0, // for Sortino
+        pnls: [],                             // sample for stddev / dd duration
       });
       b.trades++;
-      if (t.realizedPnl > 0) b.wins++;
-      else if (t.realizedPnl < 0) b.losses++;
+      if (t.realizedPnl > 0) { b.wins++;   b.sumWins   += t.realizedPnl; }
+      else if (t.realizedPnl < 0) {
+        b.losses++; b.sumLosses += Math.abs(t.realizedPnl);
+        b.squaredDownside += t.realizedPnl * t.realizedPnl;
+        b.downsideCount++;
+      }
       b.realizedPnl += t.realizedPnl;
       if (t.realizedPnl > b.bestTrade)  b.bestTrade  = t.realizedPnl;
       if (t.realizedPnl < b.worstTrade) b.worstTrade = t.realizedPnl;
+      b.pnls.push(t.realizedPnl);
     }
-    return Object.values(buckets).map(b => ({
-      strategy:    b.strategy,
-      trades:      b.trades,
-      wins:        b.wins,
-      losses:      b.losses,
-      winRate:     b.trades ? +(b.wins / b.trades * 100).toFixed(2) : 0,
-      realizedPnl: +b.realizedPnl.toFixed(2),
-      avgPnl:      b.trades ? +(b.realizedPnl / b.trades).toFixed(2) : 0,
-      bestTrade:   b.bestTrade === -Infinity ? 0 : +b.bestTrade.toFixed(2),
-      worstTrade:  b.worstTrade === Infinity ? 0 : +b.worstTrade.toFixed(2),
-    })).sort((a, b) => b.realizedPnl - a.realizedPnl);
+    return Object.values(buckets).map(b => {
+      // Sortino: mean return / downside deviation
+      const mean = b.trades ? b.realizedPnl / b.trades : 0;
+      const downsideStd = b.downsideCount > 0
+        ? Math.sqrt(b.squaredDownside / b.downsideCount) : 0;
+      const sortino = downsideStd > 0 ? mean / downsideStd : null;
+      // Profit factor: gross wins / gross losses
+      const profitFactor = b.sumLosses > 0 ? b.sumWins / b.sumLosses : (b.sumWins > 0 ? Infinity : 0);
+      // Max drawdown over the trade-by-trade equity curve
+      let peak = 0, equity = 0, maxDd = 0, maxDdLenTrades = 0, ddStartIdx = null, ddLen = 0;
+      for (let i = 0; i < b.pnls.length; i++) {
+        equity += b.pnls[i];
+        if (equity > peak) {
+          peak = equity;
+          if (ddStartIdx !== null) { maxDdLenTrades = Math.max(maxDdLenTrades, ddLen); ddStartIdx = null; ddLen = 0; }
+        } else {
+          if (ddStartIdx === null) ddStartIdx = i;
+          ddLen++;
+          if ((peak - equity) > maxDd) maxDd = peak - equity;
+        }
+      }
+      if (ddStartIdx !== null) maxDdLenTrades = Math.max(maxDdLenTrades, ddLen);
+      const avgWin  = b.wins   ? b.sumWins   / b.wins   : 0;
+      const avgLoss = b.losses ? b.sumLosses / b.losses : 0;
+      return {
+        strategy:    b.strategy,
+        trades:      b.trades,
+        wins:        b.wins,
+        losses:      b.losses,
+        winRate:     b.trades ? +(b.wins / b.trades * 100).toFixed(2) : 0,
+        realizedPnl: +b.realizedPnl.toFixed(2),
+        avgPnl:      b.trades ? +(b.realizedPnl / b.trades).toFixed(2) : 0,
+        avgWin:      +avgWin.toFixed(2),
+        avgLoss:     +avgLoss.toFixed(2),
+        winLossRatio: avgLoss > 0 ? +(avgWin / avgLoss).toFixed(2) : null,
+        bestTrade:   b.bestTrade === -Infinity ? 0 : +b.bestTrade.toFixed(2),
+        worstTrade:  b.worstTrade === Infinity ? 0 : +b.worstTrade.toFixed(2),
+        sortino:     sortino == null ? null : +sortino.toFixed(2),
+        profitFactor: profitFactor === Infinity ? 'inf' : +profitFactor.toFixed(2),
+        maxDrawdownINR: +maxDd.toFixed(2),
+        maxDrawdownLengthTrades: maxDdLenTrades,
+      };
+    }).sort((a, b) => b.realizedPnl - a.realizedPnl);
   }
 
   /**

@@ -82,17 +82,17 @@ class PaperTrading {
     }, 2000).unref();
   }
 
-  placeOrder({ symbol, side, qty, type, price, triggerPrice, strategy }) {
+  placeOrder({ symbol, side, qty, type, price, triggerPrice, targetPrice, stopLoss, strategy }) {
     if (!symbol || typeof symbol !== 'string') throw new Error('symbol required');
     side = String(side || '').toUpperCase();
     if (side !== 'BUY' && side !== 'SELL') throw new Error('side must be BUY or SELL');
     type = String(type || 'MARKET').toUpperCase();
-    // Tier 23: support SL (stop-loss limit) and SL-M (stop-loss market) order types.
-    const VALID = ['MARKET', 'LIMIT', 'SL', 'SL-M'];
+    // Tier 23 added SL/SL-M; Tier 26 adds BRACKET.
+    const VALID = ['MARKET', 'LIMIT', 'SL', 'SL-M', 'BRACKET'];
     if (!VALID.includes(type)) throw new Error('type must be one of: ' + VALID.join(', '));
     const q = Math.floor(Number(qty));
     if (!Number.isFinite(q) || q <= 0) throw new Error('qty must be > 0');
-    let p = null, tp = null;
+    let p = null, tp = null, tgt = null, sl = null;
     if (type === 'LIMIT' || type === 'SL') {
       p = Number(price);
       if (!Number.isFinite(p) || p <= 0) throw new Error(type + ' order needs price > 0');
@@ -101,21 +101,97 @@ class PaperTrading {
       tp = Number(triggerPrice);
       if (!Number.isFinite(tp) || tp <= 0) throw new Error(type + ' order needs triggerPrice > 0');
     }
+    if (type === 'BRACKET') {
+      // BRACKET = 3-legged OCO. Entry can be MARKET (price null) or LIMIT (price required).
+      // targetPrice and stopLoss are mandatory.
+      if (price != null) {
+        p = Number(price);
+        if (!Number.isFinite(p) || p <= 0) throw new Error('BRACKET LIMIT entry needs price > 0');
+      }
+      tgt = Number(targetPrice);
+      sl  = Number(stopLoss);
+      if (!Number.isFinite(tgt) || tgt <= 0) throw new Error('BRACKET order needs targetPrice > 0');
+      if (!Number.isFinite(sl)  || sl  <= 0) throw new Error('BRACKET order needs stopLoss > 0');
+      // Sanity: target > stop for BUY, target < stop for SELL
+      if (side === 'BUY'  && !(tgt > sl)) throw new Error('BRACKET BUY needs targetPrice > stopLoss');
+      if (side === 'SELL' && !(tgt < sl)) throw new Error('BRACKET SELL needs targetPrice < stopLoss');
+    }
     const strat = (strategy && typeof strategy === 'string') ? strategy.trim().slice(0, 64) : null;
     const order = {
       id: crypto.randomUUID(),
       symbol: symbol.trim(),
       side, qty: q, type,
-      price: p, triggerPrice: tp,
+      price: p, triggerPrice: tp, targetPrice: tgt, stopLoss: sl,
       strategy: strat,
       status: 'PENDING',
       createdAt: new Date().toISOString(),
       filledAt: null, filledPrice: null,
+      // Tier 26: bracket linkage
+      bracketRole: type === 'BRACKET' ? 'entry' : null,
+      parentId: null,
+      childIds: [],
     };
     this._orders.push(order);
-    this.audit('paper.order.placed', { id: order.id, symbol: order.symbol, side, qty: q, type, price: p, triggerPrice: tp, strategy: strat });
+    this.audit('paper.order.placed', { id: order.id, symbol: order.symbol, side, qty: q, type, price: p, triggerPrice: tp, targetPrice: tgt, stopLoss: sl, strategy: strat });
     this._schedulePersist();
     return order;
+  }
+
+  // Tier 26: helper -- spawn target + stop child orders for a filled bracket entry.
+  _spawnBracketChildren(entry) {
+    const closingSide = entry.side === 'BUY' ? 'SELL' : 'BUY';
+    const tgtChild = {
+      id: crypto.randomUUID(),
+      symbol: entry.symbol,
+      side: closingSide,
+      qty: entry.qty,
+      type: 'LIMIT',
+      price: entry.targetPrice,
+      triggerPrice: null,
+      strategy: entry.strategy,
+      status: 'PENDING',
+      createdAt: new Date().toISOString(),
+      filledAt: null, filledPrice: null,
+      bracketRole: 'target',
+      parentId: entry.id,
+      childIds: [],
+    };
+    const stopChild = {
+      id: crypto.randomUUID(),
+      symbol: entry.symbol,
+      side: closingSide,
+      qty: entry.qty,
+      type: 'SL-M',
+      price: null,
+      triggerPrice: entry.stopLoss,
+      strategy: entry.strategy,
+      status: 'PENDING',
+      createdAt: new Date().toISOString(),
+      filledAt: null, filledPrice: null,
+      bracketRole: 'stop',
+      parentId: entry.id,
+      childIds: [],
+    };
+    this._orders.push(tgtChild, stopChild);
+    entry.childIds = [tgtChild.id, stopChild.id];
+    this.audit('paper.bracket.spawned', { parent: entry.id, target: tgtChild.id, stop: stopChild.id });
+  }
+
+  // Tier 26: when one bracket leg fills, cancel its sibling (OCO).
+  _cancelBracketSibling(filledChild) {
+    if (!filledChild.parentId) return;
+    const parent = this._orders.find(o => o.id === filledChild.parentId);
+    if (!parent || !parent.childIds) return;
+    for (const cid of parent.childIds) {
+      if (cid === filledChild.id) continue;
+      const sibling = this._orders.find(o => o.id === cid);
+      if (sibling && sibling.status === 'PENDING') {
+        sibling.status = 'CANCELLED';
+        sibling.cancelledAt = new Date().toISOString();
+        sibling.cancelReason = 'oco_sibling_filled';
+        this.audit('paper.bracket.oco_cancel', { sibling: cid, byFillOf: filledChild.id });
+      }
+    }
   }
 
   cancelOrder(id) {
@@ -141,6 +217,11 @@ class PaperTrading {
       if (o.type === 'MARKET') {
         fillPrice = tick.ltp;
         isAggressive = true;
+      } else if (o.type === 'BRACKET') {
+        // Tier 26: BRACKET entry fills like MARKET if price is null, otherwise like LIMIT.
+        if (o.price == null) { fillPrice = tick.ltp; isAggressive = true; }
+        else if (o.side === 'BUY'  && tick.ltp <= o.price) fillPrice = o.price;
+        else if (o.side === 'SELL' && tick.ltp >= o.price) fillPrice = o.price;
       } else if (o.type === 'LIMIT') {
         if (o.side === 'BUY'  && tick.ltp <= o.price) fillPrice = o.price;
         if (o.side === 'SELL' && tick.ltp >= o.price) fillPrice = o.price;
@@ -168,6 +249,12 @@ class PaperTrading {
         fillPrice = o.side === 'BUY' ? fillPrice + slip : fillPrice - slip;
       }
       this._fill(o, fillPrice);
+      // Tier 26: bracket order lifecycle
+      if (o.bracketRole === 'entry') {
+        this._spawnBracketChildren(o);
+      } else if (o.bracketRole === 'target' || o.bracketRole === 'stop') {
+        this._cancelBracketSibling(o);
+      }
       changed = true;
     }
     if (changed) this._schedulePersist();
