@@ -41,6 +41,7 @@ const { FactorTilt }   = require('./factor-tilt');
 const { WormAudit }    = require('./worm-audit');
 const { SpanSim }      = require('./span-sim');
 const { buildIpAllowlist } = require('./ip-allowlist');
+const { TwoFactor }    = require('./two-factor');
 const { Rebalance }    = require('./rebalance');
 const { Replay }       = require('./replay');
 const { EmailAlerts }  = require('./email-alerts');
