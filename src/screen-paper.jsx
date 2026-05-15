@@ -292,6 +292,144 @@ const StatPill = ({ label, value, accent }) => (
   </div>
 );
 
+
+/* ============================================================
+ * Tier 36: SpanMarginPanel -- F&O margin estimator wired to
+ * POST /api/risk/span (Tier 34 backend). Single-leg form; for
+ * multi-leg explorations the same endpoint accepts a legs array.
+ * ============================================================ */
+const SpanMarginPanel = () => {
+  const [symbol, setSymbol]     = React.useState("NIFTY");
+  const [type, setType]         = React.useState("CALL");
+  const [side, setSide]         = React.useState("BUY");
+  const [strike, setStrike]     = React.useState(25000);
+  const [expiry, setExpiry]     = React.useState(() => {
+    const d = new Date(); d.setDate(d.getDate() + 30);
+    return d.toISOString().slice(0, 10);
+  });
+  const [qty, setQty]           = React.useState(1);
+  const [lotSize, setLotSize]   = React.useState(25);
+  const [spotPrice, setSpot]    = React.useState(25000);
+  const [iv, setIv]             = React.useState(0.18);
+
+  const [running, setRunning] = React.useState(false);
+  const [result, setResult]   = React.useState(null);
+  const [error, setError]     = React.useState(null);
+
+  const inputStyle = {
+    width: "100%", padding: "6px 8px",
+    background: "var(--bg-sunk)", border: "1px solid var(--border)",
+    borderRadius: "var(--r-md)", fontFamily: "var(--mono)", fontSize: 12,
+  };
+
+  const run = async () => {
+    setRunning(true); setResult(null); setError(null);
+    try {
+      const leg = {
+        symbol, type, side,
+        qty: Number(qty), lotSize: Number(lotSize),
+        spotPrice: Number(spotPrice), iv: Number(iv),
+        expiry,
+      };
+      if (type !== "FUT") leg.strike = Number(strike);
+      const r = await window.fetchApi('/api/risk/span', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ legs: [leg] }),
+      });
+      setResult(r);
+    } catch (e) {
+      setError(String(e.message || e));
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <Card
+      title="F&O margin estimator"
+      sub="SPAN + exposure estimate · POST /api/risk/span"
+      style={{ marginTop: 16 }}>
+      <div className="col" style={{ gap: 10 }}>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <label style={{ flex: "1 1 100px" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>Symbol</div>
+            <input style={inputStyle} value={symbol} onChange={ev => setSymbol(ev.target.value.toUpperCase())}/>
+          </label>
+          <label style={{ flex: "1 1 80px" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>Type</div>
+            <select style={inputStyle} value={type} onChange={ev => setType(ev.target.value)}>
+              <option value="CALL">CALL</option>
+              <option value="PUT">PUT</option>
+              <option value="FUT">FUT</option>
+            </select>
+          </label>
+          <label style={{ flex: "1 1 80px" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>Side</div>
+            <select style={inputStyle} value={side} onChange={ev => setSide(ev.target.value)}>
+              <option value="BUY">BUY</option>
+              <option value="SELL">SELL</option>
+            </select>
+          </label>
+          {type !== "FUT" && (
+            <label style={{ flex: "1 1 100px" }}>
+              <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>Strike</div>
+              <input style={inputStyle} type="number" value={strike} onChange={ev => setStrike(ev.target.value)}/>
+            </label>
+          )}
+          <label style={{ flex: "1 1 120px" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>Expiry</div>
+            <input style={inputStyle} type="date" value={expiry} onChange={ev => setExpiry(ev.target.value)}/>
+          </label>
+        </div>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <label style={{ flex: "1 1 70px" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>Lots</div>
+            <input style={inputStyle} type="number" min="1" value={qty} onChange={ev => setQty(ev.target.value)}/>
+          </label>
+          <label style={{ flex: "1 1 80px" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>Lot size</div>
+            <input style={inputStyle} type="number" min="1" value={lotSize} onChange={ev => setLotSize(ev.target.value)}/>
+          </label>
+          <label style={{ flex: "1 1 100px" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>Spot ₹</div>
+            <input style={inputStyle} type="number" step="0.05" value={spotPrice} onChange={ev => setSpot(ev.target.value)}/>
+          </label>
+          <label style={{ flex: "1 1 80px" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>IV (e.g. 0.18)</div>
+            <input style={inputStyle} type="number" step="0.01" min="0" value={iv} onChange={ev => setIv(ev.target.value)}/>
+          </label>
+        </div>
+        <button className="btn btn--accent" disabled={running} onClick={run}>
+          {running ? <><I.refresh size={12}/> Estimating…</> : <><I.play size={12}/> Estimate margin</>}
+        </button>
+        {error && (
+          <div style={{ padding: 8, background: "var(--bg-soft)", border: "1px solid var(--down)", borderRadius: "var(--r-md)", color: "var(--down)", fontSize: 12 }}>
+            {error}
+          </div>
+        )}
+        {result && result.ok && (
+          <div style={{ padding: 10, background: "var(--bg-soft)", border: "1px solid var(--border)", borderRadius: "var(--r-md)" }}>
+            <div className="row" style={{ gap: 14, flexWrap: "wrap", fontSize: 12 }}>
+              <div><span style={{ color: "var(--text-3)" }}>Total margin</span> <span className="mono" style={{ fontWeight: 600 }}>₹{Math.round(result.totalMargin).toLocaleString('en-IN')}</span></div>
+              <div><span style={{ color: "var(--text-3)" }}>SPAN</span> <span className="mono">₹{Math.round(result.spanMargin).toLocaleString('en-IN')}</span></div>
+              <div><span style={{ color: "var(--text-3)" }}>Exposure</span> <span className="mono">₹{Math.round(result.exposureMargin).toLocaleString('en-IN')}</span></div>
+              {result.perLeg && result.perLeg[0] && (
+                <div><span style={{ color: "var(--text-3)" }}>Notional</span> <span className="mono">₹{Math.round(result.perLeg[0].notional).toLocaleString('en-IN')}</span></div>
+              )}
+            </div>
+            {Array.isArray(result.notes) && result.notes.length > 0 && (
+              <div style={{ marginTop: 8, fontSize: 10, color: "var(--text-3)" }}>
+                {result.notes.map((n, i) => <div key={i}>· {n}</div>)}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+};
+
 const PaperScreen = () => {
   const [account, setAccount] = useState("50L");
   const [, bump] = useState(0);
@@ -510,6 +648,7 @@ const PaperScreen = () => {
 
       {/* Tier 33: Bracket order builder wired to /api/orders/dry-run (Tier 26 backend) */}
       <BracketOrderPanel />
+      <SpanMarginPanel />
 
       {/* Promotion readiness — explicit 4-gate criteria */}
       <Card
