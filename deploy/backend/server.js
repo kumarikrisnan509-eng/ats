@@ -43,6 +43,7 @@ const { SpanSim }      = require('./span-sim');
 const { buildIpAllowlist } = require('./ip-allowlist');
 const { TwoFactor }    = require('./two-factor');
 const { Digest }       = require('./digest');
+const { parseCASText } = require('./cas-parser');
 const { Rebalance }    = require('./rebalance');
 const { Replay }       = require('./replay');
 const { EmailAlerts }  = require('./email-alerts');
@@ -2310,6 +2311,20 @@ app.get('/api/whatsapp/status', (_req, res) => {
 // Tier 47: daily / weekly digest. Build + send via Tier 27 EmailAlerts.
 //   POST /api/digest/send  body: { kind?: 'daily'|'weekly', to?: '...' }
 //   GET  /api/digest/preview?kind=...  -> returns the rendered HTML (no send)
+// Tier 46: parse uploaded CAS (Consolidated Account Statement) PDF text.
+// Caller does `pdftotext your-cas.pdf -` and POSTs the stdout here. Returns
+// PAN, period, total value, folio + scheme breakdown.
+app.post('/api/cas/parse', express.json({ limit: '8mb' }), (req, res) => {
+  try {
+    const text = req.body && req.body.text;
+    if (!text || typeof text !== 'string') return res.status(400).json({ ok:false, reason:'body.text (string) required' });
+    if (text.length > 5_000_000) return res.status(413).json({ ok:false, reason:'CAS text too large (5MB max)' });
+    const out = parseCASText(text);
+    audit('cas.parsed', { pan: out.pan, folios: out.folios.length, totalValue: out.totalValue });
+    res.json({ ok: true, ...out });
+  } catch (e) { res.status(500).json({ ok:false, reason: e.message }); }
+});
+
 app.post('/api/digest/send', async (req, res) => {
   if (!digest) return res.status(503).json({ ok:false, reason:'digest_not_initialized' });
   const { kind, to } = req.body || {};
