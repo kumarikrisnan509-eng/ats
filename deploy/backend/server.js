@@ -42,6 +42,7 @@ const { WormAudit }    = require('./worm-audit');
 const { SpanSim }      = require('./span-sim');
 const { buildIpAllowlist } = require('./ip-allowlist');
 const { TwoFactor }    = require('./two-factor');
+const { Digest }       = require('./digest');
 const { Rebalance }    = require('./rebalance');
 const { Replay }       = require('./replay');
 const { EmailAlerts }  = require('./email-alerts');
@@ -102,7 +103,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, rebalance, replay, emailAlerts, whatsAppAlerts;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, rebalance, replay, emailAlerts, whatsAppAlerts;
 
 async function init() {
   broker = createBroker(process.env);
@@ -228,6 +229,11 @@ async function init() {
     baseUrl: process.env.PUBLIC_BASE_URL || 'https://ats.rajasekarselvam.com',
     ttlMs: Number(process.env.TWO_FACTOR_TTL_MS) || 5 * 60_000,
     disabled: String(process.env.DISABLE_2FA || '').toLowerCase() === 'true',
+  });
+
+  // Tier 47: daily/weekly digest emails (uses Tier 27 EmailAlerts under the hood).
+  digest = new Digest({
+    paper, pnl, autorun, wormAudit, news, emailAlerts, audit,
   });
 
   // Tier 23: bucket-target rebalancing engine.
@@ -2300,6 +2306,25 @@ app.get('/api/whatsapp/status', (_req, res) => {
   if (!whatsAppAlerts) return res.status(503).json({ ok:false, reason:'whatsapp_not_initialized' });
   res.json({ ok:true, ...whatsAppAlerts.status() });
 });
+
+// Tier 47: daily / weekly digest. Build + send via Tier 27 EmailAlerts.
+//   POST /api/digest/send  body: { kind?: 'daily'|'weekly', to?: '...' }
+//   GET  /api/digest/preview?kind=...  -> returns the rendered HTML (no send)
+app.post('/api/digest/send', async (req, res) => {
+  if (!digest) return res.status(503).json({ ok:false, reason:'digest_not_initialized' });
+  const { kind, to } = req.body || {};
+  const r = await digest.send({ kind: kind || 'daily', to });
+  res.json(r);
+});
+app.get('/api/digest/preview', (req, res) => {
+  if (!digest) return res.status(503).json({ ok:false, reason:'digest_not_initialized' });
+  try {
+    const { subject, html } = digest.build({ kind: req.query.kind || 'daily' });
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (e) { res.status(500).json({ ok:false, reason: e.message }); }
+});
+
 app.post('/api/whatsapp/send', async (req, res) => {
   if (!whatsAppAlerts) return res.status(503).json({ ok:false, reason:'whatsapp_not_initialized' });
   const { to, body } = req.body || {};
