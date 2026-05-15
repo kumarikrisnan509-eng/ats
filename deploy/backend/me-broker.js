@@ -42,6 +42,7 @@ function createMeBrokerRouter({ db, vault, requireAuth }) {
           has_api_key: !!r.has_api_key,
           has_access_token: !!r.has_access_token,
           has_totp: !!r.has_totp,
+          has_password: !!r.has_password,
         })),
       });
     } catch (e) {
@@ -57,6 +58,7 @@ function createMeBrokerRouter({ db, vault, requireAuth }) {
       const api_secret = req.body && req.body.api_secret;
       const totp_seed = req.body && req.body.totp_seed;
       const access_token = req.body && req.body.access_token;
+      const password = req.body && req.body.password;
       const set_default = !!(req.body && req.body.set_default);
 
       if (!broker || !SUPPORTED.has(String(broker).toLowerCase())) {
@@ -80,6 +82,7 @@ function createMeBrokerRouter({ db, vault, requireAuth }) {
         refresh_token: await seal(api_secret),
         totp_seed: totp_seed ? await seal(totp_seed) : null,
         access_token: access_token ? await seal(access_token) : null,
+        feed_token: password ? await seal(password) : null, // Tier 64: Kite password co-located in feed_token slot
         is_default: set_default,
       };
 
@@ -118,6 +121,7 @@ function createMeBrokerRouter({ db, vault, requireAuth }) {
         refresh_token: patch.api_secret ? await seal(patch.api_secret) : null,
         totp_seed: patch.totp_seed === '' ? null : (patch.totp_seed ? await seal(patch.totp_seed) : null),
         access_token: patch.access_token ? await seal(patch.access_token) : null,
+        feed_token: patch.password === '' ? null : (patch.password ? await seal(patch.password) : null),
         is_default: patch.is_default != null ? !!patch.is_default : !!existing.is_default,
       };
 

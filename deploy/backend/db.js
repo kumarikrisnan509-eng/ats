@@ -107,7 +107,7 @@ function makeRepo(conn) {
     pnlRecent:    conn.prepare('SELECT * FROM pnl_daily WHERE user_id = ? ORDER BY date DESC LIMIT ?'),
 
     // Tier 57: broker_accounts CRUD
-    brokerListByUser: conn.prepare('SELECT id, user_id, broker, broker_user_id, issued_at, expires_at, is_default, created_at, (api_key IS NOT NULL) AS has_api_key, (access_token IS NOT NULL) AS has_access_token, (totp_seed IS NOT NULL) AS has_totp FROM broker_accounts WHERE user_id = ? ORDER BY is_default DESC, created_at DESC'),
+    brokerListByUser: conn.prepare('SELECT id, user_id, broker, broker_user_id, issued_at, expires_at, is_default, created_at, (api_key IS NOT NULL) AS has_api_key, (access_token IS NOT NULL) AS has_access_token, (totp_seed IS NOT NULL) AS has_totp, (feed_token IS NOT NULL) AS has_password FROM broker_accounts WHERE user_id = ? ORDER BY is_default DESC, created_at DESC'),
     brokerGetFull:    conn.prepare('SELECT * FROM broker_accounts WHERE id = ? AND user_id = ?'),
     brokerGetByBrokerForUser: conn.prepare('SELECT * FROM broker_accounts WHERE user_id = ? AND broker = ? ORDER BY is_default DESC, created_at DESC LIMIT 1'),
     brokerUpsert:     conn.prepare(`

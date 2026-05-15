@@ -2412,6 +2412,41 @@ app.use('/api/me/broker', (req, res, next) => {
   }
 });
 
+// ---------- Tier 64: Test Connection endpoint ----------
+// POST /api/me/broker-test
+// Uses the requesting user's per-user broker to call Kite /profile.
+// Returns profile name + segments + products on success, or detailed error.
+app.post('/api/me/broker-test', withAuth(async (req, res) => {
+  try {
+    if (!_brokerResolver) return res.status(503).json({ ok: false, reason: 'resolver_unavailable' });
+    const r = await _brokerResolver.resolveForRequest({ db, vault, globalBroker: null, fallbackToGlobal: false }, req);
+    if (!r.broker) return res.status(412).json({ ok: false, reason: 'broker_not_connected', detail: 'Save credentials first.' });
+    const profile = await r.broker.getProfile();
+    res.json({
+      ok: true,
+      profile: {
+        userName: profile && (profile.user_name || profile.userName) || null,
+        userEmail: profile && (profile.email || profile.userEmail) || null,
+        broker: profile && (profile.broker || 'ZERODHA'),
+        userId: profile && (profile.user_id || profile.userId) || null,
+        segments: profile && (profile.exchanges || profile.segments) || [],
+        products: profile && profile.products || [],
+        orderTypes: profile && profile.order_types || profile.orderTypes || [],
+      },
+    });
+  } catch (e) {
+    const msg = e && e.message || 'unknown';
+    // Common: TokenException -> access token expired/missing -> guide user to Reauth
+    const isTokenIssue = /token|access_token|TokenException|InputException/i.test(msg);
+    res.status(isTokenIssue ? 401 : 500).json({
+      ok: false,
+      reason: isTokenIssue ? 'token_invalid' : 'profile_call_failed',
+      detail: msg,
+      hint: isTokenIssue ? 'Click Reauth to refresh your Kite access token.' : null,
+    });
+  }
+}));
+
 // ---------- Tier 50/51: auth endpoints (signup, login, logout, verify, reset) ----------
 app.post('/api/auth/signup', async (req, res) => {
   if (!auth) return res.status(503).json({ ok:false, reason:'auth_not_initialized' });

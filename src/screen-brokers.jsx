@@ -13,13 +13,14 @@ const BrokerConnectModal = ({ open, mode, brokerName, existing, onClose, onSaved
   const [apiKey, setApiKey]             = React.useState('');
   const [apiSecret, setApiSecret]       = React.useState('');
   const [totpSeed, setTotpSeed]         = React.useState('');
+  const [kitePassword, setKitePassword] = React.useState('');
   const [setDefault, setSetDefault]     = React.useState(true);
   const [busy, setBusy]                 = React.useState(false);
   const [err, setErr]                   = React.useState('');
 
   React.useEffect(() => {
     setBrokerUserId(existing?.broker_user_id || '');
-    setApiKey(''); setApiSecret(''); setTotpSeed(''); setErr('');
+    setApiKey(''); setApiSecret(''); setTotpSeed(''); setKitePassword(''); setErr('');
   }, [open, existing && existing.id]);
 
   const submit = async (e) => {
@@ -29,9 +30,10 @@ const BrokerConnectModal = ({ open, mode, brokerName, existing, onClose, onSaved
       const url = mode === 'edit' && existing ? `/api/me/broker/${existing.id}` : '/api/me/broker';
       const method = mode === 'edit' ? 'PUT' : 'POST';
       const body = { broker: brokerName.toLowerCase(), broker_user_id: brokerUserId };
-      if (apiKey)    body.api_key    = apiKey;
-      if (apiSecret) body.api_secret = apiSecret;
-      if (totpSeed)  body.totp_seed  = totpSeed;
+      if (apiKey)       body.api_key    = apiKey;
+      if (apiSecret)    body.api_secret = apiSecret;
+      if (totpSeed)     body.totp_seed  = totpSeed;
+      if (kitePassword) body.password   = kitePassword;
       body.set_default = setDefault;
 
       const res = await fetch(url, {
@@ -86,6 +88,10 @@ const BrokerConnectModal = ({ open, mode, brokerName, existing, onClose, onSaved
             <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>TOTP seed (optional, for auto-login)</div>
             <input className="input" type="password" autoComplete="off" value={totpSeed} onChange={e => setTotpSeed(e.target.value)} placeholder="(optional)" />
           </label>
+          <label style={{ display: 'block', marginBottom: 12 }}>
+            <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>Kite password (optional, for headless auto-login)</div>
+            <input className="input" type="password" autoComplete="off" value={kitePassword} onChange={e => setKitePassword(e.target.value)} placeholder={mode === 'edit' ? '(unchanged)' : '(optional)'} />
+          </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, fontSize: 13 }}>
             <input type="checkbox" checked={setDefault} onChange={e => setSetDefault(e.target.checked)} /> Use this as my default broker
           </label>
@@ -124,10 +130,27 @@ const BrokersScreen = () => {
   React.useEffect(() => { refreshMyBrokers(); }, [refreshMyBrokers]);
 
   const myZerodha = myBrokers.find(b => b.broker === 'zerodha');
+  const [testResult, setTestResult] = React.useState(null);
+  const [testing, setTesting] = React.useState(false);
+  const testConnection = async () => {
+    setTesting(true); setTestResult(null);
+    try {
+      const res = await fetch('/api/me/broker-test', { method: 'POST', credentials: 'include' });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok && j.ok) {
+        setTestResult({ ok: true, msg: `Connected as ${j.profile.userName || j.profile.userId}. Segments: ${(j.profile.segments || []).join(', ')}.` });
+      } else {
+        setTestResult({ ok: false, msg: j.detail || j.reason || `HTTP ${res.status}`, hint: j.hint });
+      }
+    } catch (e) {
+      setTestResult({ ok: false, msg: e.message || 'request failed' });
+    } finally { setTesting(false); }
+  };
   const disconnect = async (id) => {
-    if (!confirm('Disconnect this broker? Your credentials will be permanently removed.')) return;
+    const typed = prompt('Type DISCONNECT to permanently remove these credentials:');
+    if (typed !== 'DISCONNECT') return;
     const res = await fetch(`/api/me/broker/${id}`, { method: 'DELETE', credentials: 'include' });
-    if (res.ok) refreshMyBrokers();
+    if (res.ok) { refreshMyBrokers(); setTestResult(null); }
   };
   React.useEffect(() => {
     let cancelled = false;
@@ -269,22 +292,27 @@ const BrokersScreen = () => {
                   <div className="between" style={{ fontSize: 12, marginTop: 6 }}><span className="muted">Status</span><Pill kind="up" dot>connected · 14ms</Pill></div>
                 </>
               )}
-              <div className="row" style={{ marginTop: 14, gap: 6 }}>
+              <div className="row" style={{ marginTop: 14, gap: 6, flexWrap: 'wrap' }}>
                 {myRow ? (
                   <>
                     <button
                       className="btn btn--sm"
-                      style={{ flex: 1, justifyContent: "center" }}
+                      style={{ flex: 1, minWidth: 70, justifyContent: "center" }}
+                      onClick={() => testConnection(myRow.id)}
+                    >Test</button>
+                    <button
+                      className="btn btn--sm"
+                      style={{ flex: 1, minWidth: 70, justifyContent: "center" }}
                       onClick={() => setModalState({ open: true, mode: 'edit', brokerName: b.n.split(' ')[0], existing: myRow })}
                     >Edit</button>
                     <button
                       className="btn btn--sm"
-                      style={{ flex: 1, justifyContent: "center" }}
+                      style={{ flex: 1, minWidth: 70, justifyContent: "center" }}
                       onClick={() => window.location.href = '/api/brokers/zerodha/login'}
                     >Reauth</button>
                     <button
                       className="btn btn--sm"
-                      style={{ flex: 1, justifyContent: "center", color: 'var(--danger)' }}
+                      style={{ flex: 1, minWidth: 80, justifyContent: "center", color: 'var(--danger)' }}
                       onClick={() => disconnect(myRow.id)}
                     >Disconnect</button>
                   </>
@@ -317,6 +345,19 @@ const BrokersScreen = () => {
         })}
       </div>
 
+      {testing && <div className="row" style={{ padding: 10, marginBottom: 12, background: 'var(--bg-soft)', borderRadius: 6, fontSize: 12 }}>Testing connection&hellip;</div>}
+      {testResult && (
+        <div style={{
+          padding: 12, marginBottom: 12, borderRadius: 6, fontSize: 12,
+          background: testResult.ok ? 'color-mix(in oklab, var(--up) 12%, transparent)' : 'color-mix(in oklab, var(--danger) 12%, transparent)',
+          color: testResult.ok ? 'var(--up)' : 'var(--danger)',
+          border: '1px solid currentColor',
+        }}>
+          <strong>{testResult.ok ? '\u2713 Test passed' : '\u2715 Test failed'}.</strong> {testResult.msg}
+          {testResult.hint && <div style={{ marginTop: 6, opacity: 0.85 }}>{testResult.hint}</div>}
+          <button className="btn btn--sm" style={{ marginLeft: 12 }} onClick={() => setTestResult(null)}>Dismiss</button>
+        </div>
+      )}
       <BrokerConnectModal
         open={modalState.open}
         mode={modalState.mode}
