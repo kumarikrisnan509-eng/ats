@@ -49,9 +49,13 @@ const __orders = [
 // Default to DEMO ON when the flag is missing, so first-time visitors see populated
 // screens instead of blank ones. Production users explicitly toggle demo OFF via
 // the trading-modes panel; that empties the mock arrays and screens then fetch real data.
+// Tier 55: default flipped from true -> false. In production (real users with
+// real broker connections + real DB data) we want fetchApi() to drive every
+// screen. The trading-modes panel still toggles demo ON for tours, screenshots,
+// and offline previews.
 const isDemoOn = () => {
   if (typeof window.isDemoMode === 'function') return !!window.isDemoMode();
-  return true; // safe default
+  return false;
 };
 
 const ifDemo = (arr) => (isDemoOn() ? arr.slice() : []);

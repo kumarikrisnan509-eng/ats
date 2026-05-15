@@ -5,14 +5,6 @@
    that we use here (MF data comes from CAMS/Karvy, ETFs would migrate to
    real holdings table separately). */
 
-const __mockEquityHoldings = [
-  { s: "RELIANCE",   qty: 80,  avg: 2650.00, ltp: 2948.50, sector: "Energy" },
-  { s: "HDFCBANK",   qty: 150, avg: 1540.00, ltp: 1712.80, sector: "Banking" },
-  { s: "INFY",       qty: 120, avg: 1680.00, ltp: 1876.25, sector: "IT" },
-  { s: "TCS",        qty: 50,  avg: 3820.00, ltp: 4120.10, sector: "IT" },
-  { s: "ICICIBANK",  qty: 180, avg: 1120.00, ltp: 1288.90, sector: "Banking" },
-  { s: "ITC",        qty: 300, avg:  410.00, ltp:  446.80, sector: "FMCG" },
-];
 
 
 /* ============================================================
@@ -217,17 +209,13 @@ const PositionsTable = ({ title, rows }) => (
 );
 
 const PortfolioScreen = () => {
-  const [holdings, setHoldings] = React.useState(
-    (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn())
-      ? __mockEquityHoldings
-      : []
-  );
+  const [holdings, setHoldings] = React.useState([]);
 
   React.useEffect(() => {
     let cancelled = false;
     // If demo is ON, keep the sample; otherwise fetch real holdings.
     if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) {
-      setHoldings(__mockEquityHoldings);
+      setHoldings([]);
       return;
     }
     (async () => {
