@@ -105,6 +105,29 @@ function makeRepo(conn) {
 
     pnlUpsertDay: conn.prepare('INSERT INTO pnl_daily (user_id, date, realized_pnl, unrealized_pnl, equity, trades) VALUES (@user_id, @date, @realized_pnl, @unrealized_pnl, @equity, @trades) ON CONFLICT(user_id, date) DO UPDATE SET realized_pnl=@realized_pnl, unrealized_pnl=@unrealized_pnl, equity=@equity, trades=@trades'),
     pnlRecent:    conn.prepare('SELECT * FROM pnl_daily WHERE user_id = ? ORDER BY date DESC LIMIT ?'),
+
+    // Tier 57: broker_accounts CRUD
+    brokerListByUser: conn.prepare('SELECT id, user_id, broker, broker_user_id, issued_at, expires_at, is_default, created_at, (api_key IS NOT NULL) AS has_api_key, (access_token IS NOT NULL) AS has_access_token, (totp_seed IS NOT NULL) AS has_totp FROM broker_accounts WHERE user_id = ? ORDER BY is_default DESC, created_at DESC'),
+    brokerGetFull:    conn.prepare('SELECT * FROM broker_accounts WHERE id = ? AND user_id = ?'),
+    brokerGetByBrokerForUser: conn.prepare('SELECT * FROM broker_accounts WHERE user_id = ? AND broker = ? ORDER BY is_default DESC, created_at DESC LIMIT 1'),
+    brokerUpsert:     conn.prepare(`
+      INSERT INTO broker_accounts (user_id, broker, broker_user_id, access_token, refresh_token, feed_token, api_key, client_id, totp_seed, issued_at, expires_at, is_default)
+      VALUES (@user_id, @broker, @broker_user_id, @access_token, @refresh_token, @feed_token, @api_key, @client_id, @totp_seed, @issued_at, @expires_at, @is_default)
+      ON CONFLICT(user_id, broker, broker_user_id) DO UPDATE SET
+        access_token = COALESCE(@access_token, access_token),
+        refresh_token = COALESCE(@refresh_token, refresh_token),
+        feed_token = COALESCE(@feed_token, feed_token),
+        api_key = COALESCE(@api_key, api_key),
+        client_id = COALESCE(@client_id, client_id),
+        totp_seed = COALESCE(@totp_seed, totp_seed),
+        issued_at = COALESCE(@issued_at, issued_at),
+        expires_at = COALESCE(@expires_at, expires_at),
+        is_default = @is_default
+    `),
+    brokerUpdateTokens: conn.prepare(`UPDATE broker_accounts SET access_token=@access_token, issued_at=@issued_at, expires_at=@expires_at WHERE id=@id AND user_id=@user_id`),
+    brokerDelete:     conn.prepare('DELETE FROM broker_accounts WHERE id = ? AND user_id = ?'),
+    brokerClearDefault: conn.prepare('UPDATE broker_accounts SET is_default = 0 WHERE user_id = ?'),
+    brokerSetDefault:   conn.prepare('UPDATE broker_accounts SET is_default = 1 WHERE id = ? AND user_id = ?'),
   };
 
   return {
@@ -162,6 +185,38 @@ function makeRepo(conn) {
       add: (userId, symbol, exchange) => stmts.wlAdd.run(userId, symbol, exchange || 'NSE'),
       remove: (userId, symbol) => stmts.wlRemove.run(userId, symbol),
       list: (userId) => stmts.wlList.all(userId),
+    },
+    brokers: {
+      /** List all broker_accounts for a user. Secret fields stripped (only presence flags). */
+      list: (userId) => x.brokerListByUser.all(userId),
+      /** Get a single broker row (includes encrypted secrets — use only inside server). */
+      getFull: (userId, id) => x.brokerGetFull.get(id, userId),
+      /** Find a user's account for a given broker (e.g. 'zerodha'). */
+      getByBroker: (userId, broker) => x.brokerGetByBrokerForUser.get(userId, broker),
+      /** Insert-or-merge a broker_account row. Partial fields (e.g. token-only refresh) are merged. */
+      upsert: (row) => x.brokerUpsert.run({
+        user_id: row.user_id,
+        broker: row.broker,
+        broker_user_id: row.broker_user_id || '',
+        access_token: row.access_token || null,
+        refresh_token: row.refresh_token || null,
+        feed_token: row.feed_token || null,
+        api_key: row.api_key || null,
+        client_id: row.client_id || null,
+        totp_seed: row.totp_seed || null,
+        issued_at: row.issued_at || null,
+        expires_at: row.expires_at || null,
+        is_default: row.is_default ? 1 : 0,
+      }),
+      /** Refresh just the daily access_token (after Kite re-auth). */
+      updateTokens: (id, userId, accessToken, issuedAt, expiresAt) =>
+        x.brokerUpdateTokens.run({ id, user_id: userId, access_token: accessToken, issued_at: issuedAt, expires_at: expiresAt }),
+      delete: (userId, id) => x.brokerDelete.run(id, userId),
+      /** Atomically: clear all defaults for user, then mark `id` as default. */
+      setDefault: (userId, id) => {
+        x.brokerClearDefault.run(userId);
+        return x.brokerSetDefault.run(id, userId);
+      },
     },
   };
 }

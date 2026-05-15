@@ -210,6 +210,7 @@ function App() {
       <div className="main">
         <TopBar title={title} crumb={crumb} theme={theme} setTheme={setTheme} setRoute={go}/>
         {window.NetworkStatus && <window.NetworkStatus/>}
+        {window.BrokerNotConnectedBanner && <window.BrokerNotConnectedBanner setRoute={go}/>}
         {window.ActiveAutomationStrip && <window.ActiveAutomationStrip setRoute={go}/>}
         <LiveTicker/>
         <div className="content" data-screen-label={title}>

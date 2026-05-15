@@ -1,11 +1,134 @@
 /* eslint-disable */
-/* Brokers screen — broker adapter pattern */
+/* Brokers screen — broker adapter pattern.
+   Tier 57: per-user broker credentials. Each user can connect their own Zerodha (or other broker)
+   from this screen. Credentials are libsodium-sealed server-side and never returned to the client. */
+
+// ============================================================================
+// BrokerConnectModal -- collects API key, API secret, optional TOTP, broker_user_id.
+// Mode: 'connect' (new) | 'edit' (modify existing) | 'reauth' (rotate access token only)
+// ============================================================================
+const BrokerConnectModal = ({ open, mode, brokerName, existing, onClose, onSaved }) => {
+  if (!open) return null;
+  const [brokerUserId, setBrokerUserId] = React.useState(existing?.broker_user_id || '');
+  const [apiKey, setApiKey]             = React.useState('');
+  const [apiSecret, setApiSecret]       = React.useState('');
+  const [totpSeed, setTotpSeed]         = React.useState('');
+  const [setDefault, setSetDefault]     = React.useState(true);
+  const [busy, setBusy]                 = React.useState(false);
+  const [err, setErr]                   = React.useState('');
+
+  React.useEffect(() => {
+    setBrokerUserId(existing?.broker_user_id || '');
+    setApiKey(''); setApiSecret(''); setTotpSeed(''); setErr('');
+  }, [open, existing && existing.id]);
+
+  const submit = async (e) => {
+    e && e.preventDefault();
+    setErr(''); setBusy(true);
+    try {
+      const url = mode === 'edit' && existing ? `/api/me/broker/${existing.id}` : '/api/me/broker';
+      const method = mode === 'edit' ? 'PUT' : 'POST';
+      const body = { broker: brokerName.toLowerCase(), broker_user_id: brokerUserId };
+      if (apiKey)    body.api_key    = apiKey;
+      if (apiSecret) body.api_secret = apiSecret;
+      if (totpSeed)  body.totp_seed  = totpSeed;
+      body.set_default = setDefault;
+
+      const res = await fetch(url, {
+        method,
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.ok) {
+        setErr(j.reason || `HTTP ${res.status}`);
+      } else {
+        onSaved && onSaved();
+        onClose();
+      }
+    } catch (e) {
+      setErr(e.message || 'request failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const title = mode === 'edit' ? `Edit ${brokerName} connection` : `Connect ${brokerName}`;
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'grid', placeItems: 'center', zIndex: 1000 }}>
+      <Card style={{ width: 'min(480px, 92vw)', maxHeight: '90vh', overflow: 'auto' }}>
+        <div className="between" style={{ marginBottom: 12 }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{title}</h3>
+          <button className="btn btn--sm btn--ghost" onClick={onClose} aria-label="close">×</button>
+        </div>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 16 }}>
+          {brokerName.toLowerCase() === 'zerodha' ? (
+            <>Get your Kite API key/secret from <span className="mono">developers.kite.trade</span>. The TOTP seed is optional and only needed for auto-login.</>
+          ) : (
+            <>Enter credentials from your broker dashboard.</>
+          )}
+        </div>
+        <form onSubmit={submit}>
+          <label style={{ display: 'block', marginBottom: 12 }}>
+            <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>Broker user ID {brokerName.toLowerCase() === 'zerodha' && '(Kite client id, e.g. ABC123)'}</div>
+            <input className="input" required value={brokerUserId} onChange={e => setBrokerUserId(e.target.value)} placeholder="e.g. ABC123" />
+          </label>
+          <label style={{ display: 'block', marginBottom: 12 }}>
+            <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>API key {mode === 'edit' && <span style={{ color: 'var(--text-3)' }}>· leave blank to keep existing</span>}</div>
+            <input className="input" type="password" autoComplete="off" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={mode === 'edit' ? '(unchanged)' : ''} />
+          </label>
+          <label style={{ display: 'block', marginBottom: 12 }}>
+            <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>API secret {mode === 'edit' && <span style={{ color: 'var(--text-3)' }}>· leave blank to keep existing</span>}</div>
+            <input className="input" type="password" autoComplete="off" value={apiSecret} onChange={e => setApiSecret(e.target.value)} placeholder={mode === 'edit' ? '(unchanged)' : ''} />
+          </label>
+          <label style={{ display: 'block', marginBottom: 12 }}>
+            <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>TOTP seed (optional, for auto-login)</div>
+            <input className="input" type="password" autoComplete="off" value={totpSeed} onChange={e => setTotpSeed(e.target.value)} placeholder="(optional)" />
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, fontSize: 13 }}>
+            <input type="checkbox" checked={setDefault} onChange={e => setSetDefault(e.target.checked)} /> Use this as my default broker
+          </label>
+          {err && <div style={{ padding: 10, background: 'color-mix(in oklab, var(--danger) 12%, transparent)', color: 'var(--danger)', borderRadius: 6, fontSize: 12, marginBottom: 12 }}>{err}</div>}
+          <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+            <button type="button" className="btn btn--sm" onClick={onClose} disabled={busy}>Cancel</button>
+            <button type="submit" className="btn btn--sm btn--primary" disabled={busy}>{busy ? 'Saving…' : (mode === 'edit' ? 'Save changes' : 'Connect')}</button>
+          </div>
+        </form>
+        <div className="muted" style={{ fontSize: 11, marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+          🔒 Stored encrypted with libsodium. The server never logs these values, and they're never returned to the browser after save.
+        </div>
+      </Card>
+    </div>
+  );
+};
+Object.assign(window, { BrokerConnectModal });
 
 const BrokersScreen = () => {
   // Live status of the primary broker from /api/health + /api/profile.
   const [zerodhaState, setZerodhaState] = React.useState({
     connected: null, since: '--', cap: [], orders: 0, fees: 0, userId: '--', userName: '--',
   });
+  // Tier 57: per-user broker connections from /api/me/broker
+  const [myBrokers, setMyBrokers] = React.useState([]); // [{id, broker, broker_user_id, has_api_key, has_access_token, is_default, ...}]
+  const [modalState, setModalState] = React.useState({ open: false, mode: 'connect', brokerName: 'Zerodha', existing: null });
+
+  const refreshMyBrokers = React.useCallback(async () => {
+    try {
+      const res = await fetch('/api/me/broker', { credentials: 'include' });
+      if (!res.ok) return;
+      const j = await res.json();
+      if (j.ok) setMyBrokers(j.brokers || []);
+    } catch (_) { /* unauthenticated or network — leave empty */ }
+  }, []);
+  React.useEffect(() => { refreshMyBrokers(); }, [refreshMyBrokers]);
+
+  const myZerodha = myBrokers.find(b => b.broker === 'zerodha');
+  const disconnect = async (id) => {
+    if (!confirm('Disconnect this broker? Your credentials will be permanently removed.')) return;
+    const res = await fetch(`/api/me/broker/${id}`, { method: 'DELETE', credentials: 'include' });
+    if (res.ok) refreshMyBrokers();
+  };
   React.useEffect(() => {
     let cancelled = false;
     const refresh = async () => {
@@ -83,7 +206,10 @@ const BrokersScreen = () => {
         </div>
         <div className="page-header__right">
           <button className="btn"><I.code size={14}/> Adapter docs</button>
-          <button className="btn btn--primary"><I.plus size={14}/> Connect broker</button>
+          <button
+            className="btn btn--primary"
+            onClick={() => setModalState({ open: true, mode: 'connect', brokerName: 'Zerodha', existing: null })}
+          ><I.plus size={14}/> Connect broker</button>
         </div>
       </div>
 
@@ -105,40 +231,100 @@ const BrokersScreen = () => {
       </Card>
 
       <div className="grid grid-3" style={{ marginBottom: 16 }}>
-        {brokers.map((b, i) => b.st === "connected" ? (
-          <Card key={i} style={{ border: "1px solid color-mix(in oklab, var(--accent) 30%, var(--border))" }}>
-            <div className="between" style={{ marginBottom: 12 }}>
-              <div className="row">
-                <div style={{ width: 40, height: 40, borderRadius: 10, background: b.logoColor, color: "white", display: "grid", placeItems: "center", fontWeight: 700, letterSpacing: "-0.02em" }}>{b.logoLetter}</div>
-                <div>
-                  <div style={{ fontSize: 15, fontWeight: 600 }}>{b.n}</div>
-                  <div className="muted" style={{ fontSize: 11, fontFamily: "var(--mono)" }}>{b.api}</div>
+        {brokers.map((b, i) => {
+          // Tier 57: per-user override -- if user has stored creds for this broker, show their row.
+          const isZerodha = b.n.toLowerCase().includes('zerodha');
+          const myRow = isZerodha ? myZerodha : null;
+          const showConnected = b.st === "connected" || !!myRow;
+          return showConnected ? (
+            <Card key={i} style={{ border: "1px solid color-mix(in oklab, var(--accent) 30%, var(--border))" }}>
+              <div className="between" style={{ marginBottom: 12 }}>
+                <div className="row">
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: b.logoColor, color: "white", display: "grid", placeItems: "center", fontWeight: 700, letterSpacing: "-0.02em" }}>{b.logoLetter}</div>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 600 }}>{b.n}</div>
+                    <div className="muted" style={{ fontSize: 11, fontFamily: "var(--mono)" }}>{b.api}</div>
+                  </div>
                 </div>
+                <Pill kind="acc">{myRow && myRow.is_default ? 'My default' : b.badge}</Pill>
               </div>
-              <Pill kind="acc">{b.badge}</Pill>
+              <div className="chip-row" style={{ marginBottom: 12 }}>
+                {b.cap.map(c => <span className="chip" key={c}>{c}</span>)}
+              </div>
+              <div className="divider"/>
+              <div className="between" style={{ fontSize: 12 }}>
+                <span className="muted">Broker user id</span>
+                <span className="mono">{myRow ? myRow.broker_user_id : b.since}</span>
+              </div>
+              <div className="between" style={{ fontSize: 12, marginTop: 6 }}><span className="muted">Orders (30d)</span><span className="mono">{(b.orders||0).toLocaleString()}</span></div>
+              {myRow ? (
+                <>
+                  <div className="between" style={{ fontSize: 12, marginTop: 6 }}><span className="muted">API key</span><span className="mono">{myRow.has_api_key ? '••• stored' : '— missing'}</span></div>
+                  <div className="between" style={{ fontSize: 12, marginTop: 6 }}><span className="muted">Access token</span><span className="mono">{myRow.has_access_token ? '••• stored' : '— needs OAuth'}</span></div>
+                  <div className="between" style={{ fontSize: 12, marginTop: 6 }}><span className="muted">TOTP auto-login</span><span className="mono">{myRow.has_totp ? '••• enabled' : 'disabled'}</span></div>
+                </>
+              ) : (
+                <>
+                  <div className="between" style={{ fontSize: 12, marginTop: 6 }}><span className="muted">Fees (30d)</span><span className="mono">{inr(b.fees)}</span></div>
+                  <div className="between" style={{ fontSize: 12, marginTop: 6 }}><span className="muted">Status</span><Pill kind="up" dot>connected · 14ms</Pill></div>
+                </>
+              )}
+              <div className="row" style={{ marginTop: 14, gap: 6 }}>
+                {myRow ? (
+                  <>
+                    <button
+                      className="btn btn--sm"
+                      style={{ flex: 1, justifyContent: "center" }}
+                      onClick={() => setModalState({ open: true, mode: 'edit', brokerName: b.n.split(' ')[0], existing: myRow })}
+                    >Edit</button>
+                    <button
+                      className="btn btn--sm"
+                      style={{ flex: 1, justifyContent: "center" }}
+                      onClick={() => window.location.href = '/api/brokers/zerodha/login'}
+                    >Reauth</button>
+                    <button
+                      className="btn btn--sm"
+                      style={{ flex: 1, justifyContent: "center", color: 'var(--danger)' }}
+                      onClick={() => disconnect(myRow.id)}
+                    >Disconnect</button>
+                  </>
+                ) : (
+                  <>
+                    <button className="btn btn--sm" style={{ flex: 1, justifyContent: "center" }}>Test API</button>
+                    <button className="btn btn--sm" style={{ flex: 1, justifyContent: "center" }}>Reauth</button>
+                  </>
+                )}
+              </div>
+            </Card>
+          ) : (
+            <div className="slot" key={i}>
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: "color-mix(in oklab, " + b.logoColor + " 18%, transparent)", color: b.logoColor, display: "grid", placeItems: "center", fontWeight: 700 }}>{b.logoLetter}</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{b.n}</div>
+              <div style={{ fontSize: 11 }}>{b.note}</div>
+              <button
+                className="btn btn--sm"
+                style={{ marginTop: 6 }}
+                onClick={() => {
+                  // Only zerodha/dhan/angelone/upstox are wired server-side today.
+                  const supported = ['Zerodha', 'Dhan', 'AngelOne', 'Upstox'];
+                  const match = supported.find(s => b.n.toLowerCase().includes(s.toLowerCase()));
+                  if (!match) { alert(`${b.n} adapter not implemented yet.`); return; }
+                  setModalState({ open: true, mode: 'connect', brokerName: match, existing: null });
+                }}
+              ><I.plus size={12}/> Connect</button>
             </div>
-            <div className="chip-row" style={{ marginBottom: 12 }}>
-              {b.cap.map(c => <span className="chip" key={c}>{c}</span>)}
-            </div>
-            <div className="divider"/>
-            <div className="between" style={{ fontSize: 12 }}><span className="muted">Connected since</span><span className="mono">{b.since}</span></div>
-            <div className="between" style={{ fontSize: 12, marginTop: 6 }}><span className="muted">Orders (30d)</span><span className="mono">{b.orders.toLocaleString()}</span></div>
-            <div className="between" style={{ fontSize: 12, marginTop: 6 }}><span className="muted">Fees (30d)</span><span className="mono">{inr(b.fees)}</span></div>
-            <div className="between" style={{ fontSize: 12, marginTop: 6 }}><span className="muted">Status</span><Pill kind="up" dot>connected · 14ms</Pill></div>
-            <div className="row" style={{ marginTop: 14, gap: 6 }}>
-              <button className="btn btn--sm" style={{ flex: 1, justifyContent: "center" }}>Test API</button>
-              <button className="btn btn--sm" style={{ flex: 1, justifyContent: "center" }}>Reauth</button>
-            </div>
-          </Card>
-        ) : (
-          <div className="slot" key={i}>
-            <div style={{ width: 40, height: 40, borderRadius: 10, background: "color-mix(in oklab, " + b.logoColor + " 18%, transparent)", color: b.logoColor, display: "grid", placeItems: "center", fontWeight: 700 }}>{b.logoLetter}</div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{b.n}</div>
-            <div style={{ fontSize: 11 }}>{b.note}</div>
-            <button className="btn btn--sm" style={{ marginTop: 6 }}><I.plus size={12}/> Connect</button>
-          </div>
-        ))}
+          );
+        })}
       </div>
+
+      <BrokerConnectModal
+        open={modalState.open}
+        mode={modalState.mode}
+        brokerName={modalState.brokerName}
+        existing={modalState.existing}
+        onClose={() => setModalState({ ...modalState, open: false })}
+        onSaved={refreshMyBrokers}
+      />
 
       <Card title="Adapter coverage" sub="Which broker implements which capability" flush>
         <table className="table">

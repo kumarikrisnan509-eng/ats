@@ -1786,8 +1786,21 @@ app.get('/api/symbols', async (_req, res) => {
   res.json({ ok: true, symbols: syms.length ? syms : DEFAULT_SYMBOLS });
 });
 
+// ---------- Tier 58: per-user broker resolver ----------
+// Quotes can stay on the global broker (market data, not user-specific).
+// Holdings/positions/orders MUST route through the requesting user's broker.
+const _brokerResolver = require('./broker-resolver');
+async function resolveUserBroker(req) {
+  if (!db || !vault) return { broker: null, isUserOwn: false, reason: 'storage_unavailable' };
+  if (!req.user || !req.user.id) return { broker: null, isUserOwn: false, reason: 'auth_required' };
+  const r = await _brokerResolver.resolveForRequest({ db, vault, globalBroker: null, fallbackToGlobal: false }, req);
+  if (!r.broker) return { broker: null, isUserOwn: false, reason: 'broker_not_connected' };
+  return r;
+}
+
 app.get('/api/quote/:symbol', async (req, res) => {
   try {
+    // Global broker for quotes is fine -- market data isn't user-isolated.
     const q = await broker.getQuote(req.params.symbol);
     res.json({ ok: true, symbol: req.params.symbol, ...q });
   } catch (e) {
@@ -1808,30 +1821,37 @@ app.get('/api/quotes', async (req, res) => {
   }
 });
 
-// ---------- Portfolio / orders REST (read-only) ----------
+// ---------- Portfolio / orders REST (read-only, per-user) ----------
+// Tier 58: route through user's own broker. If not connected, return empty + flag.
 
-app.get('/api/portfolio/holdings', async (_req, res) => {
+app.get('/api/portfolio/holdings', async (req, res) => {
   try {
-    const rows = await broker.getHoldings();
-    res.json({ ok: true, rows });
+    const r = await resolveUserBroker(req);
+    if (!r.broker) return res.json({ ok: true, brokerConnected: false, reason: r.reason, rows: [] });
+    const rows = await r.broker.getHoldings();
+    res.json({ ok: true, brokerConnected: true, rows });
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
   }
 });
 
-app.get('/api/portfolio/positions', async (_req, res) => {
+app.get('/api/portfolio/positions', async (req, res) => {
   try {
-    const data = await broker.getPositions();
-    res.json({ ok: true, ...data });
+    const r = await resolveUserBroker(req);
+    if (!r.broker) return res.json({ ok: true, brokerConnected: false, reason: r.reason, day: [], net: [] });
+    const data = await r.broker.getPositions();
+    res.json({ ok: true, brokerConnected: true, ...data });
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
   }
 });
 
-app.get('/api/orders', async (_req, res) => {
+app.get('/api/orders', async (req, res) => {
   try {
-    const rows = await broker.getOrders();
-    res.json({ ok: true, rows });
+    const r = await resolveUserBroker(req);
+    if (!r.broker) return res.json({ ok: true, brokerConnected: false, reason: r.reason, rows: [] });
+    const rows = await r.broker.getOrders();
+    res.json({ ok: true, brokerConnected: true, rows });
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
   }
@@ -2304,6 +2324,25 @@ app.get('/api/me/pnl', withAuth((req, res) => {
   const n = Math.min(365, Math.max(1, Number(req.query.n) || 30));
   res.json({ ok:true, rows: db.pnl.recent(req.user.id, n) });
 }));
+
+// ---------- Tier 57: per-user broker credentials ----------
+// Mounted as a sub-router so it can use express.Router(), middleware, and its own JSON limit.
+// The router internally uses auth.requireAuth -- which is auth.optionalAuth + 401 fallback.
+try {
+  if (db && auth && vault) {
+    const { createMeBrokerRouter } = require('./me-broker');
+    app.use('/api/me/broker', createMeBrokerRouter({ db, vault, requireAuth: auth.requireAuth }));
+  } else {
+    // Without DB/auth/vault wired, register a friendly 503 placeholder so the UI knows what's wrong.
+    app.use('/api/me/broker', (_req, res) => res.status(503).json({
+      ok: false,
+      reason: 'broker_storage_not_initialized',
+      detail: 'db/auth/vault unavailable -- check MASTER_KEY_PATH and SQLite mount',
+    }));
+  }
+} catch (e) {
+  console.error('[server] failed to mount /api/me/broker router:', e && e.message);
+}
 
 // ---------- Tier 50/51: auth endpoints (signup, login, logout, verify, reset) ----------
 app.post('/api/auth/signup', async (req, res) => {
