@@ -23,7 +23,7 @@ let Database;
 try { Database = require('better-sqlite3'); }
 catch (_) { Database = null; /* sandbox without native build; module loads, open() throws */ }
 
-const DEFAULT_PATH = process.env.ATS_DB_PATH || '/var/lib/ats/ats.db';
+const DEFAULT_PATH = process.env.ATS_DB_PATH || '/var/lib/ats/tokens/ats.db';
 const SCHEMA_PATH  = path.join(__dirname, 'schema.sql');
 
 let _instance = null;
