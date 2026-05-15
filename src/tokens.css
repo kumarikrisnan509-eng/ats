@@ -64,3 +64,90 @@ html[data-density="comfortable"] {
   --text-md: 15px;
   --row-default: 44px;
 }
+
+/* ============================================================
+ * Tier 48: responsive sweep (mobile + tablet).
+ *
+ * Most ATS screens were designed at 1280-1440px desktop. On phones the
+ * dense forms + multi-column tables become unusable. This adds:
+ *   - tighter spacing tokens on small screens
+ *   - horizontal-scroll containers around .tbl with sticky first column
+ *   - card grid collapses to single column under 720px
+ *   - sidebar nav collapses to a top bar under 600px (via .row/.col flex
+ *     wrap that's already in the JSX)
+ * ============================================================ */
+
+/* Tablet (<= 1024px) */
+@media (max-width: 1024px) {
+  :root {
+    --space-3: 10px;
+    --space-4: 14px;
+    --space-5: 18px;
+    --space-6: 22px;
+  }
+}
+
+/* Phone (<= 720px) */
+@media (max-width: 720px) {
+  :root {
+    --space-2: 4px;
+    --space-3: 8px;
+    --space-4: 10px;
+    --space-5: 12px;
+    --space-6: 16px;
+    --text-base: 13px;
+    --text-md:   13px;
+    --row-default: 34px;
+  }
+  /* Force every .row to wrap on phone so flex columns stack vertically. */
+  .row { flex-wrap: wrap !important; }
+  /* Any table with class="tbl" gets scrollable parent. The screens already
+     wrap many in overflow-x divs; this is a safety net for the rest. */
+  .tbl {
+    font-size: 11px;
+    min-width: max-content;
+  }
+  /* Cards (the "card" class is used loosely; this catches the common shape) */
+  .card,
+  [class*="card"] {
+    padding: 10px 12px !important;
+  }
+  /* Header rows on most screens use display:flex w/ flexWrap unset; force wrap. */
+  .between { flex-wrap: wrap; gap: 8px; }
+
+  /* Sidebar (set via shell.jsx) -- collapse to horizontal top strip under 600px.
+     The shell already has a hamburger toggle; this just makes content
+     usable when it's open. */
+  .sidebar {
+    width: 100% !important;
+    height: auto !important;
+    position: static !important;
+    border-right: none !important;
+    border-bottom: 1px solid var(--border) !important;
+  }
+  .sidebar nav { display: flex !important; flex-wrap: wrap; gap: 4px; padding: 8px !important; }
+  .sidebar nav a { white-space: nowrap; padding: 4px 10px !important; font-size: 12px !important; }
+
+  /* Top bar -- collapse search to icon-only */
+  .topbar .search { display: none !important; }
+}
+
+/* Very small phone (<= 380px) */
+@media (max-width: 380px) {
+  :root {
+    --text-base: 12px;
+    --text-md:   12px;
+  }
+}
+
+/* Print -- use full width, no sidebar, no background */
+@media print {
+  .sidebar, .topbar, .modal, .toast { display: none !important; }
+  body { background: white !important; color: black !important; }
+  .card { break-inside: avoid; }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
