@@ -437,7 +437,17 @@ const DashboardScreen = () => {
                 const t = new Date(r.ts || r.time || 0).getTime();
                 const start = new Date(); start.setHours(0,0,0,0);
                 return t >= start.getTime();
-              }).length : null
+              }).length : null,
+          scannerCards: scanLive && scanLive.ok && Array.isArray(scanLive.rows)
+            ? scanLive.rows.slice(0, 3).map(r => ({
+                sym: r.symbol || '—',
+                action: String(r.signal || '').toUpperCase().includes('SELL') ? 'SELL' : 'BUY',
+                conf: r.confidence != null ? Math.round(r.confidence * 100) : (r.value != null ? Math.min(99, Math.max(0, Math.round(r.value))) : 50),
+                src: r.strategy ? `${r.strategy}` : (r.message || 'scanner'),
+                tgt: r.target != null ? String(r.target) : '—',
+                sl:  r.stopLoss != null ? String(r.stopLoss) : '—',
+              }))
+            : []
         });
         if (profile && profile.ok) setLiveProfile(profile.profile);
       } catch (e) {}
@@ -775,11 +785,12 @@ const DashboardScreen = () => {
             />
           ) : (
           <div className="col" style={{ gap: 10 }}>
-            {[
-              { sym: "HDFCBANK", action: "BUY", conf: 82, src: "Claude · intraday momentum", tgt: "1745", sl: "1698" },
-              { sym: "NIFTY 22600 PE", action: "BUY", conf: 74, src: "Ensemble · mean-reversion", tgt: "112", sl: "68" },
-              { sym: "GOLD MCX", action: "SELL", conf: 61, src: "GPT-4o · macro", tgt: "73980", sl: "74820" },
-            ].map((s, i) => (
+            {(liveDash && liveDash.scannerCards && liveDash.scannerCards.length > 0
+              ? liveDash.scannerCards
+              : [
+                  { sym: "—", action: "…", conf: 0, src: "Loading scanner hits from /api/scanner/history…", tgt: "—", sl: "—" },
+                ]
+            ).map((s, i) => (
               <div key={i} style={{ padding: 12, border: "1px solid var(--border)", borderRadius: "var(--r-md)" }}>
                 <div className="between" style={{ marginBottom: 6 }}>
                   <div className="row">

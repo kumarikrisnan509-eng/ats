@@ -8,7 +8,7 @@
 // records entry/exit + P&L. Final report includes win-rate, max drawdown,
 // and the equity curve (one point per bar).
 
-const { rsi, ema, macd, bollinger } = require('./scanner');
+const { rsi, ema, macd, bollinger, atr, adx } = require('./scanner');
 
 const DEFAULT_QTY = 1;
 
@@ -37,6 +37,12 @@ function runBacktest({ candles, strategy, params, qty }) {
     signal = signalMacdCross(closes, params);
   } else if (strategy === 'bollinger') {
     signal = signalBollinger(closes, params);
+  } else if (strategy === 'supertrend') {
+    signal = signalSupertrend(candles, params);
+  } else if (strategy === 'adx_trend') {
+    signal = signalAdxTrend(candles, params);
+  } else if (strategy === 'donchian') {
+    signal = signalDonchian(candles, params);
   } else {
     throw new Error(`unknown strategy: ${strategy}`);
   }
@@ -211,6 +217,82 @@ function signalBollinger(closes, params) {
 }
 
 
+/**
+ * Supertrend -- classic trend-following indicator combining ATR + price.
+ *   Lower band = HL/2 - k*ATR, Upper band = HL/2 + k*ATR.
+ *   Trend flips up when close > previous upper; flips down when close < previous lower.
+ *   BUY on flip-up, SELL on flip-down. Long-only here.
+ */
+function signalSupertrend(candles, params) {
+  const period = params.period || 10;
+  const k      = params.multiplier || 3;
+  const atrArr = atr(candles, period);
+  const out = new Array(candles.length).fill(null);
+  let trendUp = true, prevUpper = null, prevLower = null;
+  for (let i = period; i < candles.length; i++) {
+    const c = candles[i];
+    const hl2 = (c.high + c.low) / 2;
+    const a = atrArr[i];
+    if (!Number.isFinite(a)) continue;
+    let upper = hl2 + k * a;
+    let lower = hl2 - k * a;
+    if (prevUpper != null && candles[i-1].close <= prevUpper) upper = Math.min(upper, prevUpper);
+    if (prevLower != null && candles[i-1].close >= prevLower) lower = Math.max(lower, prevLower);
+    const wasUp = trendUp;
+    if (c.close > prevUpper) trendUp = true;
+    else if (c.close < prevLower) trendUp = false;
+    if (!wasUp && trendUp) out[i] = 'BUY';
+    else if (wasUp && !trendUp) out[i] = 'SELL';
+    prevUpper = upper;
+    prevLower = lower;
+  }
+  return out;
+}
+
+/**
+ * ADX trend filter:
+ *   When ADX > threshold AND +DI > -DI -> trending up -> BUY (if flat).
+ *   When ADX > threshold AND -DI > +DI -> trending down -> SELL (if long).
+ *   When ADX < threshold -> no trade. Long-only.
+ */
+function signalAdxTrend(candles, params) {
+  const period    = params.period    || 14;
+  const threshold = params.threshold || 25;
+  const a = adx(candles, period);
+  const out = new Array(candles.length).fill(null);
+  for (let i = period * 2; i < candles.length; i++) {
+    const adxV = a.adx[i], pdi = a.plusDi[i], mdi = a.minusDi[i];
+    if (!Number.isFinite(adxV)) continue;
+    if (adxV > threshold) {
+      if (pdi > mdi) out[i] = 'BUY';
+      else if (mdi > pdi) out[i] = 'SELL';
+    }
+  }
+  return out;
+}
+
+/**
+ * Donchian channel breakout:
+ *   BUY  when close > rolling N-period high (exclusive of current bar).
+ *   SELL when close < rolling N-period low.
+ * Classic 'Turtle traders' rule. Trending markets only.
+ */
+function signalDonchian(candles, params) {
+  const period = params.period || 20;
+  const out = new Array(candles.length).fill(null);
+  for (let i = period; i < candles.length; i++) {
+    let hi = -Infinity, lo = Infinity;
+    for (let j = i - period; j < i; j++) {
+      if (candles[j].high > hi) hi = candles[j].high;
+      if (candles[j].low  < lo) lo = candles[j].low;
+    }
+    const c = candles[i].close;
+    if (c > hi) out[i] = 'BUY';
+    else if (c < lo) out[i] = 'SELL';
+  }
+  return out;
+}
+
 function computeSignal({ candles, strategy, params }) {
   if (!Array.isArray(candles) || candles.length < 30) return [];
   const closes = candles.map(c => c.close);
@@ -219,6 +301,9 @@ function computeSignal({ candles, strategy, params }) {
   if (strategy === 'ema_cross')       return signalEmaCross(closes, params);
   if (strategy === 'macd_cross')      return signalMacdCross(closes, params);
   if (strategy === 'bollinger')       return signalBollinger(closes, params);
+  if (strategy === 'supertrend')      return signalSupertrend(candles, params);
+  if (strategy === 'adx_trend')       return signalAdxTrend(candles, params);
+  if (strategy === 'donchian')        return signalDonchian(candles, params);
   throw new Error('unknown strategy: ' + strategy);
 }
 

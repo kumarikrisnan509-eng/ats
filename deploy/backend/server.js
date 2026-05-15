@@ -872,6 +872,36 @@ const STRATEGIES = [
       { name: 'k',      type: 'float', default: 2,  min: 0.5,  max: 5 },
     ],
   },
+  // ---------- Tier 16: 3 new TA strategies (toward the 22-layer goal) ----------
+  {
+    id: 'supertrend',
+    name: 'Supertrend',
+    description: 'Long-only: BUY on Supertrend flip up; SELL on flip down. Uses ATR-based upper/lower bands.',
+    bias: 'trending markets',
+    params: [
+      { name: 'period',     type: 'int',   default: 10, min: 5,   max: 50 },
+      { name: 'multiplier', type: 'float', default: 3,  min: 1,   max: 8 },
+    ],
+  },
+  {
+    id: 'adx_trend',
+    name: 'ADX trend filter',
+    description: 'Long-only: BUY when ADX > threshold and +DI > -DI (strong uptrend); SELL on opposite. Skips trade when ADX < threshold.',
+    bias: 'strongly trending markets',
+    params: [
+      { name: 'period',    type: 'int',   default: 14, min: 5,   max: 50 },
+      { name: 'threshold', type: 'float', default: 25, min: 10,  max: 50 },
+    ],
+  },
+  {
+    id: 'donchian',
+    name: 'Donchian breakout',
+    description: 'Long-only: BUY when close breaks above N-period rolling high; SELL when close breaks below rolling low. Classic Turtle-trader rule.',
+    bias: 'trending markets, breakout',
+    params: [
+      { name: 'period', type: 'int', default: 20, min: 5, max: 100 },
+    ],
+  },
 ];
 
 app.get('/api/strategies', (_req, res) => {
@@ -1811,7 +1841,7 @@ const VALID_ORDER_TYPES   = new Set(['MARKET', 'LIMIT', 'SL', 'SL-M']);
 const VALID_VARIETIES     = new Set(['regular', 'amo', 'co', 'iceberg', 'auction']);
 const VALID_VALIDITY      = new Set(['DAY', 'IOC', 'TTL']);
 
-app.post('/api/orders/place', (req, res) => {
+app.post('/api/orders/place', async (req, res) => {
   const body = req.body || {};
   // Tier 15: SEBI Algo-ID is now required. Under the 1 Apr 2026 framework every
   // algo-routed order must carry an exchange-issued Algo-ID. We require the caller
@@ -1904,6 +1934,29 @@ app.post('/api/orders/place', (req, res) => {
       clientOrderId,
     });
   }
+
+  // Tier 16 pre-trade risk-gate #4: max aggregate exposure check.
+  // Sums: open paper positions (qty * lastPrice) + live holdings (qty * ltp) + this new order's notional.
+  try {
+    let exposure = orderNotional;
+    if (paper) {
+      const pos = paper.positions ? paper.positions() : [];
+      for (const p of pos) exposure += Math.abs((p.qty || 0) * (p.ltp || p.avgPrice || 0));
+    }
+    if (typeof broker.getHoldings === 'function') {
+      const hs = await broker.getHoldings().catch(() => []);
+      for (const h of hs) exposure += Math.abs((h.quantity || 0) * (h.last_price || h.ltp || 0));
+    }
+    if (exposure > MAX_AGGREGATE_EXPOSURE) {
+      audit('order.blocked.aggregateExposure', { ...normalizedPayload, exposure, capINR: MAX_AGGREGATE_EXPOSURE });
+      return res.status(400).json({
+        ok: false,
+        reason: 'AGGREGATE_EXPOSURE_TOO_HIGH',
+        message: `Adding this order would push aggregate exposure to ₹${Math.round(exposure)}, exceeding cap ₹${MAX_AGGREGATE_EXPOSURE}.`,
+        clientOrderId,
+      });
+    }
+  } catch (_e) {}
 
   // Tier 15 pre-trade risk-gate #3: daily-loss circuit (uses paper realizedPnl as proxy today)
   try {

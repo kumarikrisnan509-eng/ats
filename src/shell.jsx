@@ -392,19 +392,79 @@ const TopBar = ({ title, crumb, theme, setTheme, setRoute }) => {
 
 const NOTIF_ROUTE = { 1: "signals", 2: "modes", 3: "portfolio", 4: "compliance", 5: "infra", 6: "settings" };
 
-// Notifications dropdown — event feed with severity + read state
+// Tier 16: Notifications dropdown -- now feeds from /api/scanner/history (last 24h)
+// + /api/sweep (recent executes) + /api/audit (broker events). Replaces 6 hardcoded
+// notifications. Severity inferred from event type.
 const NotificationsBell = ({ setRoute }) => {
   const [open, setOpen] = React.useState(false);
-  const [items, setItems] = React.useState([
-    { id: 1, sev: "info",  icon: "◆", title: "HDFCBANK signal promoted to live",  detail: "Momentum AI · 82% conf · paper win-rate 64% (14d)", when: "2m ago", unread: true },
-    { id: 2, sev: "warn",  icon: "!", title: "Options mode near daily loss limit", detail: "-₹4,820 / -₹5,000 · will auto-halt at limit", when: "18m ago", unread: true },
-    { id: 3, sev: "up",    icon: "↑", title: "Monthly profit sweep complete",       detail: "₹38,450 moved → NIFTY Next 50 index fund", when: "2h ago", unread: true },
-    { id: 4, sev: "info",  icon: "◆", title: "Compliance: daily audit exported",    detail: "237 orders · Algo-ID tagged · sent to SEBI inbox", when: "3h ago", unread: false },
-    { id: 5, sev: "down",  icon: "✕", title: "Zerodha WebSocket reconnected",       detail: "8s disconnect at 11:42:17 · no orders missed", when: "yesterday", unread: false },
-    { id: 6, sev: "info",  icon: "◆", title: "Claude Opus 4.6 released",            detail: "Auto-upgraded from 4.5 · 12% cheaper per signal", when: "yesterday", unread: false },
-  ]);
+  const [items, setItems] = React.useState([]);
+  const [readIds, setReadIds] = React.useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('ats.notify.read') || '[]')); } catch { return new Set(); }
+  });
+  React.useEffect(() => {
+    let cancelled = false;
+    const fmtAgo = (ts) => {
+      const ms = Date.now() - new Date(ts).getTime();
+      if (ms < 60_000)    return Math.max(1, Math.floor(ms/1000)) + 's ago';
+      if (ms < 3600_000)  return Math.floor(ms/60_000) + 'm ago';
+      if (ms < 86400_000) return Math.floor(ms/3600_000) + 'h ago';
+      return Math.floor(ms/86400_000) + 'd ago';
+    };
+    const load = async () => {
+      try {
+        const [scan, sweep, audit] = await Promise.all([
+          window.fetchApi('/api/scanner/history?limit=10').catch(() => null),
+          window.fetchApi('/api/sweep').catch(() => null),
+          window.fetchApi('/api/audit?limit=10').catch(() => null),
+        ]);
+        if (cancelled) return;
+        const out = [];
+        if (scan && scan.ok && Array.isArray(scan.rows)) {
+          for (const r of scan.rows.slice(0, 5)) {
+            const id = 'scan:' + (r.ts || r.time || r.symbol);
+            out.push({ id, sev: 'info', icon: '◆',
+              title: `${r.symbol || 'Signal'} · ${r.signal || r.strategy || 'scanner hit'}`,
+              detail: r.message || (r.value != null ? `value ${r.value}` : ''),
+              when: fmtAgo(r.ts || r.time || Date.now()),
+              unread: !readIds.has(id) });
+          }
+        }
+        if (sweep && sweep.ok && Array.isArray(sweep.history)) {
+          for (const h of sweep.history.slice(0, 3)) {
+            const id = 'sweep:' + h.id;
+            out.push({ id, sev: 'up', icon: '↑',
+              title: `Sweep ${h.status || 'logged'} · ₹${(h.sweepINR || 0).toLocaleString('en-IN')}`,
+              detail: `Target: ${h.target || '—'}`,
+              when: fmtAgo(h.ts || Date.now()),
+              unread: !readIds.has(id) });
+          }
+        }
+        if (audit && audit.ok && Array.isArray(audit.rows)) {
+          for (const a of audit.rows.slice(0, 4)) {
+            const id = 'audit:' + (a.ts || a.id);
+            const isErr = String(a.event || '').includes('error') || String(a.event || '').includes('blocked');
+            out.push({ id, sev: isErr ? 'warn' : 'info', icon: isErr ? '!' : '◆',
+              title: a.event || 'event',
+              detail: a.data ? JSON.stringify(a.data).slice(0, 80) : '',
+              when: fmtAgo(a.ts || Date.now()),
+              unread: !readIds.has(id) });
+          }
+        }
+        // Sort by 'when' proxy (we already pulled most-recent N from each)
+        setItems(out.slice(0, 10));
+      } catch (_e) {}
+    };
+    load();
+    const t = setInterval(load, 30000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [readIds]);
   const unreadCount = items.filter(i => i.unread).length;
-  const markAll = () => setItems(items.map(i => ({ ...i, unread: false })));
+  const markAll = () => {
+    const all = new Set(items.map(i => i.id));
+    const merged = new Set([...readIds, ...all]);
+    setReadIds(merged);
+    try { localStorage.setItem('ats.notify.read', JSON.stringify([...merged].slice(-200))); } catch {}
+  };
 
   const sevColor = {
     info: "var(--info)", warn: "oklch(65% 0.13 80)", up: "var(--up)", down: "var(--down)",
