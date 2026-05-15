@@ -147,5 +147,3 @@ module.exports = {
   _statsForTest,
   _clearForTest,
 };
-earForTest,
-};
