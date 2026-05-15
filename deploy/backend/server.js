@@ -37,6 +37,7 @@ const { SweepEngine }  = require('./sweep');
 const { LongTerm }     = require('./longterm');
 const { Wealth }       = require('./wealth');
 const { MPT }          = require('./mpt');
+const { FactorTilt }   = require('./factor-tilt');
 const { Rebalance }    = require('./rebalance');
 const { Replay }       = require('./replay');
 const { EmailAlerts }  = require('./email-alerts');
@@ -94,7 +95,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, rebalance, replay, emailAlerts, whatsAppAlerts;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, rebalance, replay, emailAlerts, whatsAppAlerts;
 
 async function init() {
   broker = createBroker(process.env);
@@ -188,6 +189,9 @@ async function init() {
 
   // Tier 22: MPT optimiser (Monte Carlo on small universes).
   mpt = new MPT();
+
+  // Tier 31: factor-tilt portfolio construction (momentum / value / quality / low-vol / size).
+  factorTilt = new FactorTilt();
 
   // Tier 23: bucket-target rebalancing engine.
   rebalance = new Rebalance();
@@ -2076,6 +2080,23 @@ app.post('/api/portfolio/optimize', (req, res) => {
   if (!mpt) return res.status(503).json({ ok:false, reason:'mpt_not_initialized' });
   try {
     const out = mpt.optimize(req.body || {});
+    res.json(out);
+  } catch (e) {
+    res.status(400).json({ ok:false, reason:e.message });
+  }
+});
+
+// ---------- Tier 31: factor-tilt portfolio construction ----------
+// POST body shape:
+//   { universe:      [{symbol, momentum, value, quality, lowVol, size, marketCap}, ...],
+//     factorWeights: { momentum:0.4, value:0.3, quality:0.2, lowVol:0.1, size:0 },
+//     mode:          'long-only' | 'long-short',         // default 'long-only'
+//     topPct:        0.2,                                 // top quintile to long
+//     bottomPct:     0.2 }                                // bottom quintile to short (long-short only)
+app.post('/api/portfolio/factor-tilt', (req, res) => {
+  if (!factorTilt) return res.status(503).json({ ok:false, reason:'factor_tilt_not_initialized' });
+  try {
+    const out = factorTilt.build(req.body || {});
     res.json(out);
   } catch (e) {
     res.status(400).json({ ok:false, reason:e.message });
