@@ -929,4 +929,4 @@ const DashboardScreenWithModals = (props) => {
   return <DashboardScreen {...props}/>;
 };
 
-Object.assign(window, {
+Object.assign(window, { DashboardScreen });

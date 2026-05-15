@@ -54,13 +54,13 @@ const formatNumber = (value, opts = {}) => {
 
 // ============ #15 DemoBanner ============
 // Tier 59 rewrite: the banner now follows the auth + broker state machine.
-//   - Authenticated + broker connected + access_token valid     -> hidden
-//   - Authenticated + no broker / token expired                 -> hidden here
-//                                                                  (BrokerNotConnectedBanner handles this case from Tier 58)
-//   - Unauthenticated browser                                   -> shown (amber)
-//   - Authenticated but demo toggle explicitly ON               -> shown (orange)
+//   - Authenticated + broker connected + access_token valid -> hidden
+//   - Authenticated + no broker / token expired             -> hidden here
+//                                                              (BrokerNotConnectedBanner handles that case from Tier 58)
+//   - Unauthenticated browser                               -> shown (blue, "Sign in")
+//   - Authenticated + explicit demo toggle ON               -> shown (amber, "Exit demo")
 const DemoBanner = () => {
-  const [tick, setTick] = React.useState(0);
+  const [, setTick] = React.useState(0);
   React.useEffect(() => {
     const h = () => setTick(t => t + 1);
     window.addEventListener('ats-auth-changed', h);
@@ -75,14 +75,9 @@ const DemoBanner = () => {
   const explicitDemo = window.useDemoMode ? window.useDemoMode()[0] : false;
   const brokerStatus = window.atsBrokerStatus || { connected: false };
 
-  // Hide entirely when authenticated + broker is fully wired AND user hasn't
-  // explicitly turned demo on.
   if (user && brokerStatus.connected && brokerStatus.hasAccessToken && !explicitDemo) return null;
-
-  // Hide for authenticated users without broker -- BrokerNotConnectedBanner shows the call to action
   if (user && !explicitDemo) return null;
 
-  // Show for anonymous browsers OR users who explicitly want demo
   const isAnonymous = !user;
   return (
     <div role="status" style={{
@@ -98,10 +93,10 @@ const DemoBanner = () => {
       fontSize: 12, fontWeight: 600, letterSpacing: "0.02em",
       display: "flex", alignItems: "center", justifyContent: "center", gap: 12,
     }}>
-      <span style={{ fontSize: 14 }}>{isAnonymous ? '👋' : '🧪'}</span>
+      <span style={{ fontSize: 14 }}>{isAnonymous ? '\u{1F44B}' : '\u{1F9EA}'}</span>
       {isAnonymous ? (
         <>
-          <span>Welcome to ATS — you're browsing in demo mode.</span>
+          <span>Welcome to ATS &mdash; you're browsing in demo mode.</span>
           <span style={{ fontWeight: 400, opacity: 0.85 }}>Sign in to use live data and place real orders.</span>
           <button
             onClick={() => { location.hash = 'login'; }}
@@ -116,7 +111,7 @@ const DemoBanner = () => {
       ) : (
         <>
           <span>DEMO MODE</span>
-          <span style={{ fontWeight: 400, opacity: 0.85 }}>No real orders · all P&L is simulated</span>
+          <span style={{ fontWeight: 400, opacity: 0.85 }}>No real orders &middot; all P&L is simulated</span>
           <button
             onClick={() => window.useDemoMode && window.useDemoMode()[1](false)}
             style={{
@@ -635,4 +630,60 @@ const TableSkeleton = ({ rows = 5, cols = 4 }) => (
       <tr>{Array.from({ length: cols }).map((_, i) => <th key={i}>&nbsp;</th>)}</tr>
     </thead>
     <tbody>
-      {Arra
+      {Array.from({ length: rows }).map((_, r) => (
+        <tr key={r}>
+          {Array.from({ length: cols }).map((_, c) => (
+            <td key={c}>
+              <div style={{
+                height: 12, width: `${50 + Math.random() * 40}%`, borderRadius: 4,
+                background: "linear-gradient(90deg, var(--bg-sunk), var(--surface-2), var(--bg-sunk))",
+                backgroundSize: "200% 100%", animation: "skel 1.4s ease-in-out infinite",
+              }}/>
+            </td>
+          ))}
+        </tr>
+      ))}
+    </tbody>
+  </table>
+);
+
+// ============ #9 ScreenError ============
+// Drop-in for screens that failed to load — broker API down, data fetch failed, etc.
+//   <ScreenError title="Broker connection lost" detail="..." onRetry={...}/>
+const ScreenError = ({ title = "Couldn't load this view", detail, onRetry }) => (
+  <div style={{
+    padding: "60px 24px", textAlign: "center",
+    background: "var(--surface)", border: "1px solid var(--border)",
+    borderRadius: "var(--r-lg)",
+  }}>
+    <div style={{
+      width: 56, height: 56, borderRadius: "50%", margin: "0 auto 16px",
+      background: "var(--down-soft)", color: "var(--down)",
+      display: "grid", placeItems: "center", fontSize: 26,
+    }}>!</div>
+    <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 6 }}>{title}</div>
+    {detail && <div className="muted" style={{ fontSize: 13, maxWidth: 420, margin: "0 auto 16px" }}>{detail}</div>}
+    {onRetry && <button className="btn btn--accent" onClick={onRetry}>Retry</button>}
+  </div>
+);
+
+// ============ #14 Toast→Notification bridge ============
+// Promote sticky/important toasts into the notification center automatically.
+// Listens for `ats-toast` and, if `pin: true` is set on the detail, also feeds the bell.
+(() => {
+  if (typeof window === "undefined") return;
+  if (window.__r11ToastBridge) return;
+  window.__r11ToastBridge = true;
+  window.addEventListener("ats-toast", (e) => {
+    const d = e.detail || {};
+    if (!d.pin) return;
+    window.dispatchEvent(new CustomEvent("notification-add", { detail: {
+      sev: d.kind || "info",
+      title: d.title,
+      detail: d.sub,
+      when: "just now",
+    }}));
+  });
+})();
+
+Object.assign(window, { PositionHandlingMatrix, useTableNav, TableSkeleton, ScreenError });
