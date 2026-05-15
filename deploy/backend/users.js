@@ -167,8 +167,72 @@ function createUsers({ db, emailAlerts, audit, secureCookie }) {
     next();
   }
 
+  async function verifyEmail(token) {
+    if (!token) throw new Error('verification token required');
+    const u = db.users.byVerifyToken(token);
+    if (!u) throw new Error('invalid or expired verification token');
+    if (u.is_verified) return { user: u, alreadyVerified: true };
+    db.users.markVerified(u.id);
+    if (audit) try { audit('user.verified', { userId: u.id, email: u.email }); } catch (_) {}
+    return { user: db.users.byId(u.id), alreadyVerified: false };
+  }
+
+  async function requestPasswordReset({ email, baseUrl }) {
+    email = String(email || '').toLowerCase().trim();
+    const u = db.users.byEmail(email);
+    // Always return ok to avoid email enumeration (404 leaks signal whether email exists).
+    if (!u) { if (audit) try { audit('user.reset.unknownEmail', { email }); } catch (_) {} return { ok: true, sent: false }; }
+    const token = _hex(32);
+    const exp = _later(60 * 60 * 1000);   // 1-hour TTL
+    db.users.setReset(u.id, token, exp);
+    if (audit) try { audit('user.reset.requested', { userId: u.id, email }); } catch (_) {}
+    if (emailAlerts && typeof emailAlerts.send === 'function') {
+      const resetUrl = `${(baseUrl || 'https://ats.rajasekarselvam.com').replace(/\/$/, '')}/reset-password?token=${token}`;
+      try {
+        await emailAlerts.send({
+          to: email,
+          subject: 'ATS password reset',
+          text: `Reset link (expires 1 hour): ${resetUrl}`,
+          html: `<p>Click to reset your password (link expires in 1 hour):</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>If you didn't request this, ignore this email.</p>`,
+        });
+      } catch (e) { if (audit) try { audit('user.reset.emailFailed', { msg: e.message }); } catch (_) {} }
+    }
+    return { ok: true, sent: true, token };   // token in response only for tests; in prod it's email-only
+  }
+
+  async function resetPassword({ token, newPassword }) {
+    if (!token) throw new Error('reset token required');
+    if (!bcrypt) throw new Error('bcrypt not installed');
+    newPassword = String(newPassword || '');
+    if (newPassword.length < PASSWORD_MIN) throw new Error(`password must be at least ${PASSWORD_MIN} chars`);
+    const u = db.users.byResetToken(token);
+    if (!u) throw new Error('invalid or expired reset token');
+    if (u.reset_expires_at && u.reset_expires_at <= _now()) throw new Error('reset token expired');
+    const hash = await bcrypt.hash(newPassword, BCRYPT_COST);
+    db.users.clearReset(u.id, hash);
+    // Invalidate all existing sessions for this user (force re-login)
+    db._conn.prepare('DELETE FROM user_sessions WHERE user_id = ?').run(u.id);
+    if (audit) try { audit('user.reset.completed', { userId: u.id }); } catch (_) {}
+    return { ok: true, user: db.users.byId(u.id) };
+  }
+
+  async function sendVerificationEmail({ user, baseUrl }) {
+    if (!user || !user.verification_token) return { ok: false, reason: 'no_token' };
+    if (!emailAlerts || typeof emailAlerts.send !== 'function') return { ok: false, reason: 'email_not_configured' };
+    const verifyUrl = `${(baseUrl || 'https://ats.rajasekarselvam.com').replace(/\/$/, '')}/verify-email?token=${user.verification_token}`;
+    try {
+      const r = await emailAlerts.send({
+        to: user.email,
+        subject: 'Verify your ATS email',
+        text: `Click to verify: ${verifyUrl}`,
+        html: `<p>Welcome to ATS! Click below to verify your email:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p>`,
+      });
+      return r;
+    } catch (e) { return { ok: false, reason: e.message }; }
+  }
+
   return {
-    signup, login, logout, getSession,
+    signup, login, logout, getSession, verifyEmail, requestPasswordReset, resetPassword, sendVerificationEmail,
     optionalAuth, requireAuth, requireAdmin,
     _setCookie: (res, sid) => _setCookie(res, COOKIE_NAME, sid, { maxAge: SESSION_TTL_MS, secure: !!secureCookie }),
     _clearCookie: (res) => _clearCookie(res, COOKIE_NAME),

@@ -125,3 +125,51 @@ test('requireAdmin blocks non-admin with 403', () => {
 });
 
 test('cleanup', () => { close(); fs.unlinkSync(TMP); });
+
+// === Tier 51 tests: verify + password reset ===
+const path2 = require('path');
+const fs2 = require('fs');
+
+test('verifyEmail: valid token marks user verified', async () => {
+  // Need a fresh DB for this since the earlier 'cleanup' test closed it
+  const TMP2 = path2.join(require('os').tmpdir(), 'ats-users2-' + Date.now() + '.db');
+  process.env.ATS_DB_PATH = TMP2;
+  delete require.cache[require.resolve('../db')];
+  delete require.cache[require.resolve('../users')];
+  const { open: open2, close: close2 } = require('../db');
+  const { createUsers: cu2 } = require('../users');
+  const db2 = open2({ path: TMP2 });
+  const auth2 = cu2({ db: db2, audit: () => {} });
+
+  await auth2.signup({ email: 'admin2@test.com', password: 'password123', name: 'A' });
+  const { verifyToken } = await auth2.signup({ email: 'second@test.com', password: 'password123', name: 'S' });
+  const v = await auth2.verifyEmail(verifyToken);
+  assert.equal(v.user.is_verified, 1);
+  assert.equal(v.alreadyVerified, false);
+
+  // Second call should be a no-op (token cleared)
+  await assert.rejects(auth2.verifyEmail(verifyToken), /invalid or expired/);
+
+  // Password reset roundtrip
+  const r = await auth2.requestPasswordReset({ email: 'second@test.com' });
+  assert.equal(r.ok, true);
+  assert.equal(typeof r.token, 'string');
+  // Wrong token rejected
+  await assert.rejects(auth2.resetPassword({ token: 'bogus', newPassword: 'newpass123' }), /invalid or expired/);
+  // Right token works
+  const done = await auth2.resetPassword({ token: r.token, newPassword: 'newpass123' });
+  assert.equal(done.ok, true);
+  // Old password no longer works
+  await assert.rejects(auth2.login({ email: 'second@test.com', password: 'password123' }), /invalid credentials/);
+  // New password works
+  const ok = await auth2.login({ email: 'second@test.com', password: 'newpass123' });
+  assert.equal(ok.user.email, 'second@test.com');
+
+  // requestPasswordReset for unknown email returns ok (anti-enumeration)
+  const unk = await auth2.requestPasswordReset({ email: 'noone@example.com' });
+  assert.equal(unk.ok, true);
+  assert.equal(unk.sent, false);
+
+  close2();
+  fs2.unlinkSync(TMP2);
+});

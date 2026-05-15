@@ -44,6 +44,8 @@ const { buildIpAllowlist } = require('./ip-allowlist');
 const { TwoFactor }    = require('./two-factor');
 const { Digest }       = require('./digest');
 const { parseCASText } = require('./cas-parser');
+const { open: openDb } = require('./db');
+const { createUsers } = require('./users');
 const { Rebalance }    = require('./rebalance');
 const { Replay }       = require('./replay');
 const { EmailAlerts }  = require('./email-alerts');
@@ -104,7 +106,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, rebalance, replay, emailAlerts, whatsAppAlerts;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, db, auth, rebalance, replay, emailAlerts, whatsAppAlerts;
 
 async function init() {
   broker = createBroker(process.env);
@@ -203,7 +205,17 @@ async function init() {
   factorTilt = new FactorTilt();
 
   // Tier 32: Write-Once-Read-Many tamper-evident audit log.
-  wormAudit = new WormAudit({
+// Tier 49 + 50: SQLite-backed user accounts.
+  try {
+    db = openDb();
+    auth = createUsers({ db, emailAlerts: null, audit, secureCookie: ENV_NAME === 'prod' });
+    console.log(`db: ${db.users.count()} users registered`);
+  } catch (e) {
+    console.error('!! DB init failed:', e.message);
+    db = null; auth = null;
+  }
+
+    wormAudit = new WormAudit({
     path: process.env.WORM_PATH || '/var/log/ats/audit.worm.jsonl',
     merkleEvery: Number(process.env.WORM_MERKLE_EVERY) || 100,
     onMerkle: (label, root, range) => {
@@ -292,6 +304,13 @@ app.set('trust proxy', 'loopback');
 
 app.use((req, _res, next) => {
   console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
+  next();
+});
+
+// Tier 50: attach req.user to every request if a valid session cookie is present.
+// Does NOT enforce auth -- that's done per-route via auth.requireAuth.
+app.use((req, res, next) => {
+  if (auth && typeof auth.optionalAuth === 'function') return auth.optionalAuth(req, res, next);
   next();
 });
 
@@ -2205,6 +2224,80 @@ app.get('/api/security/ip-allowlist', (_req, res) => {
 
 // Tier 37: echo the IP the server sees for this client, so users can paste
 // it into their API_IP_WHITELIST. Mirrors what nginx puts in X-Real-IP.
+// ---------- Tier 50/51: auth endpoints (signup, login, logout, verify, reset) ----------
+app.post('/api/auth/signup', async (req, res) => {
+  if (!auth) return res.status(503).json({ ok:false, reason:'auth_not_initialized' });
+  try {
+    const { email, password, name } = req.body || {};
+    const r = await auth.signup({ email, password, name });
+    // If a non-first user, send verification email (Tier 51)
+    if (r.verifyToken && emailAlerts) {
+      try { await auth.sendVerificationEmail({ user: r.user, baseUrl: req.protocol + '://' + req.headers.host }); }
+      catch (_) {}
+    }
+    res.status(201).json({ ok:true, user: { id: r.user.id, email: r.user.email, name: r.user.name, is_verified: !!r.user.is_verified, is_admin: !!r.user.is_admin } });
+  } catch (e) {
+    res.status(400).json({ ok:false, reason: e.message });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  if (!auth) return res.status(503).json({ ok:false, reason:'auth_not_initialized' });
+  try {
+    const { email, password } = req.body || {};
+    const r = await auth.login({
+      email, password,
+      ip: req.headers['x-real-ip'] || (req.socket && req.socket.remoteAddress) || '',
+      ua: req.headers['user-agent'] || '',
+    });
+    auth._setCookie(res, r.sessionId);
+    res.json({ ok:true, user: { id: r.user.id, email: r.user.email, name: r.user.name, is_verified: !!r.user.is_verified, is_admin: !!r.user.is_admin }, expiresAt: r.expiresAt });
+  } catch (e) {
+    res.status(401).json({ ok:false, reason: e.message });
+  }
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  if (auth && req.sessionId) auth.logout(req.sessionId);
+  if (auth) auth._clearCookie(res);
+  res.json({ ok:true });
+});
+
+app.get('/api/auth/me', (req, res) => {
+  if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
+  res.json({ ok:true, user: req.user });
+});
+
+app.post('/api/auth/verify-email', async (req, res) => {
+  if (!auth) return res.status(503).json({ ok:false, reason:'auth_not_initialized' });
+  try {
+    const { token } = req.body || {};
+    const r = await auth.verifyEmail(token);
+    res.json({ ok:true, alreadyVerified: r.alreadyVerified });
+  } catch (e) {
+    res.status(400).json({ ok:false, reason: e.message });
+  }
+});
+
+app.post('/api/auth/forgot-password', async (req, res) => {
+  if (!auth) return res.status(503).json({ ok:false, reason:'auth_not_initialized' });
+  const { email } = req.body || {};
+  const r = await auth.requestPasswordReset({ email, baseUrl: req.protocol + '://' + req.headers.host });
+  // Don't leak whether email was found
+  res.json({ ok:true, sent: r.sent });
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  if (!auth) return res.status(503).json({ ok:false, reason:'auth_not_initialized' });
+  try {
+    const { token, newPassword } = req.body || {};
+    await auth.resetPassword({ token, newPassword });
+    res.json({ ok:true });
+  } catch (e) {
+    res.status(400).json({ ok:false, reason: e.message });
+  }
+});
+
 app.get('/api/security/my-ip', (req, res) => {
   const xrip = req.headers['x-real-ip'];
   const xff  = req.headers['x-forwarded-for'];

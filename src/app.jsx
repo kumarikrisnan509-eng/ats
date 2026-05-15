@@ -47,12 +47,34 @@ const TITLES = {
 const AUTH_ROUTES = new Set(["login", "register", "forgot"]);
 
 function App() {
-  // Auth state — persisted in localStorage. Defaults to "logged in" for demo.
+  // Auth state — fetched from /api/auth/me on boot (Tier 50). Until that lands,
+  // assume not-authed. localStorage cache speeds up first paint but is overridden
+  // by the server's view once /me returns.
   const [session, setSession] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("rc_session") || "null") || { authed: true, onboarded: true }; }
-    catch { return { authed: true, onboarded: true }; }
+    try {
+      const cached = JSON.parse(localStorage.getItem("rc_session") || "null");
+      return cached && cached.authed ? cached : { authed: false, onboarded: false };
+    } catch { return { authed: false, onboarded: false }; }
   });
-  const persist = (s) => { localStorage.setItem("rc_session", JSON.stringify(s)); setSession(s); };
+  const persist = (s) => { try { localStorage.setItem("rc_session", JSON.stringify(s)); } catch (_) {} setSession(s); };
+
+  // Boot probe: ask the server who we are. If 401, drop to login screen.
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch('/api/auth/me', { credentials: 'include' });
+        if (cancelled) return;
+        if (r.status === 200) {
+          const j = await r.json();
+          persist({ authed: true, onboarded: true, user: j.user });
+        } else {
+          persist({ authed: false, onboarded: false });
+        }
+      } catch (_) { /* network blip; keep cached state */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const [route, setRoute] = useState(() => location.hash.replace("#", "") || "dashboard");
   const [theme, setTheme] = useState(() => document.documentElement.getAttribute("data-theme") || "light");
