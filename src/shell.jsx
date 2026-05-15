@@ -208,8 +208,43 @@ const NavOverflow = ({ items, route, setRoute, groupKey }) => {
   );
 };
 
+// Tier 13: live counts feeding the sidebar badges (Strategies, Brokers).
+const useLiveCounts = () => {
+  const [counts, setCounts] = React.useState({ strategies: null, brokersUp: null, brokersTotal: null });
+  React.useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const [s, h] = await Promise.all([
+          window.fetchApi('/api/strategies').catch(() => null),
+          window.fetchApi('/api/health').catch(() => null),
+        ]);
+        if (cancelled) return;
+        const sCount = s && Array.isArray(s.strategies) ? s.strategies.length
+                     : s && s.ok && Array.isArray(s.rows) ? s.rows.length : null;
+        // brokers: only Zerodha is wired today; brokersUp = 1 if broker.connected, 0 otherwise.
+        // brokersTotal = 1 (we only support Zerodha currently).
+        const brokersUp    = h && h.broker ? (h.broker.connected ? 1 : 0) : null;
+        const brokersTotal = h && h.broker ? 1 : null;
+        setCounts({ strategies: sCount, brokersUp, brokersTotal });
+      } catch (_e) {}
+    };
+    load();
+    const t = setInterval(load, 45000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
+  return counts;
+};
+
 const Sidebar = ({ route, setRoute }) => {
   const [q, setQ] = React.useState("");
+  const liveCounts = useLiveCounts();
+  // Tier 13: replace hardcoded badge text for `strategies` and `brokers` with live values
+  const liveBadgeFor = (id, current) => {
+    if (id === 'strategies' && liveCounts.strategies != null) return { text: String(liveCounts.strategies) };
+    if (id === 'brokers' && liveCounts.brokersUp != null && liveCounts.brokersTotal != null) return { text: `${liveCounts.brokersUp}/${liveCounts.brokersTotal}` };
+    return current;
+  };
   const ql = q.trim().toLowerCase();
   const filt = (it) => !ql || it.label.toLowerCase().includes(ql);
   return (
@@ -250,12 +285,12 @@ const Sidebar = ({ route, setRoute }) => {
           >
             <it.icon size={16}/>
             <span>{it.label}</span>
-            {it.badge && (
-              <span className={"nav__badge" + (it.badge.kind === "live" ? " nav__badge--live" : "")}>
-                {it.badge.kind === "live" && <span style={{ display: "inline-block", width: 6, height: 6, background: "currentColor", borderRadius: "50%", marginRight: 4, verticalAlign: "middle" }}/>}
-                {it.badge.text}
+            {(() => { const b = liveBadgeFor(it.id, it.badge); return b && (
+              <span className={"nav__badge" + (b.kind === "live" ? " nav__badge--live" : "")}>
+                {b.kind === "live" && <span style={{ display: "inline-block", width: 6, height: 6, background: "currentColor", borderRadius: "50%", marginRight: 4, verticalAlign: "middle" }}/>}
+                {b.text}
               </span>
-            )}
+            ); })()}
           </button>
         ))}
         {overflow.length > 0 && <NavOverflow items={overflow} route={route} setRoute={setRoute} groupKey={g.label || `grp-${gi}`}/>}

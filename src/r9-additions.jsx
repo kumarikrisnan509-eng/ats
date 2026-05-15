@@ -94,52 +94,61 @@ const SavedViewsBar = ({ hook, onPickFilters }) => {
   );
 };
 
-// ============ #22 AI Cost card ============
+// ============ #22 AI Cost card -- Tier 13: live from /api/system/info.components.ai ============
+// Today's calls used / dailyCap from the AI controller. We no longer have INR cost data
+// in backend (this would need per-call token logging), so we surface CALL COUNTS instead
+// of fake INR -- accurate beats pretty.
 const AICostCard = () => {
-  const days = 30;
-  const total = 4820;
-  const last = 12000;
-  const delta = ((total - last) / last) * 100;
+  const [ai, setAi] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const r = await window.fetchApi('/api/system/info').catch(() => null);
+        if (cancelled) return;
+        const a = r && r.components && r.components.ai;
+        if (a) setAi(a);
+      } catch (_e) {}
+    };
+    load();
+    const t = setInterval(load, 60000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
+  const enabled  = ai && ai.enabled;
+  const calls    = ai ? (ai.dailyCalls || 0) : 0;
+  const cap      = ai ? (ai.dailyCap || 0)   : 0;
+  const remaining = Math.max(0, cap - calls);
+  const pct      = cap > 0 ? Math.round((calls / cap) * 100) : 0;
+  const model    = (ai && ai.model) || '—';
+  const resetAt  = ai && ai.dailyResetAt ? new Date(ai.dailyResetAt) : null;
   return (
     <div className="card">
       <div className="card__head">
         <div>
-          <div className="card__title">AI inference · this month</div>
-          <div className="card__sub">Claude Opus 4.6 + Haiku · {days}-day window</div>
+          <div className="card__title">AI inference · today</div>
+          <div className="card__sub">{enabled ? `${model} · resets ${resetAt ? resetAt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) : '—'}` : 'AI subsystem disabled'}</div>
         </div>
-        <span className="pill pill--vio"><I.sparkle size={10}/> auto</span>
+        <span className="pill pill--vio"><I.sparkle size={10}/> {enabled ? 'live' : 'off'}</span>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
         <div className="stat">
-          <div className="stat__label">Spent</div>
-          <div className="stat__value">{window.inr ? window.inr(total) : `₹${total}`}</div>
-          <div className={"stat__delta " + (delta < 0 ? "up" : "down")}>
-            {delta < 0 ? "↓" : "↑"} {Math.abs(delta).toFixed(0)}% vs last month
-          </div>
+          <div className="stat__label">Calls used</div>
+          <div className="stat__value mono">{calls}</div>
+          <div className="stat__delta muted">of {cap} daily cap</div>
         </div>
         <div className="stat">
-          <div className="stat__label">Per signal</div>
-          <div className="stat__value">₹6.40</div>
-          <div className="stat__delta muted">avg of 753 calls</div>
+          <div className="stat__label">Remaining</div>
+          <div className="stat__value mono">{remaining}</div>
+          <div className="stat__delta muted">resets at midnight UTC</div>
         </div>
         <div className="stat">
-          <div className="stat__label">Budget left</div>
-          <div className="stat__value">₹5,180</div>
-          <div className="stat__delta muted">of ₹10,000 cap</div>
+          <div className="stat__label">Usage</div>
+          <div className="stat__value mono">{pct}%</div>
+          <div className="stat__delta muted">{enabled ? 'auto-throttle on cap' : 'set ANTHROPIC_API_KEY'}</div>
         </div>
       </div>
       <div className="progress" style={{ marginTop: 14 }}>
-        <div className="progress__fill" style={{ width: "48%" }}/>
-      </div>
-      <div className="row" style={{ marginTop: 14, gap: 6, flexWrap: "wrap" }}>
-        {[
-          { label: "Opus signal generation", v: "₹2,840" },
-          { label: "Haiku news summaries", v: "₹980" },
-          { label: "Opus monthly review", v: "₹620" },
-          { label: "Haiku misc", v: "₹380" },
-        ].map((x, i) => (
-          <div key={i} className="chip" style={{ fontSize: 11 }}>{x.label} · {x.v}</div>
-        ))}
+        <div className="progress__fill" style={{ width: `${pct}%` }}/>
       </div>
     </div>
   );

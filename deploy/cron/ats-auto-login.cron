@@ -1,10 +1,8 @@
 # /etc/cron.d/ats-auto-login
 # Daily Zerodha auto-login. Drops to /etc/cron.d/ via the install script.
 #
-# Schedule: 03:20 UTC = 08:50 IST, Mon-Fri (Indian markets are closed weekends).
-# The script itself adds 0-60s jitter to avoid trivial pattern detection.
-
-SHELL=/bin/bash
-PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-
-20 3 * * 1-5 root /usr/local/bin/ats-morning-check.sh >> /var/log/ats-morning-check.log 2>&1
+# Schedule: 00:40 UTC = 06:10 IST, Mon-Fri (Indian markets are closed weekends).
+# Tier 13: moved earlier so the access-token refresh happens close to the daily
+# ~06:00 IST Kite token expiry instead of 2h 50m AFTER it. Eliminates the morning
+# "token expired" window users were seeing on /api/profile.
+# The script itself adds 0-60

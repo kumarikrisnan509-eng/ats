@@ -415,9 +415,22 @@ Object.assign(window, { useUrlState, ActiveAutomationStrip, ComplianceLog, Overf
 // ============ #17 AICostMini ============
 // Compact AI-cost card for Dashboard sidebar/top — links to full AICostCard.
 const AICostMini = ({ onClick }) => {
-  const spent = 4820;
-  const budget = 6000;
-  const pct = (spent / budget) * 100;
+  const [ai, setAi] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const r = await window.fetchApi('/api/system/info').catch(() => null);
+        if (!cancelled && r && r.components && r.components.ai) setAi(r.components.ai);
+      } catch (_e) {}
+    };
+    load();
+    const t = setInterval(load, 60000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
+  const spent  = ai ? (ai.dailyCalls || 0) : 0;
+  const budget = ai ? (ai.dailyCap || 0)   : 0;
+  const pct    = budget > 0 ? (spent / budget) * 100 : 0;
   return (
     <button
       onClick={onClick}
@@ -435,10 +448,9 @@ const AICostMini = ({ onClick }) => {
         display: "grid", placeItems: "center", fontSize: 16, flexShrink: 0,
       }}>✦</div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 11, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.05em" }}>AI inference · this month</div>
+        <div style={{ fontSize: 11, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.05em" }}>AI inference · today</div>
         <div className="mono" style={{ fontSize: 16, fontWeight: 500 }}>
-          {window.formatINR ? window.formatINR(spent) : `₹${spent}`}
-          <span style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 400, marginLeft: 6 }}>/ {window.formatINR ? window.formatINR(budget) : `₹${budget}`}</span>
+          {spent}<span style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 400, marginLeft: 6 }}>/ {budget} calls</span>
         </div>
         <div style={{ marginTop: 4, height: 3, background: "var(--bg-sunk)", borderRadius: 2, overflow: "hidden" }}>
           <div style={{ width: `${Math.min(100, pct)}%`, height: "100%", background: pct > 90 ? "var(--down)" : pct > 70 ? "var(--warn)" : "var(--violet)" }}/>
