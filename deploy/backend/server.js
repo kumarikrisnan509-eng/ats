@@ -3110,10 +3110,53 @@ app.get('/api/brokers/zerodha/login', (_req, res) => {
 });
 
 // Step 2: Kite redirects back with ?request_token=...
+// Tier 62: If state= is present, this is a per-user OAuth callback. Decode the state,
+// look up the user, and route the exchange through their own broker_accounts row.
 app.get('/api/brokers/zerodha/callback', async (req, res) => {
-  if (BROKER_NAME !== 'zerodha') return res.status(400).send('Not configured for Zerodha.');
   const rt = req.query.request_token;
+  const state = req.query.state;
   if (!rt) return res.status(400).send('Missing request_token in callback.');
+
+  // Per-user path
+  if (state && typeof state === 'string' && state.split('.').length === 3) {
+    const userId = _verifyState(state);
+    if (!userId) return res.status(400).send('Invalid or expired state token. Please retry from the Brokers screen.');
+    try {
+      const row = db.brokers.getByBroker(userId, 'zerodha');
+      if (!row) return res.status(404).send('No Zerodha credentials on file for this user.');
+      const apiKey    = row.api_key      ? await vault.open(row.api_key)      : null;
+      const apiSecret = row.refresh_token ? await vault.open(row.refresh_token) : null;
+      if (!apiKey || !apiSecret) return res.status(412).send('Incomplete credentials.');
+      const { KiteConnect } = require('kiteconnect');
+      const kc = new KiteConnect({ api_key: apiKey });
+      const session = await kc.generateSession(rt, apiSecret);
+      const sealedAccessToken = await vault.seal(session.access_token);
+      const now = new Date();
+      const expiresAt = new Date(now);
+      expiresAt.setUTCHours(0, 30, 0, 0);
+      if (expiresAt < now) expiresAt.setUTCDate(expiresAt.getUTCDate() + 1);
+      db.brokers.updateTokens(row.id, userId, sealedAccessToken, now.toISOString(), expiresAt.toISOString());
+      if (session.user_id && !row.broker_user_id) {
+        db._conn.prepare('UPDATE broker_accounts SET broker_user_id = ? WHERE id = ?').run(session.user_id, row.id);
+      }
+      try { _brokerResolver.invalidate(userId); } catch (_) {}
+      audit('zerodha.connected.per-user', { userId, kiteUserId: session.user_id });
+      res.set('Content-Type', 'text/html');
+      return res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Zerodha connected</title>
+<style>body{font-family:-apple-system,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#f8fafc;color:#0f172a}.card{padding:32px;border-radius:12px;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.08);text-align:center}.ok{color:#059669;font-size:48px}h1{font-size:18px;margin:12px 0 4px}.muted{color:#64748b;font-size:13px}</style>
+</head><body><div class="card"><div class="ok">&#10003;</div><h1>Zerodha connected</h1><div class="muted">You can close this window. Returning to ATS...</div></div>
+<script>
+  try { if (window.opener) window.opener.postMessage({ type: 'ats-broker-connected', broker: 'zerodha' }, '*'); } catch (e) {}
+  setTimeout(() => { try { window.close(); } catch (e) {} window.location.href = '/#brokers?connected=1'; }, 1200);
+</script></body></html>`);
+    } catch (err) {
+      audit('zerodha.callback.per-user.error', { userId, msg: err.message });
+      return res.status(500).set('Content-Type','text/html').send(`<html><body style="font-family:sans-serif;padding:24px"><h2>Connection failed</h2><p>${(err.message||'unknown').replace(/[<>&]/g,'')}</p><p><a href="/#brokers">Back to Brokers</a></p></body></html>`);
+    }
+  }
+
+  // Legacy global path (no state= -- pre-Tier-62 admin-only flow)
+  if (BROKER_NAME !== 'zerodha') return res.status(400).send('Not configured for Zerodha.');
   try {
     const session = await broker.exchangeRequestToken(rt);
     broker.setAccessToken(session.accessToken);
