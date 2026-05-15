@@ -32,7 +32,31 @@ function createBroker(env = process.env) {
     });
   }
 
-  throw new Error(`unknown BROKER="${which}". Use "mock", "zerodha", or "upstox".`);
+  // Tier 29: DhanHQ adapter
+  if (which === 'dhan') {
+    const { DhanBroker } = require('./dhan-broker');
+    return new DhanBroker({
+      apiKey:      env.DHAN_API_KEY,
+      accessToken: env.DHAN_ACCESS_TOKEN,
+      clientId:    env.DHAN_CLIENT_ID,
+    });
+  }
+
+  // Tier 29: AngelOne SmartAPI adapter
+  if (which === 'angelone' || which === 'angel') {
+    const { AngelOneBroker } = require('./angelone-broker');
+    return new AngelOneBroker({
+      apiKey:       env.ANGELONE_API_KEY,
+      clientCode:   env.ANGELONE_CLIENT_CODE,
+      password:     env.ANGELONE_PASSWORD,
+      totpSecret:   env.ANGELONE_TOTP_SECRET,
+      jwtToken:     env.ANGELONE_JWT_TOKEN,
+      refreshToken: env.ANGELONE_REFRESH_TOKEN,
+      feedToken:    env.ANGELONE_FEED_TOKEN,
+    });
+  }
+
+  throw new Error(`unknown BROKER="${which}". Use "mock", "zerodha", "upstox", "dhan", or "angelone".`);
 }
 
 module.exports = { createBroker };
