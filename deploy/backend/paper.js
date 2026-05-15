@@ -27,6 +27,12 @@ const crypto = require('crypto');
 
 const DEFAULT_STORE = '/var/lib/ats/tokens/_paper.json';
 const DEFAULT_CASH  = 1000000; // INR 10 lakhs starting capital
+// Tier 28: spec §2.2 calls for tiered ₹10L/₹25L/₹50L paper accounts.
+const VALID_TIERS = {
+  '10L': 1000000,
+  '25L': 2500000,
+  '50L': 5000000,
+};
 
 class PaperTrading {
   /**
@@ -371,13 +377,26 @@ class PaperTrading {
     return v;
   }
 
-  reset() {
+  reset(opts) {
+    // Tier 28: allow reset to choose a new starting tier.
+    if (opts && opts.tier) {
+      const v = VALID_TIERS[String(opts.tier).toUpperCase()];
+      if (!v) throw new Error('tier must be one of: ' + Object.keys(VALID_TIERS).join(', '));
+      this.startingCash = v;
+    } else if (opts && Number.isFinite(opts.startingCash) && opts.startingCash > 0) {
+      this.startingCash = Math.floor(opts.startingCash);
+    }
     this._orders    = [];
     this._positions = {};
     this._trades    = [];
     this._cash      = this.startingCash;
     this._persist();
-    this.audit('paper.reset', { startingCash: this.startingCash });
+    this.audit('paper.reset', { startingCash: this.startingCash, tier: opts && opts.tier });
+    return { startingCash: this.startingCash };
+  }
+
+  availableTiers() {
+    return Object.entries(VALID_TIERS).map(([tier, cash]) => ({ tier, startingCash: cash }));
   }
 }
 

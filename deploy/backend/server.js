@@ -40,6 +40,7 @@ const { MPT }          = require('./mpt');
 const { Rebalance }    = require('./rebalance');
 const { Replay }       = require('./replay');
 const { EmailAlerts }  = require('./email-alerts');
+const { WhatsAppAlerts } = require('./whatsapp-alerts');
 const { runPreflight } = require('./preflight');
 const csvImport        = require('./csv-import');
 
@@ -93,7 +94,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, rebalance, replay, emailAlerts;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, rebalance, replay, emailAlerts, whatsAppAlerts;
 
 async function init() {
   broker = createBroker(process.env);
@@ -194,6 +195,7 @@ async function init() {
   // Tier 27: replay engine (uses backtest's computeSignal) and email alerts.
   replay = new Replay({ computeSignal });
   emailAlerts = new EmailAlerts({ audit });
+  whatsAppAlerts = new WhatsAppAlerts({ audit });
 
   if (BROKER_NAME === 'zerodha') {
     if (!fs.existsSync(MASTER_KEY_PATH)) {
@@ -1157,10 +1159,19 @@ app.delete('/api/paper/order/:id', (req, res) => {
   if (!paper) return res.status(503).json({ ok:false, reason:'paper_not_initialized' });
   res.json({ ok:true, ...paper.cancelOrder(req.params.id) });
 });
-app.post('/api/paper/reset', (_req, res) => {
+app.post('/api/paper/reset', (req, res) => {
   if (!paper) return res.status(503).json({ ok:false, reason:'paper_not_initialized' });
-  paper.reset();
-  res.json({ ok:true, stats: paper.stats() });
+  // Tier 28: optional { tier: '10L' | '25L' | '50L' } or { startingCash: <int> }.
+  try {
+    const r = paper.reset(req.body || {});
+    res.json({ ok:true, ...r, stats: paper.stats() });
+  } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
+});
+
+// Tier 28: expose available paper tiers.
+app.get('/api/paper/tiers', (_req, res) => {
+  if (!paper) return res.status(503).json({ ok:false, reason:'paper_not_initialized' });
+  res.json({ ok:true, tiers: paper.availableTiers(), current: paper.stats().cash + paper.stats().totalEquity ? paper.stats() : null });
 });
 
 // ---------- P&L Attribution ----------
@@ -2154,6 +2165,18 @@ app.post('/api/email/send', async (req, res) => {
   if (!emailAlerts) return res.status(503).json({ ok:false, reason:'email_not_initialized' });
   const { to, subject, text } = req.body || {};
   const r = await emailAlerts.send({ to, subject, text });
+  res.json(r);
+});
+
+// ---------- Tier 28: WhatsApp alerts (Twilio HTTP) ----------
+app.get('/api/whatsapp/status', (_req, res) => {
+  if (!whatsAppAlerts) return res.status(503).json({ ok:false, reason:'whatsapp_not_initialized' });
+  res.json({ ok:true, ...whatsAppAlerts.status() });
+});
+app.post('/api/whatsapp/send', async (req, res) => {
+  if (!whatsAppAlerts) return res.status(503).json({ ok:false, reason:'whatsapp_not_initialized' });
+  const { to, body } = req.body || {};
+  const r = await whatsAppAlerts.send({ to, body });
   res.json(r);
 });
 
