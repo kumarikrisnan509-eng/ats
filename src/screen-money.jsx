@@ -17,19 +17,36 @@ const MoneyScreen = () => {
   const [evalData, setEvalData]   = React.useState(null);
   const [busy, setBusy]           = React.useState(false);
   const [msg, setMsg]             = React.useState("");
+  // Tier 20: bucket strategy (emergency / short-term / long-term)
+  const [buckets, setBuckets]     = React.useState(null);
+  const [bucketDraft, setBucketDraft] = React.useState(null);
+  const saveBuckets = async (b) => {
+    setBusy(true); setMsg('');
+    try {
+      const r = await window.fetchApi('/api/buckets', {
+        method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ buckets: b }),
+      });
+      if (r && r.ok && r.buckets) { setBuckets(r.buckets); setMsg('Saved.'); setBucketDraft(null); }
+      else setMsg('Save failed: ' + ((r && r.reason) || 'unknown'));
+    } catch (e) { setMsg('Save failed: ' + e.message); }
+    finally { setBusy(false); setTimeout(() => setMsg(''), 3500); }
+  };
 
   const refresh = React.useCallback(async () => {
     try {
-      const [p, h, sw, ev] = await Promise.all([
+      const [p, h, sw, ev, bk] = await Promise.all([
         window.fetchApi('/api/paper').catch(() => null),
         window.fetchApi('/api/portfolio/holdings').catch(() => null),
         window.fetchApi('/api/sweep').catch(() => null),
         window.fetchApi('/api/sweep/evaluate').catch(() => null),
+        window.fetchApi('/api/buckets').catch(() => null),
       ]);
       if (p  && p.ok)  setPaperStats(p.stats || p);
       if (h  && h.ok)  setHoldings(h.rows || []);
       if (sw && sw.ok) setSweepData(sw);
       if (ev && ev.ok) setEvalData(ev);
+      if (bk && bk.ok && bk.buckets) setBuckets(bk.buckets);
     } catch (e) {}
   }, []);
 
@@ -223,6 +240,44 @@ const MoneyScreen = () => {
         )}
       </div>
 
+      {/* Tier 20: Bucket strategy (emergency / short / long) */}
+      <div style={{ padding: 16, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase' }}>Bucket strategy</div>
+            <div style={{ fontSize: 18, fontWeight: 600, marginTop: 2 }}>Emergency · Short-term · Long-term</div>
+          </div>
+          <button onClick={() => setBucketDraft({ ...(buckets || { emergency: 20, shortTerm: 30, longTerm: 50 }) })}
+            style={{ padding: '6px 12px', fontSize: 12, background: 'var(--bg-soft)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer' }}>
+            Edit
+          </button>
+        </div>
+        {buckets ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+            {[
+              { k: 'emergency',  label: 'Emergency',  pct: buckets.emergency, color: 'var(--down)' },
+              { k: 'shortTerm',  label: 'Short-term', pct: buckets.shortTerm, color: 'var(--acc)' },
+              { k: 'longTerm',   label: 'Long-term',  pct: buckets.longTerm,  color: 'var(--up)' },
+            ].map(b => (
+              <div key={b.k} style={{ padding: 12, background: 'var(--bg-soft)', borderRadius: 8 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{b.label}</div>
+                <div style={{ fontSize: 18, fontWeight: 600, marginTop: 2 }}>{b.pct}%</div>
+                <div style={{ height: 4, background: 'var(--surface)', borderRadius: 99, marginTop: 6, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: b.pct + '%', background: b.color }}/>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Loading bucket allocation…</div>
+        )}
+        {buckets && (buckets.emergency + buckets.shortTerm + buckets.longTerm < 100) && (
+          <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-3)' }}>
+            Unallocated: {100 - (buckets.emergency + buckets.shortTerm + buckets.longTerm)}% (working capital / trading book)
+          </div>
+        )}
+      </div>
+
       {/* Row 3: sweep rules editor */}
       <div style={{ padding: 16, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -380,6 +435,45 @@ const MoneyScreen = () => {
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
               <button onClick={() => setDraft(null)} style={{ padding: '8px 14px', fontSize: 13, background: 'var(--bg-soft)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer' }}>Cancel</button>
               <button onClick={() => upsertRule(draft)} disabled={busy} style={{ padding: '8px 14px', fontSize: 13, fontWeight: 500, background: 'var(--acc)', color: 'white', border: 0, borderRadius: 6, cursor: 'pointer' }}>
+                {busy ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tier 20: bucket edit modal */}
+      {bucketDraft && (
+        <div onClick={() => setBucketDraft(null)} style={{
+          position: 'fixed', inset: 0, background: 'oklch(0% 0 0 / 0.5)', zIndex: 100,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            width: 420, padding: 24, background: 'var(--surface)',
+            border: '1px solid var(--border)', borderRadius: 12,
+          }}>
+            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Edit bucket allocation</div>
+            <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 12 }}>Percentages must sum to ≤ 100. The remainder is your working capital / trading book.</div>
+            {[
+              { k: 'emergency',  label: 'Emergency (3-6mo expenses)' },
+              { k: 'shortTerm',  label: 'Short-term (1-3y goals)' },
+              { k: 'longTerm',   label: 'Long-term (retirement, kids)' },
+            ].map(b => (
+              <div key={b.k} style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4 }}>{b.label}</div>
+                <input type="number" min="0" max="100"
+                  value={bucketDraft[b.k]}
+                  onChange={e => setBucketDraft({ ...bucketDraft, [b.k]: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })}
+                  style={{ width: '100%', padding: '6px 10px', fontSize: 13, background: 'var(--bg-soft)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-1)' }}/>
+              </div>
+            ))}
+            <div style={{ marginTop: 10, fontSize: 11, color: bucketDraft.emergency + bucketDraft.shortTerm + bucketDraft.longTerm > 100 ? 'var(--down)' : 'var(--text-3)' }}>
+              Sum: {bucketDraft.emergency + bucketDraft.shortTerm + bucketDraft.longTerm}% (max 100)
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+              <button onClick={() => setBucketDraft(null)} style={{ padding: '8px 14px', fontSize: 13, background: 'var(--bg-soft)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={() => saveBuckets(bucketDraft)} disabled={busy || (bucketDraft.emergency + bucketDraft.shortTerm + bucketDraft.longTerm > 100)}
+                style={{ padding: '8px 14px', fontSize: 13, fontWeight: 500, background: 'var(--acc)', color: 'white', border: 0, borderRadius: 6, cursor: 'pointer' }}>
                 {busy ? 'Saving…' : 'Save'}
               </button>
             </div>

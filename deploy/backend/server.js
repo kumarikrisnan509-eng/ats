@@ -1025,6 +1025,44 @@ const STRATEGIES = [
       { name: 'kijun',  type: 'int', default: 26, min: 9, max: 60 },
     ],
   },
+  // ---------- Tier 20: 4 final TA strategies (22 total -- spec target reached) ----------
+  {
+    id: 'vwap',
+    name: 'VWAP cross (rolling)',
+    description: 'Long-only: BUY when close crosses above N-period rolling VWAP; SELL on opposite. Volume-weighted trend filter.',
+    bias: 'trending markets, volume-aware',
+    params: [
+      { name: 'period', type: 'int', default: 20, min: 5, max: 100 },
+    ],
+  },
+  {
+    id: 'pivot',
+    name: 'Pivot Points (R1/S1)',
+    description: 'Long-only: BUY when close breaks above prior-day R1 pivot; SELL when close breaks below S1. Classic floor-trader rule.',
+    bias: 'breakout markets',
+    params: [],
+  },
+  {
+    id: 'mfi',
+    name: 'Money Flow Index',
+    description: 'Long-only: BUY when MFI crosses up through oversold; SELL when MFI crosses down through overbought. Volume-weighted RSI.',
+    bias: 'mean-reverting markets, volume-aware',
+    params: [
+      { name: 'period',     type: 'int',   default: 14, min: 5,  max: 50 },
+      { name: 'oversold',   type: 'float', default: 20, min: 5,  max: 40 },
+      { name: 'overbought', type: 'float', default: 80, min: 60, max: 95 },
+    ],
+  },
+  {
+    id: 'trix',
+    name: 'TRIX',
+    description: 'Long-only: BUY when TRIX (triple-smoothed EMA momentum) crosses above its signal line; SELL on opposite. Noise-resistant momentum.',
+    bias: 'trending markets, momentum',
+    params: [
+      { name: 'period', type: 'int', default: 15, min: 5, max: 50 },
+      { name: 'signal', type: 'int', default: 9,  min: 3, max: 30 },
+    ],
+  },
 ];
 
 app.get('/api/strategies', (_req, res) => {

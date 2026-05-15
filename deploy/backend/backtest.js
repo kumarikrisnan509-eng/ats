@@ -65,6 +65,14 @@ function runBacktest({ candles, strategy, params, qty }) {
     signal = signalATRTrail(candles, params);
   } else if (strategy === 'ichimoku') {
     signal = signalIchimoku(candles, params);
+  } else if (strategy === 'vwap') {
+    signal = signalVWAP(candles, params);
+  } else if (strategy === 'pivot') {
+    signal = signalPivot(candles, params);
+  } else if (strategy === 'mfi') {
+    signal = signalMFI(candles, params);
+  } else if (strategy === 'trix') {
+    signal = signalTRIX(candles, params);
   } else {
     throw new Error(`unknown strategy: ${strategy}`);
   }
@@ -649,6 +657,100 @@ function signalIchimoku(candles, params) {
   return out;
 }
 
+/** Rolling N-bar VWAP. BUY when close crosses above VWAP; SELL when crosses below.
+ *  (True VWAP resets each session; this is a rolling proxy that also works on daily candles.) */
+function signalVWAP(candles, params) {
+  const period = params.period || 20;
+  const n = candles.length;
+  const vwap = new Array(n).fill(NaN);
+  for (let i = period - 1; i < n; i++) {
+    let pv = 0, vv = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      const c = candles[j];
+      const tp = (c.high + c.low + c.close) / 3;
+      const v = c.volume || 0;
+      pv += tp * v; vv += v;
+    }
+    vwap[i] = vv === 0 ? NaN : pv / vv;
+  }
+  const out = new Array(n).fill(null);
+  for (let i = period; i < n; i++) {
+    const v = vwap[i], vP = vwap[i - 1];
+    if (!Number.isFinite(v) || !Number.isFinite(vP)) continue;
+    const c = candles[i].close, cP = candles[i - 1].close;
+    if (c > v && cP <= vP) out[i] = 'BUY';
+    if (c < v && cP >= vP) out[i] = 'SELL';
+  }
+  return out;
+}
+
+/** Classic floor-trader pivot points (computed daily from prior day's H/L/C).
+ *  BUY when close breaks above R1; SELL when close breaks below S1. */
+function signalPivot(candles, params) {
+  void params;
+  const n = candles.length;
+  const out = new Array(n).fill(null);
+  for (let i = 1; i < n; i++) {
+    const prev = candles[i - 1];
+    const pp = (prev.high + prev.low + prev.close) / 3;
+    const r1 = 2 * pp - prev.low;
+    const s1 = 2 * pp - prev.high;
+    const c = candles[i].close;
+    if (c > r1) out[i] = 'BUY';
+    else if (c < s1) out[i] = 'SELL';
+  }
+  return out;
+}
+
+/** Money Flow Index (volume-weighted RSI).
+ *  BUY when MFI crosses up through oversold (20); SELL when MFI crosses down through overbought (80). */
+function signalMFI(candles, params) {
+  const period     = params.period     || 14;
+  const oversold   = params.oversold   || 20;
+  const overbought = params.overbought || 80;
+  const n = candles.length;
+  const tp  = candles.map(c => (c.high + c.low + c.close) / 3);
+  const rmf = candles.map((c, i) => tp[i] * (c.volume || 0));
+  const out = new Array(n).fill(null);
+  let mfiPrev = NaN;
+  for (let i = period; i < n; i++) {
+    let posMF = 0, negMF = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      if (tp[j] > tp[j-1]) posMF += rmf[j];
+      else if (tp[j] < tp[j-1]) negMF += rmf[j];
+    }
+    const mfi = negMF === 0 ? 100 : 100 - 100 / (1 + posMF / negMF);
+    if (Number.isFinite(mfiPrev)) {
+      if (mfi > oversold && mfiPrev <= oversold) out[i] = 'BUY';
+      if (mfi < overbought && mfiPrev >= overbought) out[i] = 'SELL';
+    }
+    mfiPrev = mfi;
+  }
+  return out;
+}
+
+/** TRIX -- triple-smoothed EMA momentum.
+ *  BUY when TRIX crosses above its signal line. SELL on opposite. */
+function signalTRIX(candles, params) {
+  const period = params.period || 15;
+  const sigP   = params.signal || 9;
+  const closes = candles.map(c => c.close);
+  const e1 = ema(closes, period);
+  const e2 = ema(e1, period);
+  const e3 = ema(e2, period);
+  const trix = e3.map((v, i) => i === 0 || !Number.isFinite(e3[i-1]) || e3[i-1] === 0 ? NaN : ((v - e3[i-1]) / e3[i-1]) * 100);
+  const sig  = ema(trix, sigP);
+  const out  = new Array(candles.length).fill(null);
+  for (let i = period * 3 + sigP; i < candles.length; i++) {
+    const t = trix[i], tP = trix[i-1];
+    const s = sig[i],  sP = sig[i-1];
+    if (!Number.isFinite(t) || !Number.isFinite(s) || !Number.isFinite(tP) || !Number.isFinite(sP)) continue;
+    if (t > s && tP <= sP) out[i] = 'BUY';
+    if (t < s && tP >= sP) out[i] = 'SELL';
+  }
+  return out;
+}
+
 function computeSignal({ candles, strategy, params }) {
   if (!Array.isArray(candles) || candles.length < 30) return [];
   const closes = candles.map(c => c.close);
@@ -671,6 +773,10 @@ function computeSignal({ candles, strategy, params }) {
   if (strategy === 'cmf')             return signalCMF(candles, params);
   if (strategy === 'atr_trail')       return signalATRTrail(candles, params);
   if (strategy === 'ichimoku')        return signalIchimoku(candles, params);
+  if (strategy === 'vwap')            return signalVWAP(candles, params);
+  if (strategy === 'pivot')           return signalPivot(candles, params);
+  if (strategy === 'mfi')             return signalMFI(candles, params);
+  if (strategy === 'trix')            return signalTRIX(candles, params);
   throw new Error('unknown strategy: ' + strategy);
 }
 

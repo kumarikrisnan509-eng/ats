@@ -9,6 +9,22 @@ const AIReviewScreen = () => {
   const [aiOutput, setAiOutput] = React.useState(null);
   const [aiError, setAiError] = React.useState(null);
   const [aiStats, setAiStats] = React.useState(null);
+  // Tier 20: live monthly review state
+  const [mrBusy, setMrBusy] = React.useState(false);
+  const [mrText, setMrText] = React.useState(null);
+  const [mrErr, setMrErr] = React.useState(null);
+  const runMonthlyReview = async () => {
+    setMrBusy(true); setMrErr(null); setMrText(null);
+    try {
+      const r = await window.fetchApi('/api/ai/monthly-review', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),  // auto-derives from /api/paper
+      });
+      if (r && r.ok) setMrText(r.narrative || '');
+      else setMrErr((r && r.reason) || 'AI call failed');
+    } catch (e) { setMrErr(String(e.message || e)); }
+    finally { setMrBusy(false); }
+  };
   const askLiveAI = async () => {
     setAiBusy(true); setAiError(null);
     try {
@@ -127,6 +143,30 @@ const AIReviewScreen = () => {
           </div>
         </div>
       </Card>
+
+      {/* Tier 20: Live AI monthly review */}
+      <div style={{ marginTop: 16 }}>
+        <Card title="AI monthly narrative" sub="Claude-generated review of your paper-trading month. Counts against the daily AI cap."
+          right={
+            <button className="btn btn--sm btn--accent" onClick={runMonthlyReview} disabled={mrBusy}>
+              {mrBusy ? 'Generating…' : 'Generate review'}
+            </button>
+          }>
+          {mrErr && <div style={{ padding: 12, background: 'var(--down-soft)', color: 'var(--down)', borderRadius: 6, fontSize: 12 }}>Error: {mrErr}</div>}
+          {!mrText && !mrErr && !mrBusy && (
+            <div style={{ padding: 16, background: 'var(--bg-soft)', borderRadius: 6, fontSize: 12, color: 'var(--text-3)' }}>
+              Click <b>Generate review</b> to have Claude analyse your paper-trading month and surface verdict / what worked / what didn't / one behavioral pattern / one actionable change.
+            </div>
+          )}
+          {mrText && (
+            <div style={{
+              padding: 16, background: 'var(--bg-soft)', borderRadius: 6,
+              fontSize: 13, lineHeight: 1.6, color: 'var(--text-1)',
+              whiteSpace: 'pre-wrap',
+            }}>{mrText}</div>
+          )}
+        </Card>
+      </div>
 
       {/* Highlights */}
       <div style={{ marginTop: 16 }}>
