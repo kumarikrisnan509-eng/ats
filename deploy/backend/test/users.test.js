@@ -1,0 +1,127 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const path = require('path');
+const os = require('os');
+const fs = require('fs');
+
+const Module = require('module');
+const origResolve = Module._resolveFilename;
+Module._resolveFilename = function (req, ...rest) {
+  if (req === 'better-sqlite3') return require.resolve('/tmp/sqlite-test/node_modules/better-sqlite3');
+  if (req === 'bcrypt')         return require.resolve('/tmp/sqlite-test/node_modules/bcrypt');
+  return origResolve.call(this, req, ...rest);
+};
+
+const TMP = path.join(os.tmpdir(), 'ats-users-' + Date.now() + '.db');
+process.env.ATS_DB_PATH = TMP;
+process.env.BCRYPT_COST = '4';  // speed up tests (still safe in tests)
+const { open, close } = require('../db');
+const { createUsers } = require('../users');
+
+const db = open({ path: TMP });
+const auth = createUsers({ db, audit: () => {} });
+
+test('signup: first user becomes admin + verified', async () => {
+  const { user } = await auth.signup({ email: 'admin@test.com', password: 'password123', name: 'Admin' });
+  assert.equal(user.is_admin, 1);
+  assert.equal(user.is_verified, 1);
+});
+
+test('signup: second user is not admin, needs verification', async () => {
+  const { user, verifyToken } = await auth.signup({ email: 'user@test.com', password: 'password123', name: 'User' });
+  assert.equal(user.is_admin, 0);
+  assert.equal(user.is_verified, 0);
+  assert.equal(typeof verifyToken, 'string');
+  assert.equal(verifyToken.length, 64);
+});
+
+test('signup: duplicate email rejected', async () => {
+  await assert.rejects(auth.signup({ email: 'admin@test.com', password: 'password123', name: 'X' }), /already registered/);
+});
+
+test('signup: invalid email rejected', async () => {
+  await assert.rejects(auth.signup({ email: 'not-an-email', password: 'password123', name: 'X' }), /invalid email/);
+});
+
+test('signup: short password rejected', async () => {
+  await assert.rejects(auth.signup({ email: 'short@test.com', password: 'short', name: 'X' }), /at least 8 chars/);
+});
+
+test('login: success returns sessionId + user', async () => {
+  const r = await auth.login({ email: 'admin@test.com', password: 'password123', ip: '1.2.3.4', ua: 'curl/8' });
+  assert.equal(typeof r.sessionId, 'string');
+  assert.equal(r.sessionId.length, 64);
+  assert.equal(r.user.email, 'admin@test.com');
+  // Session is queryable
+  const s = auth.getSession(r.sessionId);
+  assert.equal(s.user_id, r.user.id);
+  assert.equal(s.email, 'admin@test.com');
+});
+
+test('login: wrong password rejected', async () => {
+  await assert.rejects(auth.login({ email: 'admin@test.com', password: 'wrong-password' }), /invalid credentials/);
+});
+
+test('login: unknown email rejected with same message', async () => {
+  await assert.rejects(auth.login({ email: 'noone@test.com', password: 'whatever' }), /invalid credentials/);
+});
+
+test('login: 5 wrong attempts lock the account 15 min', async () => {
+  for (let i = 0; i < 4; i++) {
+    try { await auth.login({ email: 'user@test.com', password: 'wrong' }); } catch (_) {}
+  }
+  // 5th attempt -> lock
+  await assert.rejects(auth.login({ email: 'user@test.com', password: 'wrong' }), /too many failed|locked/);
+  // Even with correct password, account is now locked
+  await assert.rejects(auth.login({ email: 'user@test.com', password: 'password123' }), /locked/);
+});
+
+test('logout: deletes the session', async () => {
+  const r = await auth.login({ email: 'admin@test.com', password: 'password123' });
+  auth.logout(r.sessionId);
+  assert.equal(auth.getSession(r.sessionId), null);
+});
+
+test('optionalAuth attaches req.user when cookie present', () => {
+  return (async () => {
+    const r = await auth.login({ email: 'admin@test.com', password: 'password123' });
+    const req = { headers: { cookie: `ats_sid=${r.sessionId}` } };
+    const res = {};
+    let nextCalled = false;
+    auth.optionalAuth(req, res, () => { nextCalled = true; });
+    assert.equal(nextCalled, true);
+    assert.equal(req.user.email, 'admin@test.com');
+    assert.equal(req.user.is_admin, true);
+  })();
+});
+
+test('requireAuth blocks unauthenticated requests with 401', () => {
+  const req = { headers: {} };
+  let status = 200, body = null;
+  const res = { status(c) { status = c; return this; }, json(o) { body = o; return this; } };
+  auth.optionalAuth(req, res, () => {
+    auth.requireAuth(req, res, () => assert.fail('should not reach next()'));
+  });
+  assert.equal(status, 401);
+  assert.equal(body.reason, 'auth_required');
+});
+
+test('requireAdmin blocks non-admin with 403', () => {
+  return (async () => {
+    const r = await auth.login({ email: 'user@test.com', password: 'password123' }).catch(async () => {
+      // Account is locked from earlier test -- unlock + re-try
+      db._conn.prepare('UPDATE users SET locked_until = NULL, failed_logins = 0 WHERE email = ?').run('user@test.com');
+      return await auth.login({ email: 'user@test.com', password: 'password123' });
+    });
+    const req = { headers: { cookie: `ats_sid=${r.sessionId}` } };
+    let status = 200, body = null;
+    const res = { status(c) { status = c; return this; }, json(o) { body = o; return this; } };
+    auth.optionalAuth(req, res, () => {
+      auth.requireAdmin(req, res, () => assert.fail('non-admin reached admin route'));
+    });
+    assert.equal(status, 403);
+    assert.equal(body.reason, 'admin_only');
+  })();
+});
+
+test('cleanup', () => { close(); fs.unlinkSync(TMP); });
