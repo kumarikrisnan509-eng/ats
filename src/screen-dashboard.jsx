@@ -358,12 +358,14 @@ const DashboardScreen = () => {
     let cancelled = false;
     const refresh = async () => {
       try {
-        const [holdings, paper, pnlDaily, pnlBy, profile] = await Promise.all([
+        const [holdings, paper, pnlDaily, pnlBy, profile, stratsLive, scanLive] = await Promise.all([
           window.fetchApi('/api/portfolio/holdings').catch(() => null),
           window.fetchApi('/api/paper').catch(() => null),
           window.fetchApi('/api/pnl/daily?days=30').catch(() => null),
           window.fetchApi('/api/pnl/by-strategy').catch(() => null),
           window.fetchApi('/api/profile').catch(() => null),
+          window.fetchApi('/api/strategies').catch(() => null),
+          window.fetchApi('/api/scanner/history?limit=300').catch(() => null),
         ]);
         if (cancelled) return;
         // Compute portfolio value from real holdings
@@ -391,6 +393,14 @@ const DashboardScreen = () => {
           dailyEquity: dailyRows.map(r => ({ x: r.date, y: r.totalEquity })),
           asOf: new Date().toISOString(),
           holdingsCount: rows.length,
+          stratCount: stratsLive && stratsLive.ok && Array.isArray(stratsLive.rows) ? stratsLive.rows.length
+                    : stratsLive && Array.isArray(stratsLive.strategies) ? stratsLive.strategies.length : null,
+          signalsToday: scanLive && scanLive.ok && Array.isArray(scanLive.rows)
+            ? scanLive.rows.filter(r => {
+                const t = new Date(r.ts || r.time || 0).getTime();
+                const start = new Date(); start.setHours(0,0,0,0);
+                return t >= start.getTime();
+              }).length : null
         });
         if (profile && profile.ok) setLiveProfile(profile.profile);
       } catch (e) {}
@@ -559,7 +569,16 @@ const DashboardScreen = () => {
       <div className="page-header">
         <div>
           <h1 className="page-header__title" style={{ fontSize: 24, marginBottom: 4 }}>Welcome back, {liveProfile && liveProfile.userName ? liveProfile.userName.split(' ')[0] : 'Rajasekar'} · <span className="muted" style={{ fontWeight: 400 }}>{fmtDate()}</span></h1>
-          <div className="page-header__sub">{demo ? "Demo mode · clean slate · no live data" : "Markets are live · 3 strategies running · 2 AI signals awaiting review"}</div>
+          <div className="page-header__sub">{demo ? "Demo mode · clean slate · no live data" : (() => {
+            const status = (typeof window.marketStatus === 'function') ? window.marketStatus() : { open:false, label:'' };
+            const market = status.open ? 'Markets are live' : (status.label ? `Markets ${status.label.toLowerCase()}` : 'Markets closed');
+            const stratN = liveDash && liveDash.stratCount != null ? liveDash.stratCount : null;
+            const sigN   = liveDash && liveDash.signalsToday  != null ? liveDash.signalsToday : null;
+            const parts = [market];
+            if (stratN != null) parts.push(`${stratN} strategies running`);
+            if (sigN   != null) parts.push(`${sigN} AI signals today`);
+            return parts.join(' · ');
+          })()}</div>
         </div>
         <div className="page-header__right">
           <button className="btn"><I.download size={14}/> Export</button>

@@ -451,9 +451,35 @@ const NotificationsBell = ({ setRoute }) => {
 };
 
 // Profile menu — avatar + dropdown with quick links
+// Tier 12: name + email now pulled from /api/profile (live Kite session).
+// Falls back to "—" with a "Kite reconnect needed" badge when token expired.
 const ProfileMenu = ({ setRoute }) => {
   const [open, setOpen] = React.useState(false);
   const [demo, setDemo] = window.useDemoMode();
+  const [me, setMe] = React.useState(null);
+  const [meErr, setMeErr] = React.useState(false);
+  React.useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const r = await window.fetchApi('/api/profile');
+        if (cancelled) return;
+        if (r && r.ok && (r.user_name || r.email)) { setMe(r); setMeErr(false); }
+        else setMeErr(true);
+      } catch (_e) { setMeErr(true); }
+    };
+    load();
+    const t = setInterval(load, 60000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
+  const initials = (() => {
+    const n = (me && (me.user_name || me.user_shortname)) || '';
+    if (!n) return 'RS';
+    const parts = n.trim().split(/\s+/);
+    return ((parts[0] || '')[0] || '') + ((parts[parts.length-1] || '')[0] || '') || 'RS';
+  })().toUpperCase();
+  const displayName  = (me && (me.user_name || me.user_shortname)) || (meErr ? 'Kite — reconnect' : '…');
+  const displayEmail = (me && me.email) || (meErr ? 'Token expired or broker disconnected' : '');
   const nav = (r) => { setOpen(false); setRoute && setRoute(r); };
   return (
     <div style={{ position: "relative" }}>
@@ -466,7 +492,7 @@ const ProfileMenu = ({ setRoute }) => {
           border: "2px solid var(--border)",
           cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
         }}
-      >RS</button>
+      >{initials}</button>
       {open && (
         <>
           <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 50 }}/>
@@ -485,10 +511,10 @@ const ProfileMenu = ({ setRoute }) => {
                 background: "linear-gradient(135deg, var(--accent), oklch(50% 0.12 280))",
                 color: "white", fontWeight: 600, fontSize: 14,
                 display: "flex", alignItems: "center", justifyContent: "center",
-              }}>RS</div>
+              }}>{initials}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 500, fontSize: 13 }}>Rajasekar Selvam</div>
-                <div className="muted" style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>rajasekar@example.in</div>
+                <div style={{ fontWeight: 500, fontSize: 13 }} title={displayName}>{displayName}</div>
+                <div className="muted" style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={displayEmail}>{displayEmail}</div>
               </div>
             </div>
             <div style={{ padding: "6px 0" }}>

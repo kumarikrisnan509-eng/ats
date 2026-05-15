@@ -198,6 +198,32 @@ const useUrlState = (key, defaultValue) => {
 // signals queue depth, kill state. Click any chip → deep-link to that screen.
 const ActiveAutomationStrip = ({ setRoute }) => {
   const [, bump] = React.useReducer(x => x + 1, 0);
+  // Tier 12: live counts from backend.
+  const [live, setLive] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const [strats, scan, summary] = await Promise.all([
+          window.fetchApi('/api/strategies').catch(() => null),
+          window.fetchApi('/api/scanner/history?limit=200').catch(() => null),
+          window.fetchApi('/api/summary').catch(() => null),
+        ]);
+        if (cancelled) return;
+        const stratCount = strats && strats.ok && Array.isArray(strats.rows) ? strats.rows.length
+                        : strats && Array.isArray(strats.strategies) ? strats.strategies.length : 0;
+        // signals queue = scanner history rows in the last 24h
+        const since = Date.now() - 24*3600*1000;
+        const signals = scan && scan.ok && Array.isArray(scan.rows)
+          ? scan.rows.filter(r => new Date(r.ts || r.time || 0).getTime() >= since).length : 0;
+        const positions = summary && summary.aggregates ? (summary.aggregates.positionsNetCount || 0) : 0;
+        setLive({ stratCount, signals, positions });
+      } catch (_e) {}
+    };
+    load();
+    const t = setInterval(load, 30000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
   React.useEffect(() => {
     const h = () => bump();
     window.addEventListener("modes-changed", h);
@@ -252,14 +278,14 @@ const ActiveAutomationStrip = ({ setRoute }) => {
       <Chip
         icon="strat"
         label="Strategies"
-        value="8 active"
+        value={live ? `${live.stratCount} active` : "—"}
         color="oklch(58% 0.14 165)"
         onClick={() => setRoute && setRoute("strategies")}
       />
       <Chip
         icon="signals"
         label="Signals queue"
-        value="12 pending"
+        value={live ? `${live.signals} pending` : "—"}
         color="oklch(58% 0.13 245)"
         onClick={() => setRoute && setRoute("signals")}
         mono
@@ -267,7 +293,7 @@ const ActiveAutomationStrip = ({ setRoute }) => {
       <Chip
         icon="positions"
         label="Open positions"
-        value="14"
+        value={live ? String(live.positions) : "—"}
         color="oklch(58% 0.16 295)"
         onClick={() => setRoute && setRoute("trading")}
         mono
