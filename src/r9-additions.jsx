@@ -154,98 +154,143 @@ const AICostCard = () => {
   );
 };
 
-// ============ #18 Multi-broker aggregated P&L card ============
+// ============ #18 Broker connection status -- Tier 14: replaces 5-broker mock ============
+// We currently only support Zerodha. Showing fake 'Upstox/Dhan/Groww/Angel' brokers was a lie.
+// This card now shows the SINGLE truth: Zerodha connection status, holdings P&L, deployed capital.
 const MultiBrokerPnL = () => {
-  const brokers = [
-    { name: "Zerodha",  status: "live",  pnl: 8420,  capital: 1850000, color: "var(--info)" },
-    { name: "Upstox",   status: "live",  pnl: 1250,  capital:  720000, color: "var(--violet)" },
-    { name: "Dhan",     status: "live",  pnl: -380,  capital:  420000, color: "var(--accent)" },
-    { name: "Groww",    status: "ready", pnl: 0,     capital:       0, color: "var(--text-4)" },
-    { name: "Angel",    status: "ready", pnl: 0,     capital:       0, color: "var(--text-4)" },
-  ];
-  const tot = brokers.reduce((a, b) => a + b.pnl, 0);
-  const cap = brokers.reduce((a, b) => a + b.capital, 0);
+  const [data, setData] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const [holdings, health, paper] = await Promise.all([
+          window.fetchApi('/api/portfolio/holdings').catch(() => null),
+          window.fetchApi('/api/health').catch(() => null),
+          window.fetchApi('/api/paper').catch(() => null),
+        ]);
+        if (cancelled) return;
+        const rows = (holdings && holdings.rows) || [];
+        const eqValue = rows.reduce((s, h) => s + (h.quantity || 0) * (h.last_price || h.ltp || 0), 0);
+        const eqPnl   = rows.reduce((s, h) => s + (h.pnl || 0), 0);
+        const paperEq  = paper && paper.stats ? (paper.stats.totalEquity || 0) : 0;
+        const paperPnl = paper && paper.stats ? (paper.stats.realizedPnl || 0) : 0;
+        setData({
+          connected: !!(health && health.broker && health.broker.connected),
+          eqValue, eqPnl, paperEq, paperPnl,
+          totalPnl: eqPnl + paperPnl,
+          totalCap: eqValue + paperEq,
+        });
+      } catch (_e) {}
+    };
+    load();
+    const t = setInterval(load, 30000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
+  const inr = (n) => window.inr ? window.inr(n) : '₹' + Math.round(n || 0).toLocaleString('en-IN');
+  const inrC = (n) => window.inrCompact ? window.inrCompact(n) : inr(n);
   return (
     <div className="card">
       <div className="card__head">
         <div>
-          <div className="card__title">All-broker aggregated P&amp;L</div>
-          <div className="card__sub">3 of 5 connected · live unified view</div>
+          <div className="card__title">Broker P&amp;L</div>
+          <div className="card__sub">Zerodha · {data && data.connected ? 'connected' : 'reconnecting'}</div>
         </div>
         <a href="#brokers" className="btn btn--sm btn--ghost">Manage</a>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 14 }}>
         <div className="stat">
-          <div className="stat__label">Today's P&amp;L</div>
-          <div className={"stat__value " + (tot >= 0 ? "up" : "down")}>
-            {tot >= 0 ? "+" : ""}{window.inr ? window.inr(tot) : tot}
+          <div className="stat__label">Total P&amp;L</div>
+          <div className={"stat__value " + (data && data.totalPnl >= 0 ? "up" : "down")}>
+            {data ? (data.totalPnl >= 0 ? '+' : '') + inr(data.totalPnl) : '—'}
           </div>
         </div>
         <div className="stat">
-          <div className="stat__label">Deployed capital</div>
-          <div className="stat__value">{window.inrCompact ? window.inrCompact(cap) : `₹${cap}`}</div>
+          <div className="stat__label">Capital deployed</div>
+          <div className="stat__value">{data ? inrC(data.totalCap) : '—'}</div>
         </div>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {brokers.map(b => (
-          <div key={b.name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderTop: "1px solid var(--border)" }}>
-            <span style={{ width: 8, height: 8, borderRadius: "50%", background: b.color }}/>
-            <span style={{ fontSize: 13, flex: 1 }}>{b.name}</span>
-            {b.status === "live" ? (
-              <>
-                <span className="mono muted" style={{ fontSize: 11 }}>{window.inrCompact ? window.inrCompact(b.capital) : b.capital}</span>
-                <span className={"mono " + (b.pnl >= 0 ? "up" : "down")} style={{ fontSize: 12, minWidth: 70, textAlign: "right" }}>
-                  {b.pnl >= 0 ? "+" : ""}{window.inr ? window.inr(b.pnl) : b.pnl}
-                </span>
-              </>
-            ) : (
-              <span className="pill" style={{ fontSize: 10 }}>not connected</span>
-            )}
-          </div>
-        ))}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderTop: '1px solid var(--border)' }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--info)' }}/>
+          <span style={{ fontSize: 13, flex: 1 }}>Equity (Zerodha)</span>
+          <span className="mono muted" style={{ fontSize: 11 }}>{data ? inrC(data.eqValue) : '—'}</span>
+          <span className={"mono " + (data && data.eqPnl >= 0 ? "up" : "down")} style={{ fontSize: 12, minWidth: 70, textAlign: 'right' }}>
+            {data ? (data.eqPnl >= 0 ? '+' : '') + inr(data.eqPnl) : '—'}
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderTop: '1px solid var(--border)' }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)' }}/>
+          <span style={{ fontSize: 13, flex: 1 }}>Paper trading</span>
+          <span className="mono muted" style={{ fontSize: 11 }}>{data ? inrC(data.paperEq) : '—'}</span>
+          <span className={"mono " + (data && data.paperPnl >= 0 ? "up" : "down")} style={{ fontSize: 12, minWidth: 70, textAlign: 'right' }}>
+            {data ? (data.paperPnl >= 0 ? '+' : '') + inr(data.paperPnl) : '—'}
+          </span>
+        </div>
       </div>
     </div>
   );
 };
 
-// ============ #19 Login / session history ============
+// ============ #19 Session info -- Tier 14: replaces fake 6-row login history ============
+// We don't have a real auth/session backend yet. Rather than show 6 fake IP addresses,
+// surface the ONE truth we know: current session uptime + Kite session validity.
 const LoginHistory = () => {
-  const rows = [
-    { when: "Today · 09:14", ip: "203.115.32.18", loc: "Mumbai, IN", device: "Chrome · macOS", current: true },
-    { when: "Yesterday · 18:42", ip: "203.115.32.18", loc: "Mumbai, IN", device: "Chrome · macOS" },
-    { when: "Yesterday · 08:55", ip: "203.115.32.18", loc: "Mumbai, IN", device: "iOS · Safari" },
-    { when: "Mar 24 · 21:08", ip: "157.49.144.7",  loc: "Pune, IN",  device: "Chrome · Windows", suspicious: true },
-    { when: "Mar 23 · 14:22", ip: "203.115.32.18", loc: "Mumbai, IN", device: "Chrome · macOS" },
-    { when: "Mar 22 · 09:11", ip: "203.115.32.18", loc: "Mumbai, IN", device: "Chrome · macOS" },
-  ];
+  const [info, setInfo] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const [health, profile] = await Promise.all([
+          window.fetchApi('/api/health').catch(() => null),
+          window.fetchApi('/api/profile').catch(() => null),
+        ]);
+        if (cancelled) return;
+        setInfo({
+          uptimeSec: health ? (health.uptimeSec || 0) : 0,
+          brokerConnected: !!(health && health.broker && health.broker.connected),
+          hasAccessToken: !!(health && health.broker && health.broker.hasAccessToken),
+          profileOk: !!(profile && profile.ok),
+          userName: profile && profile.user_name,
+          email: profile && profile.email,
+        });
+      } catch (_e) {}
+    };
+    load();
+    const t = setInterval(load, 30000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
+  const fmtUptime = (s) => {
+    if (!s) return '—';
+    if (s < 60) return s + 's';
+    if (s < 3600) return Math.floor(s/60) + 'm';
+    if (s < 86400) return Math.floor(s/3600) + 'h ' + Math.floor((s%3600)/60) + 'm';
+    return Math.floor(s/86400) + 'd ' + Math.floor((s%86400)/3600) + 'h';
+  };
+  const status = !info ? 'loading' :
+                  info.profileOk ? 'authenticated' :
+                  info.hasAccessToken && !info.brokerConnected ? 'reconnecting' :
+                  'kite token expired';
   return (
-    <div className="card card--flush">
-      <div className="card__head" style={{ padding: "16px 20px 0" }}>
+    <div className="card">
+      <div className="card__head">
         <div>
-          <div className="card__title">Recent sign-ins</div>
-          <div className="card__sub">Last 30 days · highlighted entries are flagged for review</div>
+          <div className="card__title">Session status</div>
+          <div className="card__sub">Kite Connect session for this account</div>
         </div>
-        <button className="btn btn--sm btn--danger" title="Force sign-out of all sessions except this one">Sign out all other sessions</button>
+        <button className="btn btn--sm btn--ghost" onClick={() => location.hash = 'brokers'}>Manage</button>
       </div>
-      <table className="table" style={{ marginTop: 14 }}>
-        <thead>
-          <tr><th>When</th><th>Location</th><th>IP</th><th>Device</th><th></th></tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={i} style={{ background: r.suspicious ? "var(--warn-soft)" : "" }}>
-              <td>{r.when}</td>
-              <td>{r.loc}</td>
-              <td className="mono" style={{ fontSize: 12 }}>{r.ip}</td>
-              <td>{r.device}</td>
-              <td style={{ textAlign: "right" }}>
-                {r.current && <span className="pill pill--up">this session</span>}
-                {r.suspicious && <span className="pill pill--warn">review</span>}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 8 }}>
+        <div className="stat">
+          <div className="stat__label">Kite session</div>
+          <div className={"stat__value " + (info && info.profileOk ? 'up' : 'down')} style={{ fontSize: 16 }}>{status}</div>
+          <div className="stat__delta muted">{info && info.userName ? info.userName : 'auto-relogin daily 06:10 IST'}</div>
+        </div>
+        <div className="stat">
+          <div className="stat__label">Backend uptime</div>
+          <div className="stat__value mono" style={{ fontSize: 16 }}>{info ? fmtUptime(info.uptimeSec) : '—'}</div>
+          <div className="stat__delta muted">{info && info.email ? info.email : 'this server instance'}</div>
+        </div>
+      </div>
     </div>
   );
 };

@@ -171,17 +171,59 @@ const TodaysPlan = () => {
   const [dismissed, setDismissed] = React.useState(() => {
     try { return localStorage.getItem("ats.plan.dismissed") === new Date().toDateString(); } catch { return false; }
   });
+  // Tier 14: live data for the 4 tiles
+  //   #1 Signals: scanner hits today + (best-effort) confidence-filtered count
+  //   #2 NIFTY expiry: next Thursday from /api/expiries
+  //   #3 Risk: today's realized PnL absolute vs paper starting equity (proxy for daily cap)
+  //   #4 Sweep: next pending sweep amount (from /api/sweep/evaluate)
+  const [plan, setPlan] = React.useState(null);
+  const [me, setMe] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const [scan, exp, paper, sweep, profile] = await Promise.all([
+          window.fetchApi('/api/scanner/history?limit=300').catch(() => null),
+          window.fetchApi('/api/expiries?underlying=NIFTY').catch(() => null),
+          window.fetchApi('/api/paper').catch(() => null),
+          window.fetchApi('/api/sweep/evaluate').catch(() => null),
+          window.fetchApi('/api/profile').catch(() => null),
+        ]);
+        if (cancelled) return;
+        const startToday = (() => { const d = new Date(); d.setHours(0,0,0,0); return d.getTime(); })();
+        const signalsToday = scan && scan.ok && Array.isArray(scan.rows)
+          ? scan.rows.filter(r => new Date(r.ts || r.time || 0).getTime() >= startToday).length : 0;
+        const expiries = exp && exp.ok && Array.isArray(exp.expiries) ? exp.expiries : (exp && Array.isArray(exp.rows) ? exp.rows : []);
+        const nextExpiry = expiries.length ? expiries[0] : null;
+        const paperStats = paper && paper.stats ? paper.stats : (paper || {});
+        const realized = paperStats.realizedPnl || 0;
+        const totalEq  = paperStats.totalEquity || 0;
+        const wouldSweep = sweep && sweep.ok && Array.isArray(sweep.wouldSweep)
+          ? sweep.wouldSweep.reduce((a, b) => a + (b.sweepINR || 0), 0) : 0;
+        setPlan({ signalsToday, nextExpiry, realized, totalEq, wouldSweep });
+        if (profile && profile.ok) setMe(profile);
+      } catch (_e) {}
+    };
+    load();
+    const t = setInterval(load, 60000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
   if (dismissed) return null;
   const dismiss = () => {
     try { localStorage.setItem("ats.plan.dismissed", new Date().toDateString()); } catch {}
     setDismissed(true);
   };
-
+  const fmtInr = (n) => (n == null) ? '—' : '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
+  const firstName = me && me.user_name ? me.user_name.split(' ')[0] : 'there';
   const items = [
-    { icon: I.brain,   label: "12 signals queued",  sub: "3 high-confidence", color: "var(--violet)", href: "#signals" },
-    { icon: I.layers,  label: "NIFTY weekly expiry", sub: "Thu · 2 IC positions at risk", color: "var(--warn)", href: "#trading" },
-    { icon: I.shield,  label: "Risk: 32% used",     sub: "₹4.8k / ₹15k daily cap",       color: "var(--up)", href: "#risk" },
-    { icon: I.target,  label: "1 SIP due today",    sub: "₹15k → Index 500",            color: "var(--info)", href: "#stpswp" },
+    { icon: I.brain,   label: plan ? `${plan.signalsToday} signals today` : '… signals today',
+      sub: plan ? 'scanner hits since 00:00 IST' : 'loading', color: "var(--violet)", href: "#signals" },
+    { icon: I.layers,  label: plan && plan.nextExpiry ? `NIFTY ${plan.nextExpiry}` : 'NIFTY expiry —',
+      sub: plan && plan.nextExpiry ? 'next weekly expiry' : 'loading', color: "var(--warn)", href: "#trading" },
+    { icon: I.shield,  label: plan ? `Realized: ${fmtInr(plan.realized)}` : 'Realized: —',
+      sub: plan && plan.totalEq ? `of ${fmtInr(plan.totalEq)} equity` : 'paper P&L today', color: "var(--up)", href: "#risk" },
+    { icon: I.target,  label: plan ? `Sweep ready: ${fmtInr(plan.wouldSweep)}` : 'Sweep ready: —',
+      sub: plan && plan.wouldSweep > 0 ? 'tap to sweep into long-term' : 'no rules firing', color: "var(--info)", href: "#money" },
   ];
 
   return (
@@ -193,7 +235,7 @@ const TodaysPlan = () => {
     }}>
       <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 4, minWidth: 240, borderRight: "1px solid var(--border)" }}>
         <div className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>Today's plan</div>
-        <div style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.01em", fontFamily: "var(--display)" }}>Good morning, Rajasekar</div>
+        <div style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.01em", fontFamily: "var(--display)" }}>Good morning, {firstName}</div>
         <div className="muted" style={{ fontSize: 12 }}>4 things to know before market open</div>
       </div>
       <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(4, 1fr)" }}>

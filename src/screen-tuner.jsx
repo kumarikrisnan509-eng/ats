@@ -5,7 +5,7 @@
 const TunerScreen = () => {
   const [job, setJob] = React.useState("momentum-rsi-tuning");
   const [showNew, setShowNew] = React.useState(false);
-  // ---- live POST /api/tune (default: RELIANCE rsi_mean_revert 27-combo grid) ----
+  // ---- live POST /api/tuner/run (default: RELIANCE rsi_mean_revert 27-combo grid) ----
   const [liveTune, setLiveTune] = React.useState(null);
   const [liveTuneBusy, setLiveTuneBusy] = React.useState(false);
   const runLiveTune = async () => {
@@ -13,7 +13,7 @@ const TunerScreen = () => {
     try {
       const to = new Date().toISOString().slice(0,10);
       const from = new Date(Date.now() - 365*86400*1000).toISOString().slice(0,10);
-      const d = await window.fetchApi('/api/tune', {
+      const d = await window.fetchApi('/api/tuner/runr/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
