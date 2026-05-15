@@ -2224,6 +2224,87 @@ app.get('/api/security/ip-allowlist', (_req, res) => {
 
 // Tier 37: echo the IP the server sees for this client, so users can paste
 // it into their API_IP_WHITELIST. Mirrors what nginx puts in X-Real-IP.
+// ---------- Tier 53: per-user data routes (require auth) ----------
+function withAuth(handler) {
+  return async (req, res) => {
+    if (!auth) return res.status(503).json({ ok:false, reason:'auth_not_initialized' });
+    if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
+    try { await handler(req, res); }
+    catch (e) { res.status(400).json({ ok:false, reason: e.message }); }
+  };
+}
+
+// Watchlist
+app.get('/api/me/watchlist', withAuth((req, res) => {
+  res.json({ ok:true, items: db.watchlist.list(req.user.id) });
+}));
+app.post('/api/me/watchlist', withAuth((req, res) => {
+  const { symbol, exchange } = req.body || {};
+  if (!symbol) return res.status(400).json({ ok:false, reason:'symbol required' });
+  db.watchlist.add(req.user.id, String(symbol).toUpperCase(), exchange || 'NSE');
+  res.json({ ok:true });
+}));
+app.delete('/api/me/watchlist/:symbol', withAuth((req, res) => {
+  db.watchlist.remove(req.user.id, req.params.symbol.toUpperCase());
+  res.json({ ok:true });
+}));
+
+// Alerts
+app.get('/api/me/alerts', withAuth((req, res) => {
+  res.json({ ok:true, alerts: db.alerts.list(req.user.id) });
+}));
+app.post('/api/me/alerts', withAuth((req, res) => {
+  const { symbol, operator, triggerPrice, channel } = req.body || {};
+  if (!symbol || !operator || triggerPrice == null) return res.status(400).json({ ok:false, reason:'symbol/operator/triggerPrice required' });
+  db.alerts.add(req.user.id, String(symbol).toUpperCase(), operator, Number(triggerPrice), channel);
+  res.json({ ok:true });
+}));
+app.delete('/api/me/alerts/:id', withAuth((req, res) => {
+  db.alerts.remove(req.user.id, Number(req.params.id));
+  res.json({ ok:true });
+}));
+
+// Paper
+app.get('/api/me/paper', withAuth((req, res) => {
+  res.json({ ok:true,
+    state: db.paper.getState(req.user.id),
+    orders: db.paper.listOrders(req.user.id),
+    positions: db.paper.listPositions(req.user.id),
+  });
+}));
+
+// Autorun config (per user)
+app.get('/api/me/autorun', withAuth((req, res) => {
+  res.json({ ok:true,
+    config: db.autorun.get(req.user.id) || null,
+    history: db.autorun.listHistory(req.user.id),
+  });
+}));
+app.put('/api/me/autorun', withAuth((req, res) => {
+  const b = req.body || {};
+  db.autorun.upsert({
+    user_id: req.user.id,
+    enabled: b.enabled ? 1 : 0,
+    strategy: b.strategy || null,
+    symbol: b.symbol || null,
+    qty: Number(b.qty) || 1,
+    interval: b.interval || 'day',
+    interval_minutes: Number(b.intervalMinutes) || 60,
+    candle_lookback_days: Number(b.candleLookbackDays) || 60,
+  });
+  res.json({ ok:true });
+}));
+app.delete('/api/me/autorun', withAuth((req, res) => {
+  db.autorun.delete(req.user.id);
+  res.json({ ok:true });
+}));
+
+// Daily P&L (last N days for current user)
+app.get('/api/me/pnl', withAuth((req, res) => {
+  const n = Math.min(365, Math.max(1, Number(req.query.n) || 30));
+  res.json({ ok:true, rows: db.pnl.recent(req.user.id, n) });
+}));
+
 // ---------- Tier 50/51: auth endpoints (signup, login, logout, verify, reset) ----------
 app.post('/api/auth/signup', async (req, res) => {
   if (!auth) return res.status(503).json({ ok:false, reason:'auth_not_initialized' });

@@ -84,11 +84,58 @@ function makeRepo(conn) {
     wlList:   conn.prepare('SELECT symbol, exchange, added_at FROM watchlist WHERE user_id = ? ORDER BY added_at DESC'),
   };
 
+  // Tier 53: extra repos (alerts, paper, autorun, pnl)
+  const x = {
+    alertInsert: conn.prepare('INSERT INTO price_alerts (user_id, symbol, operator, trigger_price, channel) VALUES (?, ?, ?, ?, ?)'),
+    alertList:   conn.prepare('SELECT * FROM price_alerts WHERE user_id = ? AND active = 1 ORDER BY created_at DESC'),
+    alertDelete: conn.prepare('DELETE FROM price_alerts WHERE id = ? AND user_id = ?'),
+    alertFire:   conn.prepare('UPDATE price_alerts SET fired_at = datetime(\'now\'), active = 0 WHERE id = ?'),
+
+    paperGetState: conn.prepare('SELECT * FROM paper_state WHERE user_id = ?'),
+    paperUpsertState: conn.prepare('INSERT INTO paper_state (user_id, tier, cash, initial_capital, realized_pnl) VALUES (@user_id, @tier, @cash, @initial_capital, @realized_pnl) ON CONFLICT(user_id) DO UPDATE SET tier=@tier, cash=@cash, initial_capital=@initial_capital, realized_pnl=@realized_pnl, updated_at=datetime(\'now\')'),
+    paperPlaceOrder: conn.prepare('INSERT INTO paper_orders (user_id, client_order_id, strategy_tag, symbol, side, qty, order_type, product, req_price, fill_price, slippage, status, filled_at) VALUES (@user_id, @client_order_id, @strategy_tag, @symbol, @side, @qty, @order_type, @product, @req_price, @fill_price, @slippage, @status, @filled_at)'),
+    paperListOrders: conn.prepare('SELECT * FROM paper_orders WHERE user_id = ? ORDER BY created_at DESC LIMIT 200'),
+    paperListPositions: conn.prepare('SELECT * FROM paper_positions WHERE user_id = ?'),
+
+    autorunGet:    conn.prepare('SELECT * FROM autorun_config WHERE user_id = ?'),
+    autorunUpsert: conn.prepare('INSERT INTO autorun_config (user_id, enabled, strategy, symbol, qty, interval, interval_minutes, candle_lookback_days) VALUES (@user_id, @enabled, @strategy, @symbol, @qty, @interval, @interval_minutes, @candle_lookback_days) ON CONFLICT(user_id) DO UPDATE SET enabled=@enabled, strategy=@strategy, symbol=@symbol, qty=@qty, interval=@interval, interval_minutes=@interval_minutes, candle_lookback_days=@candle_lookback_days, updated_at=datetime(\'now\')'),
+    autorunDelete: conn.prepare('DELETE FROM autorun_config WHERE user_id = ?'),
+    autorunHistAdd: conn.prepare('INSERT INTO autorun_history (user_id, strategy, symbol, signal, action, note) VALUES (?, ?, ?, ?, ?, ?)'),
+    autorunHistList: conn.prepare('SELECT * FROM autorun_history WHERE user_id = ? ORDER BY ts DESC LIMIT 100'),
+
+    pnlUpsertDay: conn.prepare('INSERT INTO pnl_daily (user_id, date, realized_pnl, unrealized_pnl, equity, trades) VALUES (@user_id, @date, @realized_pnl, @unrealized_pnl, @equity, @trades) ON CONFLICT(user_id, date) DO UPDATE SET realized_pnl=@realized_pnl, unrealized_pnl=@unrealized_pnl, equity=@equity, trades=@trades'),
+    pnlRecent:    conn.prepare('SELECT * FROM pnl_daily WHERE user_id = ? ORDER BY date DESC LIMIT ?'),
+  };
+
   return {
     _conn: conn,
     exec:  (sql) => conn.exec(sql),
     transaction: (fn) => conn.transaction(fn)(),
     pragma: (s) => conn.pragma(s),
+    alerts: {
+      add: (uid, symbol, operator, price, channel) => x.alertInsert.run(uid, symbol, operator, price, channel || 'telegram'),
+      list: (uid) => x.alertList.all(uid),
+      remove: (uid, id) => x.alertDelete.run(id, uid),
+      markFired: (id) => x.alertFire.run(id),
+    },
+    paper: {
+      getState: (uid) => x.paperGetState.get(uid) || { user_id: uid, tier: '10L', cash: 1000000, initial_capital: 1000000, realized_pnl: 0 },
+      setState: (s) => x.paperUpsertState.run(s),
+      placeOrder: (o) => x.paperPlaceOrder.run(o),
+      listOrders: (uid) => x.paperListOrders.all(uid),
+      listPositions: (uid) => x.paperListPositions.all(uid),
+    },
+    autorun: {
+      get: (uid) => x.autorunGet.get(uid),
+      upsert: (c) => x.autorunUpsert.run(c),
+      delete: (uid) => x.autorunDelete.run(uid),
+      addHistory: (uid, strategy, symbol, signal, action, note) => x.autorunHistAdd.run(uid, strategy, symbol, signal, action, note),
+      listHistory: (uid) => x.autorunHistList.all(uid),
+    },
+    pnl: {
+      upsertDay: (row) => x.pnlUpsertDay.run(row),
+      recent: (uid, n) => x.pnlRecent.all(uid, Math.min(365, Math.max(1, n || 7))),
+    },
 
     users: {
       create: (u) => stmts.userInsert.run(u),
