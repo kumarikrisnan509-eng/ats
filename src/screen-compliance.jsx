@@ -2,6 +2,136 @@
 /* Compliance screen — Tier 22: live SEBI-algo-framework readiness from /api/system/info + /api/audit.
    Replaces the prior hardcoded checklist + 7 fake algo orders. */
 
+
+/* ============================================================
+ * Tier 37: IpAllowlistCard -- live state of /api/security/ip-allowlist
+ * plus the user's currently-observed IP from /api/security/my-ip.
+ * ============================================================ */
+const IpAllowlistCard = () => {
+  const [state, setState] = React.useState(null);
+  const [myIp, setMyIp]   = React.useState(null);
+  const [copied, setCopied] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [a, b] = await Promise.all([
+          window.fetchApi('/api/security/ip-allowlist').catch(() => null),
+          window.fetchApi('/api/security/my-ip').catch(() => null),
+        ]);
+        if (cancelled) return;
+        if (a) setState(a);
+        if (b) setMyIp(b);
+      } catch (_) {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const copy = (text) => {
+    try {
+      navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (_) {}
+  };
+
+  const cardStyle = { padding: 14, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8 };
+  return (
+    <div style={cardStyle}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ fontSize: 14, fontWeight: 600 }}>Static IP allowlist (SEBI access control)</div>
+        {state && (
+          <span style={{
+            fontSize: 11, padding: '2px 8px', borderRadius: 999,
+            background: state.enabled ? 'var(--up-soft, #dcfce7)' : 'var(--bg-soft)',
+            color: state.enabled ? 'var(--up)' : 'var(--text-3)',
+            fontWeight: 600,
+          }}>
+            {state.enabled ? (state.enforcing ? 'ENFORCING' : 'AUDIT-ONLY') : 'DISABLED'}
+          </span>
+        )}
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, fontSize: 12 }}>
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--text-3)' }}>Your current IP</div>
+          <div className="mono" style={{ fontSize: 14, fontWeight: 500 }}>
+            {myIp && myIp.ip ? myIp.ip : '—'}
+            {myIp && myIp.ip && (
+              <button
+                onClick={() => copy(myIp.ip)}
+                style={{ marginLeft: 8, fontSize: 10, padding: '2px 6px', cursor: 'pointer' }}>
+                {copied ? '✓ copied' : 'copy'}
+              </button>
+            )}
+          </div>
+          {myIp && <div style={{ fontSize: 10, color: 'var(--text-3)' }}>via {myIp.source}</div>}
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-3)' }}>Allowlist entries ({state && state.entries ? state.entries.length : 0})</div>
+          <div className="mono" style={{ fontSize: 12 }}>
+            {state && state.entries && state.entries.length > 0
+              ? state.entries.map((e, i) => <div key={i}>{e}</div>)
+              : <span style={{ color: 'var(--text-3)' }}>(none -- allowlist disabled)</span>}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--text-3)' }}>Bypass paths</div>
+          <div className="mono" style={{ fontSize: 11 }}>
+            {state && state.bypass ? state.bypass.map((b, i) => <div key={i}>{b}</div>) : '—'}
+          </div>
+        </div>
+      </div>
+      {state && !state.enabled && (
+        <div style={{ marginTop: 12, padding: 10, background: 'var(--bg-soft)', borderRadius: 6, fontSize: 11, color: 'var(--text-2)' }}>
+          To enable: set <span className="mono">API_IP_WHITELIST</span> in <span className="mono">/etc/ats/backend.env</span>,
+          then optionally <span className="mono">API_IP_WHITELIST_MODE=audit</span> for a safe rollout.
+        </div>
+      )}
+    </div>
+  );
+};
+
+/* ============================================================
+ * Tier 38: TwoFactorCard -- /api/security/two-factor status.
+ * ============================================================ */
+const TwoFactorCard = () => {
+  const [s, setS] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await window.fetchApi('/api/security/two-factor').catch(() => null);
+        if (!cancelled && r) setS(r);
+      } catch (_) {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  const cardStyle = { padding: 14, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8 };
+  return (
+    <div style={cardStyle}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ fontSize: 14, fontWeight: 600 }}>2FA confirm-before-trade</div>
+        {s && (
+          <span style={{
+            fontSize: 11, padding: '2px 8px', borderRadius: 999,
+            background: s.hasTelegram && !s.disabled ? 'var(--up-soft, #dcfce7)' : 'var(--bg-soft)',
+            color: s.hasTelegram && !s.disabled ? 'var(--up)' : 'var(--text-3)',
+            fontWeight: 600,
+          }}>{s.disabled ? 'DISABLED' : (s.hasTelegram ? 'ACTIVE' : 'NO TELEGRAM')}</span>
+        )}
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, fontSize: 12 }}>
+        <div><span style={{ color: 'var(--text-3)' }}>Pending tokens</span> <span className="mono">{s ? s.pendingCount : '—'}</span></div>
+        <div><span style={{ color: 'var(--text-3)' }}>Confirmed today</span> <span className="mono">{s ? s.confirmedTodayCount : '—'}</span></div>
+      </div>
+      <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-3)' }}>
+        Fires on the FIRST order of each trading day per (broker user × strategy tag) pair. Telegram message holds the order for 5 minutes.
+      </div>
+    </div>
+  );
+};
+
 const ComplianceScreen = () => {
   const [info, setInfo] = React.useState(null);
   const [audit, setAudit] = React.useState(null);
@@ -105,6 +235,12 @@ const ComplianceScreen = () => {
           Live state of every gate that gets us regulatory-OK for live trading. {greenCount} / {checks.length} green.
         </div>
       </div>
+
+      {/* Tier 37: IP allowlist state */}
+      <IpAllowlistCard />
+
+      {/* Tier 38: 2FA confirm-before-trade state */}
+      <TwoFactorCard />
 
       {/* Live status checklist */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
