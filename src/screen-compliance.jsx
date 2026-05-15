@@ -132,6 +132,126 @@ const TwoFactorCard = () => {
   );
 };
 
+
+/* ============================================================
+ * Tier 42: WormAuditCard -- visual hash-chain timeline view.
+ * Polls /api/audit/verify (integrity) + /api/audit/tail?n=N
+ * (recent entries). Each entry shows seq, ts, event, prevHash
+ * suffix, hash suffix, so the user can manually spot-check the
+ * chain continuity by eyeballing the prevHash of row N matches
+ * the hash of row N-1.
+ * ============================================================ */
+const WormAuditCard = () => {
+  const [verify, setVerify] = React.useState(null);
+  const [entries, setEntries] = React.useState([]);
+  const [tailN, setTailN] = React.useState(20);
+  const [loading, setLoading] = React.useState(false);
+  const [eventFilter, setEventFilter] = React.useState('');
+
+  const load = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const [v, t] = await Promise.all([
+        window.fetchApi('/api/audit/verify').catch(() => null),
+        window.fetchApi(`/api/audit/tail?n=${tailN}`).catch(() => null),
+      ]);
+      if (v) setVerify(v);
+      if (t && t.ok && Array.isArray(t.entries)) setEntries(t.entries);
+    } finally {
+      setLoading(false);
+    }
+  }, [tailN]);
+
+  React.useEffect(() => { load(); }, [load]);
+
+  const filtered = eventFilter
+    ? entries.filter(e => String(e.event || '').toLowerCase().includes(eventFilter.toLowerCase()))
+    : entries;
+
+  const cardStyle = { padding: 14, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8 };
+  const short = (h) => h ? h.slice(0, 8) + '…' + h.slice(-4) : '—';
+  return (
+    <div style={cardStyle}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ fontSize: 14, fontWeight: 600 }}>WORM audit timeline (Tier 32)</div>
+        {verify && (
+          <span style={{
+            fontSize: 11, padding: '2px 8px', borderRadius: 999,
+            background: verify.ok ? 'var(--up-soft, #dcfce7)' : 'var(--down-soft, #fee2e2)',
+            color: verify.ok ? 'var(--up)' : 'var(--down)',
+            fontWeight: 600,
+          }}>
+            {verify.ok ? `✓ INTACT (${verify.totalEntries} entries)` : `✗ TAMPERED at seq ${verify.brokenAt}`}
+          </span>
+        )}
+      </div>
+
+      {/* Chain head + verify summary */}
+      {verify && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, fontSize: 11, marginBottom: 10 }}>
+          <div><span style={{ color: 'var(--text-3)' }}>Head seq</span> <span className="mono">{verify.headSeq}</span></div>
+          <div><span style={{ color: 'var(--text-3)' }}>Head hash</span> <span className="mono">{short(verify.headHash)}</span></div>
+          {!verify.ok && <div><span style={{ color: 'var(--text-3)' }}>Reason</span> <span className="mono" style={{ color: 'var(--down)' }}>{verify.reason}</span></div>}
+        </div>
+      )}
+
+      {/* Controls */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8, fontSize: 11, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span style={{ color: 'var(--text-3)' }}>Show last</span>
+        <select value={tailN} onChange={ev => setTailN(Number(ev.target.value))} style={{ padding: '2px 6px', fontSize: 11 }}>
+          <option value={10}>10</option>
+          <option value={20}>20</option>
+          <option value={50}>50</option>
+          <option value={100}>100</option>
+          <option value={500}>500</option>
+        </select>
+        <span style={{ color: 'var(--text-3)' }}>filter event</span>
+        <input value={eventFilter} onChange={ev => setEventFilter(ev.target.value)}
+               placeholder="e.g. order. or worm" style={{ padding: '2px 6px', fontSize: 11, width: 160 }}/>
+        <button onClick={load} disabled={loading} style={{ fontSize: 10, padding: '3px 10px', cursor: 'pointer' }}>
+          {loading ? 'loading…' : 'refresh'}
+        </button>
+        <span style={{ color: 'var(--text-3)', marginLeft: 'auto' }}>
+          showing {filtered.length} / {entries.length}
+        </span>
+      </div>
+
+      {/* Timeline table */}
+      <div style={{ overflowX: 'auto', maxHeight: 360, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--r-md)' }}>
+        <table className="tbl" style={{ width: '100%', fontSize: 10, minWidth: 720 }}>
+          <thead style={{ position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }}>
+            <tr>
+              <th style={{ width: 50 }}>seq</th>
+              <th style={{ width: 130 }}>ts (UTC)</th>
+              <th>event</th>
+              <th style={{ width: 120 }}>prevHash</th>
+              <th style={{ width: 120 }}>hash</th>
+              <th style={{ width: 28 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((e, i) => {
+              // Continuity check: this row's prevHash should match the previous row's hash.
+              const prevRow = i > 0 ? filtered[i - 1] : null;
+              const chainOk = !prevRow || prevRow.hash === e.prevHash;
+              return (
+                <tr key={e.seq} style={{ background: chainOk ? undefined : 'var(--down-soft, #fee2e2)' }}>
+                  <td className="mono" style={{ color: 'var(--text-3)' }}>{e.seq}</td>
+                  <td className="mono">{String(e.ts || '').slice(0, 19).replace('T', ' ')}</td>
+                  <td className="mono" style={{ fontSize: 11 }}>{e.event}</td>
+                  <td className="mono" title={e.prevHash}>{short(e.prevHash)}</td>
+                  <td className="mono" title={e.hash}>{short(e.hash)}</td>
+                  <td title={chainOk ? 'chain link OK' : 'BROKEN'}>{chainOk ? '✓' : '!'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
 const ComplianceScreen = () => {
   const [info, setInfo] = React.useState(null);
   const [audit, setAudit] = React.useState(null);
@@ -241,6 +361,9 @@ const ComplianceScreen = () => {
 
       {/* Tier 38: 2FA confirm-before-trade state */}
       <TwoFactorCard />
+
+      {/* Tier 42: WORM audit timeline */}
+      <WormAuditCard />
 
       {/* Live status checklist */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
