@@ -13,7 +13,7 @@ const TunerScreen = () => {
     try {
       const to = new Date().toISOString().slice(0,10);
       const from = new Date(Date.now() - 365*86400*1000).toISOString().slice(0,10);
-      const d = await window.fetchApi('/api/tuner/run', {
+      const d = await window.fetchApi('/api/tune', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
