@@ -212,7 +212,6 @@ function makeRepo(conn) {
       updateTokens: (id, userId, accessToken, issuedAt, expiresAt) =>
         x.brokerUpdateTokens.run({ id, user_id: userId, access_token: accessToken, issued_at: issuedAt, expires_at: expiresAt }),
       delete: (userId, id) => x.brokerDelete.run(id, userId),
-      /** Atomically: clear all defaults for user, then mark `id` as default. */
       setDefault: (userId, id) => {
         x.brokerClearDefault.run(userId);
         return x.brokerSetDefault.run(id, userId);
