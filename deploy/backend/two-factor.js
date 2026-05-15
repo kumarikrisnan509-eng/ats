@@ -138,7 +138,22 @@ class TwoFactor {
     };
   }
 
-  _formatTelegram({ payload, confirmUrl, strategyTag, exp }) {
+  /** Reject a pending token (the order is discarded). */
+  reject(token) {
+    const e = this._pending.get(token);
+    if (!e) {
+      if (this.audit) { try { this.audit('order.2fa.rejectMiss', { token }); } catch (_) {} }
+      return { ok: false, reason: 'unknown_or_used' };
+    }
+    this._pending.delete(token);
+    if (this.audit) {
+      try { this.audit('order.2fa.rejected', { token, userId: e.userId, strategyTag: e.strategyTag, symbol: e.payload && e.payload.symbol }); }
+      catch (_) {}
+    }
+    return { ok: true, rejected: true, payload: e.payload };
+  }
+
+    _formatTelegram({ payload, confirmUrl, strategyTag, exp }) {
     const p = payload || {};
     const lines = [
       '🛡️ *First order of the day -- confirm to proceed*',
@@ -154,7 +169,8 @@ class TwoFactor {
     if (p.triggerPrice) lines.push(`*Trigger:*  \`${p.triggerPrice}\``);
     if (p.algoId)       lines.push(`*Algo ID:*  \`${p.algoId}\``);
     const secs = Math.max(0, Math.round((exp - Date.now()) / 1000));
-    lines.push('', `Tap to confirm (expires in ${secs}s):`, confirmUrl);
+    const cancelUrl = confirmUrl.replace('/confirm-2fa/', '/cancel-2fa/');
+    lines.push('', `*Confirm* (expires in ${secs}s):`, confirmUrl, '', '*Cancel:*', cancelUrl);
     return lines.join('\n');
   }
 }

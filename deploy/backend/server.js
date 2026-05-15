@@ -2559,6 +2559,19 @@ app.post('/api/orders/confirm-2fa/:token', async (req, res) => {
   }
 });
 
+// Tier 41: reject a pending 2FA token. Useful when the user spots a
+// suspicious order in the Telegram alert and wants to abort.
+// GET so it can be one-click from Telegram; POST also accepted.
+async function handleCancel2fa(req, res) {
+  if (!twoFactor) return res.status(503).json({ ok:false, reason:'two_factor_not_initialized' });
+  const token = String(req.params.token || '').trim();
+  const r = twoFactor.reject(token);
+  if (!r.ok) return res.status(404).json({ ok:false, reason: r.reason });
+  res.json({ ok:true, rejected:true, message:'Order rejected. No broker call was made.' });
+}
+app.get( '/api/orders/cancel-2fa/:token', handleCancel2fa);
+app.post('/api/orders/cancel-2fa/:token', handleCancel2fa);
+
 // Tier 38: status endpoint (for the Compliance UI panel).
 app.get('/api/security/two-factor', (_req, res) => {
   if (!twoFactor) return res.status(503).json({ ok:false, reason:'two_factor_not_initialized' });
