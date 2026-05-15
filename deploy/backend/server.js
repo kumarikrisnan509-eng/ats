@@ -35,6 +35,7 @@ const { TaxPlanner }   = require('./tax');
 const { ClaudeAI }     = require('./ai');
 const { SweepEngine }  = require('./sweep');
 const { LongTerm }     = require('./longterm');
+const { Wealth }       = require('./wealth');
 const { runPreflight } = require('./preflight');
 const csvImport        = require('./csv-import');
 
@@ -88,7 +89,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth;
 
 async function init() {
   broker = createBroker(process.env);
@@ -176,6 +177,9 @@ async function init() {
     storePath: process.env.LONGTERM_PATH || '/var/lib/ats/tokens/_longterm.json',
   });
   longterm.load();
+
+  // Tier 21: curated reference catalogs for bonds / REITs / smallcases / traders.
+  wealth = new Wealth();
 
   if (BROKER_NAME === 'zerodha') {
     if (!fs.existsSync(MASTER_KEY_PATH)) {
@@ -2022,6 +2026,24 @@ app.post('/api/goals/inflate', (req, res) => {
     const r = longterm.inflateGoal(req.body || {});
     res.json({ ok:true, ...r });
   } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
+});
+
+// ---------- Tier 21: Wealth reference catalogs (bonds / REITs / smallcases / traders) ----------
+app.get('/api/bonds', (_req, res) => {
+  if (!wealth) return res.status(503).json({ ok:false, reason:'wealth_not_initialized' });
+  res.json(wealth.getBonds());
+});
+app.get('/api/reits', (_req, res) => {
+  if (!wealth) return res.status(503).json({ ok:false, reason:'wealth_not_initialized' });
+  res.json(wealth.getReits());
+});
+app.get('/api/smallcase/baskets', (_req, res) => {
+  if (!wealth) return res.status(503).json({ ok:false, reason:'wealth_not_initialized' });
+  res.json(wealth.getSmallcases());
+});
+app.get('/api/copy/traders', (_req, res) => {
+  if (!wealth) return res.status(503).json({ ok:false, reason:'wealth_not_initialized' });
+  res.json(wealth.getTraders());
 });
 
 // Tier 18: AI-generated monthly review narrative (spec §4 Stage 4).
