@@ -120,12 +120,12 @@ const ReplayPanel = () => {
         {stats && (
           <div className="col" style={{ gap: 8 }}>
             <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-              <Pill label="Trades"     value={stats.trades}/>
-              <Pill label="Win rate"   value={(stats.winRate != null ? stats.winRate + "%" : "—")}/>
-              <Pill label="Total P&L"  value={"₹" + (stats.totalPnl != null ? Math.round(stats.totalPnl).toLocaleString('en-IN') : "—")}
+              <StatPill label="Trades"     value={stats.trades}/>
+              <StatPill label="Win rate"   value={(stats.winRate != null ? stats.winRate + "%" : "—")}/>
+              <StatPill label="Total P&L"  value={"₹" + (stats.totalPnl != null ? Math.round(stats.totalPnl).toLocaleString('en-IN') : "—")}
                     accent={stats.totalPnl >= 0 ? "up" : "down"}/>
-              {stats.wins != null  && <Pill label="Wins"   value={stats.wins}/>}
-              {stats.losses != null && <Pill label="Losses" value={stats.losses}/>}
+              {stats.wins != null  && <StatPill label="Wins"   value={stats.wins}/>}
+              {stats.losses != null && <StatPill label="Losses" value={stats.losses}/>}
             </div>
             {Array.isArray(result.trades) && result.trades.length > 0 && (
               <div style={{ maxHeight: 180, overflowY: "auto", border: "1px solid var(--border)", borderRadius: "var(--r-md)" }}>
@@ -277,7 +277,7 @@ const BracketOrderPanel = () => {
   );
 };
 
-const Pill = ({ label, value, accent }) => (
+const StatPill = ({ label, value, accent }) => (
   <div style={{
     padding: "6px 10px",
     background: "var(--bg-soft)",
