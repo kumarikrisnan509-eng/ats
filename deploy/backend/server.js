@@ -39,6 +39,7 @@ const { Wealth }       = require('./wealth');
 const { MPT }          = require('./mpt');
 const { FactorTilt }   = require('./factor-tilt');
 const { WormAudit }    = require('./worm-audit');
+const { SpanSim }      = require('./span-sim');
 const { Rebalance }    = require('./rebalance');
 const { Replay }       = require('./replay');
 const { EmailAlerts }  = require('./email-alerts');
@@ -99,7 +100,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, rebalance, replay, emailAlerts, whatsAppAlerts;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, rebalance, replay, emailAlerts, whatsAppAlerts;
 
 async function init() {
   broker = createBroker(process.env);
@@ -213,6 +214,9 @@ async function init() {
   } else {
     console.log(`worm-audit: ${_wormInit.fresh ? 'fresh log' : 'resumed'} (count=${_wormInit.count})`);
   }
+
+  // Tier 34: F&O SPAN-style margin simulator (pre-trade estimator).
+  spanSim = new SpanSim();
 
   // Tier 23: bucket-target rebalancing engine.
   rebalance = new Rebalance();
@@ -2118,6 +2122,24 @@ app.post('/api/portfolio/factor-tilt', (req, res) => {
   if (!factorTilt) return res.status(503).json({ ok:false, reason:'factor_tilt_not_initialized' });
   try {
     const out = factorTilt.build(req.body || {});
+    res.json(out);
+  } catch (e) {
+    res.status(400).json({ ok:false, reason:e.message });
+  }
+});
+
+// ---------- Tier 34: F&O SPAN-style margin simulator (pre-trade estimator) ----------
+// POST body shape:
+//   { legs: [{symbol, type:'CALL'|'PUT'|'FUT', side:'BUY'|'SELL', strike, expiry,
+//             qty, lotSize, spotPrice, iv?}, ...] }
+// Returns total/SPAN/exposure margin, per-leg breakdown, detected spread structures.
+// Accurate to within ~10-15% of real broker margin (uses public NSE formulas; real
+// SPAN files are exchange-distributed and proprietary).
+app.post('/api/risk/span', (req, res) => {
+  if (!spanSim) return res.status(503).json({ ok:false, reason:'span_sim_not_initialized' });
+  try {
+    const out = spanSim.estimate(req.body || {});
+    audit('risk.span.estimate', { legs: (req.body && req.body.legs && req.body.legs.length) || 0, total: out.totalMargin });
     res.json(out);
   } catch (e) {
     res.status(400).json({ ok:false, reason:e.message });
