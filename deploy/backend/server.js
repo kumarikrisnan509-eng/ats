@@ -38,6 +38,8 @@ const { LongTerm }     = require('./longterm');
 const { Wealth }       = require('./wealth');
 const { MPT }          = require('./mpt');
 const { Rebalance }    = require('./rebalance');
+const { Replay }       = require('./replay');
+const { EmailAlerts }  = require('./email-alerts');
 const { runPreflight } = require('./preflight');
 const csvImport        = require('./csv-import');
 
@@ -91,7 +93,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, rebalance;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, rebalance, replay, emailAlerts;
 
 async function init() {
   broker = createBroker(process.env);
@@ -188,6 +190,10 @@ async function init() {
 
   // Tier 23: bucket-target rebalancing engine.
   rebalance = new Rebalance();
+
+  // Tier 27: replay engine (uses backtest's computeSignal) and email alerts.
+  replay = new Replay({ computeSignal });
+  emailAlerts = new EmailAlerts({ audit });
 
   if (BROKER_NAME === 'zerodha') {
     if (!fs.existsSync(MASTER_KEY_PATH)) {
@@ -2108,6 +2114,50 @@ app.post('/api/rebalance', async (req, res) => {
 });
 
 // Tier 18: AI-generated monthly review narrative (spec §4 Stage 4).
+
+// ---------- Tier 27: Historical replay (step-through candles + signals) ----------
+app.post('/api/paper/replay', async (req, res) => {
+  if (!replay) return res.status(503).json({ ok:false, reason:'replay_not_initialized' });
+  try {
+    const { symbol, from, to, strategy, params, qty, interval, candles } = req.body || {};
+    if (!strategy) return res.status(400).json({ ok:false, reason:'strategy required' });
+    let bars;
+    if (Array.isArray(candles) && candles.length >= 30) {
+      // Caller-supplied candles -- skip Kite fetch (useful when broker is offline)
+      bars = candles;
+    } else {
+      if (!symbol)   return res.status(400).json({ ok:false, reason:'symbol required (or pass candles[])' });
+      if (!from || !to) return res.status(400).json({ ok:false, reason:'from and to required (YYYY-MM-DD)' });
+      try {
+        bars = await broker.getHistorical({ symbol, interval: interval || 'day', from, to });
+      } catch (e) {
+        return res.status(502).json({ ok:false, reason:`historical fetch failed: ${e.message}`, hint:'Pass candles[] in body to bypass broker.' });
+      }
+      if (!Array.isArray(bars) || bars.length < 30) {
+        return res.status(400).json({ ok:false, reason:`need >= 30 candles, got ${bars ? bars.length : 0}` });
+      }
+    }
+    const result = replay.replay({ candles: bars, strategy, params: params || {}, qty: Number(qty) || 1 });
+    audit('paper.replay', { symbol, strategy, bars: bars.length, trades: result.stats.trades });
+    res.json({ symbol, from, to, ...result });
+  } catch (e) {
+    res.status(400).json({ ok:false, reason:e.message });
+  }
+});
+
+// ---------- Tier 27: Email alerts ----------
+app.get('/api/email/status', (_req, res) => {
+  if (!emailAlerts) return res.status(503).json({ ok:false, reason:'email_not_initialized' });
+  res.json({ ok:true, ...emailAlerts.status() });
+});
+app.post('/api/email/send', async (req, res) => {
+  if (!emailAlerts) return res.status(503).json({ ok:false, reason:'email_not_initialized' });
+  const { to, subject, text } = req.body || {};
+  const r = await emailAlerts.send({ to, subject, text });
+  res.json(r);
+});
+
+
 app.post('/api/ai/monthly-review', async (req, res) => {
   if (!ai || !ai.enabled()) return res.status(503).json({ ok:false, reason:'ai_disabled', detail:'set ANTHROPIC_API_KEY env to enable' });
   try {
