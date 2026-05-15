@@ -22,7 +22,7 @@ const { createBroker } = require('./brokers');
 const { Vault }        = require('./crypto-vault');
 const { SessionStore } = require('./sessions');
 const { LoginVault }   = require('./login-vault');
-const { notify }       = require('./notify');
+const { notify, postTelegram } = require('./notify');
 const { Alerts }       = require('./alerts');
 const { Watchlist }    = require('./watchlist');
 const { Scanner, classifyRegime } = require('./scanner');
@@ -101,7 +101,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, rebalance, replay, emailAlerts, whatsAppAlerts;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, rebalance, replay, emailAlerts, whatsAppAlerts;
 
 async function init() {
   broker = createBroker(process.env);
@@ -218,6 +218,16 @@ async function init() {
 
   // Tier 34: F&O SPAN-style margin simulator (pre-trade estimator).
   spanSim = new SpanSim();
+
+  // Tier 38: 2FA confirm-before-trade on FIRST order of the day.
+  // Off when Telegram is not configured; off if DISABLE_2FA=true.
+  twoFactor = new TwoFactor({
+    audit,
+    postTelegram: typeof postTelegram === 'function' ? postTelegram : null,
+    baseUrl: process.env.PUBLIC_BASE_URL || 'https://ats.rajasekarselvam.com',
+    ttlMs: Number(process.env.TWO_FACTOR_TTL_MS) || 5 * 60_000,
+    disabled: String(process.env.DISABLE_2FA || '').toLowerCase() === 'true',
+  });
 
   // Tier 23: bucket-target rebalancing engine.
   rebalance = new Rebalance();
@@ -2185,6 +2195,19 @@ app.get('/api/security/ip-allowlist', (_req, res) => {
   res.json({ ok:true, ...ipAllowlist.state() });
 });
 
+// Tier 37: echo the IP the server sees for this client, so users can paste
+// it into their API_IP_WHITELIST. Mirrors what nginx puts in X-Real-IP.
+app.get('/api/security/my-ip', (req, res) => {
+  const xrip = req.headers['x-real-ip'];
+  const xff  = req.headers['x-forwarded-for'];
+  let ip = (typeof xrip === 'string' && xrip.trim())
+        || (typeof xff  === 'string' && xff.split(',')[0].trim())
+        || (req.socket && req.socket.remoteAddress)
+        || '';
+  if (typeof ip === 'string' && ip.startsWith('::ffff:')) ip = ip.slice(7);
+  res.json({ ok:true, ip, source: xrip ? 'x-real-ip' : (xff ? 'x-forwarded-for' : 'socket') });
+});
+
 // Tier 23: rebalance suggestions. Auto-derives buckets + holdings + paper equity + cash if not in body.
 app.post('/api/rebalance', async (req, res) => {
   if (!rebalance) return res.status(503).json({ ok:false, reason:'rebalance_not_initialized' });
@@ -2468,6 +2491,35 @@ app.post('/api/orders/place', async (req, res) => {
     });
   }
 
+  // Tier 38: 2FA confirm-before-trade gate. Fires on the FIRST order of the
+  // day per {userId, strategyTag} pair. If active, the order is held in a
+  // 5-minute bucket and the user is asked to confirm via Telegram.
+  // The actual broker.placeOrder() call is deferred to /api/orders/confirm-2fa/:token.
+  try {
+    const userId = (broker && broker.userId) || (broker && broker.name) || 'unknown';
+    const sTag   = normalizedPayload.strategyTag || 'unknown';
+    if (twoFactor && twoFactor.shouldChallenge({ userId, strategyTag: sTag })) {
+      const issued = await twoFactor.issue({
+        userId, strategyTag: sTag,
+        payload: { ...normalizedPayload, clientOrderId },
+      });
+      return res.status(202).json({
+        ok: true,
+        pending: true,
+        reason: '2FA_REQUIRED',
+        token: issued.token,
+        telegramSent: issued.sent,
+        message: issued.sent
+          ? 'First order of the day. Confirm via Telegram within 5 minutes.'
+          : 'First order of the day. Telegram delivery failed; confirm manually via POST /api/orders/confirm-2fa/' + issued.token,
+        clientOrderId,
+      });
+    }
+  } catch (e) {
+    // 2FA failure must not block the order path -- fall through to broker.placeOrder.
+    audit('order.2fa.error', { clientOrderId, msg: e.message });
+  }
+
   // Reserved for the future. Unreachable today.
   _orderRateRecord();
   broker.placeOrder(normalizedPayload)
@@ -2479,6 +2531,37 @@ app.post('/api/orders/place', async (req, res) => {
       audit('order.placeError', { clientOrderId, msg: err.message });
       res.status(502).json({ ok: false, reason: err.message, clientOrderId });
     });
+});
+
+// Tier 38: confirm a 2FA-pending order. Replays the held payload through
+// the same broker.placeOrder path so all the same audit + risk checks apply.
+app.post('/api/orders/confirm-2fa/:token', async (req, res) => {
+  if (!twoFactor) return res.status(503).json({ ok:false, reason:'two_factor_not_initialized' });
+  const token = String(req.params.token || '').trim();
+  const c = twoFactor.consume(token);
+  if (!c.ok) {
+    return res.status(c.reason === 'expired' ? 410 : 404).json({ ok:false, reason: c.reason });
+  }
+  if (typeof broker.placeOrder !== 'function') {
+    audit('order.2fa.blocked.notImplemented', { token });
+    return res.status(501).json({ ok:false, reason:'PLACE_ORDER_NOT_IMPLEMENTED' });
+  }
+  audit('order.2fa.placing', { token, clientOrderId: c.payload && c.payload.clientOrderId });
+  try {
+    _orderRateRecord();
+    const result = await broker.placeOrder(c.payload);
+    audit('order.placed.viaTwoFactor', { clientOrderId: c.payload.clientOrderId, result });
+    res.json({ ok:true, confirmed:true, clientOrderId: c.payload.clientOrderId, ...result });
+  } catch (err) {
+    audit('order.2fa.placeError', { token, msg: err.message });
+    res.status(502).json({ ok:false, reason: err.message });
+  }
+});
+
+// Tier 38: status endpoint (for the Compliance UI panel).
+app.get('/api/security/two-factor', (_req, res) => {
+  if (!twoFactor) return res.status(503).json({ ok:false, reason:'two_factor_not_initialized' });
+  res.json({ ok:true, ...twoFactor.stats() });
 });
 
 // Tier 11: cancel a working order. Same dual gating as place.
