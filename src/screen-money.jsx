@@ -20,6 +20,21 @@ const MoneyScreen = () => {
   // Tier 20: bucket strategy (emergency / short-term / long-term)
   const [buckets, setBuckets]     = React.useState(null);
   const [bucketDraft, setBucketDraft] = React.useState(null);
+  // Tier 24: rebalance suggestions
+  const [rebal, setRebal]         = React.useState(null);
+  const [rebalBusy, setRebalBusy] = React.useState(false);
+  const runRebalance = async () => {
+    setRebalBusy(true);
+    try {
+      const r = await window.fetchApi('/api/rebalance', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),  // auto-derives buckets + holdings + paper equity + cash
+      });
+      if (r && r.ok) setRebal(r);
+      else setRebal({ ok: false, reason: (r && r.reason) || 'failed' });
+    } catch (e) { setRebal({ ok: false, reason: e.message }); }
+    finally { setRebalBusy(false); }
+  };
   const saveBuckets = async (b) => {
     setBusy(true); setMsg('');
     try {
@@ -275,6 +290,66 @@ const MoneyScreen = () => {
           <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-3)' }}>
             Unallocated: {100 - (buckets.emergency + buckets.shortTerm + buckets.longTerm)}% (working capital / trading book)
           </div>
+        )}
+      </div>
+
+      {/* Tier 24: Rebalance check */}
+      <div style={{ padding: 16, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase' }}>Rebalance</div>
+            <div style={{ fontSize: 18, fontWeight: 600, marginTop: 2 }}>Bucket-target drift check</div>
+          </div>
+          <button onClick={runRebalance} disabled={rebalBusy} style={{
+            padding: '6px 12px', fontSize: 12, fontWeight: 500,
+            background: 'var(--acc)', color: 'white', border: 0, borderRadius: 6,
+            cursor: rebalBusy ? 'wait' : 'pointer',
+          }}>{rebalBusy ? 'Checking...' : 'Check now'}</button>
+        </div>
+
+        {!rebal && (
+          <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
+            Click <b>Check now</b> to compare your current allocation (Kite holdings + paper equity + cash) against your bucket targets.
+          </div>
+        )}
+
+        {rebal && rebal.ok === false && (
+          <div style={{ padding: 10, background: 'var(--down-soft)', color: 'var(--down)', borderRadius: 6, fontSize: 12 }}>
+            Error: {rebal.reason}
+          </div>
+        )}
+
+        {rebal && rebal.triggered === false && (
+          <div style={{ padding: 12, background: 'var(--up-soft)', color: 'var(--up)', borderRadius: 6, fontSize: 13 }}>
+            ✓ Allocation is within tolerance ({rebal.thresholdPct}% threshold). No rebalancing needed.
+          </div>
+        )}
+
+        {rebal && rebal.triggered === true && (
+          <>
+            <div style={{ padding: 12, background: 'var(--warn-soft)', color: 'oklch(45% 0.13 80)', borderRadius: 6, fontSize: 13, marginBottom: 12 }}>
+              Drift exceeds {rebal.thresholdPct}% threshold. {rebal.suggestions.length} suggested move(s):
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {rebal.suggestions.map((s, i) => (
+                <div key={i} style={{ padding: 10, background: 'var(--bg-soft)', borderRadius: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>
+                    <span style={{
+                      padding: '2px 8px', fontSize: 10, fontWeight: 600, borderRadius: 4,
+                      background: s.action === 'INCREASE' ? 'var(--up)' : 'var(--down)',
+                      color: 'white', marginRight: 8,
+                    }}>{s.action}</span>
+                    <b>{s.bucket}</b> by ₹{(s.amountINR || 0).toLocaleString('en-IN')}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 4 }}>{s.suggestedHow || s.rationale}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 10, fontSize: 11, color: 'var(--text-3)' }}>
+              Total portfolio: ₹{(rebal.total || 0).toLocaleString('en-IN')}.
+              Current: emergency {rebal.current.emergency}% · short {rebal.current.shortTerm}% · long {rebal.current.longTerm}%.
+            </div>
+          </>
         )}
       </div>
 
