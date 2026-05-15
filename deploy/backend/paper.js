@@ -82,31 +82,38 @@ class PaperTrading {
     }, 2000).unref();
   }
 
-  placeOrder({ symbol, side, qty, type, price, strategy }) {
+  placeOrder({ symbol, side, qty, type, price, triggerPrice, strategy }) {
     if (!symbol || typeof symbol !== 'string') throw new Error('symbol required');
     side = String(side || '').toUpperCase();
     if (side !== 'BUY' && side !== 'SELL') throw new Error('side must be BUY or SELL');
     type = String(type || 'MARKET').toUpperCase();
-    if (type !== 'MARKET' && type !== 'LIMIT') throw new Error('type must be MARKET or LIMIT');
+    // Tier 23: support SL (stop-loss limit) and SL-M (stop-loss market) order types.
+    const VALID = ['MARKET', 'LIMIT', 'SL', 'SL-M'];
+    if (!VALID.includes(type)) throw new Error('type must be one of: ' + VALID.join(', '));
     const q = Math.floor(Number(qty));
     if (!Number.isFinite(q) || q <= 0) throw new Error('qty must be > 0');
-    let p = null;
-    if (type === 'LIMIT') {
+    let p = null, tp = null;
+    if (type === 'LIMIT' || type === 'SL') {
       p = Number(price);
-      if (!Number.isFinite(p) || p <= 0) throw new Error('LIMIT order needs price > 0');
+      if (!Number.isFinite(p) || p <= 0) throw new Error(type + ' order needs price > 0');
+    }
+    if (type === 'SL' || type === 'SL-M') {
+      tp = Number(triggerPrice);
+      if (!Number.isFinite(tp) || tp <= 0) throw new Error(type + ' order needs triggerPrice > 0');
     }
     const strat = (strategy && typeof strategy === 'string') ? strategy.trim().slice(0, 64) : null;
     const order = {
       id: crypto.randomUUID(),
       symbol: symbol.trim(),
-      side, qty: q, type, price: p,
+      side, qty: q, type,
+      price: p, triggerPrice: tp,
       strategy: strat,
       status: 'PENDING',
       createdAt: new Date().toISOString(),
       filledAt: null, filledPrice: null,
     };
     this._orders.push(order);
-    this.audit('paper.order.placed', { id: order.id, symbol: order.symbol, side, qty: q, type, price: p, strategy: strat });
+    this.audit('paper.order.placed', { id: order.id, symbol: order.symbol, side, qty: q, type, price: p, triggerPrice: tp, strategy: strat });
     this._schedulePersist();
     return order;
   }
@@ -122,20 +129,44 @@ class PaperTrading {
     return { cancelled: true, order: o };
   }
 
-  /** Hot path -- called on every tick from the broker fan-out. */
+  /** Hot path -- called on every tick from the broker fan-out.
+   *  Tier 23: added SL + SL-M handling and a small slippage model on aggressive fills. */
   onTick(tick) {
     if (!tick || typeof tick.symbol !== 'string' || typeof tick.ltp !== 'number') return;
     let changed = false;
     for (const o of this._orders) {
       if (o.status !== 'PENDING' || o.symbol !== tick.symbol) continue;
       let fillPrice = null;
+      let isAggressive = false; // MARKET or SL-M fills cross the spread
       if (o.type === 'MARKET') {
         fillPrice = tick.ltp;
+        isAggressive = true;
       } else if (o.type === 'LIMIT') {
         if (o.side === 'BUY'  && tick.ltp <= o.price) fillPrice = o.price;
         if (o.side === 'SELL' && tick.ltp >= o.price) fillPrice = o.price;
+      } else if (o.type === 'SL') {
+        // Stop-loss limit: once trigger is breached, become a LIMIT at \`price\`.
+        // BUY-SL is used to cap an upward break (trigger ABOVE current price).
+        // SELL-SL is used to cap a downward break (trigger BELOW current price).
+        if (o.side === 'BUY'  && tick.ltp >= o.triggerPrice) {
+          // limit to o.price; fills only if market then comes back to <= price
+          if (tick.ltp <= o.price) fillPrice = o.price;
+        }
+        if (o.side === 'SELL' && tick.ltp <= o.triggerPrice) {
+          if (tick.ltp >= o.price) fillPrice = o.price;
+        }
+      } else if (o.type === 'SL-M') {
+        // Stop-loss market: once trigger is breached, become a MARKET order.
+        if (o.side === 'BUY'  && tick.ltp >= o.triggerPrice) { fillPrice = tick.ltp; isAggressive = true; }
+        if (o.side === 'SELL' && tick.ltp <= o.triggerPrice) { fillPrice = tick.ltp; isAggressive = true; }
       }
       if (fillPrice == null) continue;
+      // Tier 23: slippage model -- aggressive fills (MARKET, SL-M) cost 5 bps of price worse for the taker.
+      if (isAggressive) {
+        const slipBps = Number(process.env.PAPER_SLIPPAGE_BPS || 0);  // Tier 23: opt-in via env
+        const slip = fillPrice * (slipBps / 10000);
+        fillPrice = o.side === 'BUY' ? fillPrice + slip : fillPrice - slip;
+      }
       this._fill(o, fillPrice);
       changed = true;
     }

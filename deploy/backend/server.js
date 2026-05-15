@@ -37,6 +37,7 @@ const { SweepEngine }  = require('./sweep');
 const { LongTerm }     = require('./longterm');
 const { Wealth }       = require('./wealth');
 const { MPT }          = require('./mpt');
+const { Rebalance }    = require('./rebalance');
 const { runPreflight } = require('./preflight');
 const csvImport        = require('./csv-import');
 
@@ -90,7 +91,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, rebalance;
 
 async function init() {
   broker = createBroker(process.env);
@@ -184,6 +185,9 @@ async function init() {
 
   // Tier 22: MPT optimiser (Monte Carlo on small universes).
   mpt = new MPT();
+
+  // Tier 23: bucket-target rebalancing engine.
+  rebalance = new Rebalance();
 
   if (BROKER_NAME === 'zerodha') {
     if (!fs.existsSync(MASTER_KEY_PATH)) {
@@ -2055,6 +2059,48 @@ app.post('/api/portfolio/optimize', (req, res) => {
   if (!mpt) return res.status(503).json({ ok:false, reason:'mpt_not_initialized' });
   try {
     const out = mpt.optimize(req.body || {});
+    res.json(out);
+  } catch (e) {
+    res.status(400).json({ ok:false, reason:e.message });
+  }
+});
+
+// Tier 23: rebalance suggestions. Auto-derives buckets + holdings + paper equity + cash if not in body.
+app.post('/api/rebalance', async (req, res) => {
+  if (!rebalance) return res.status(503).json({ ok:false, reason:'rebalance_not_initialized' });
+  try {
+    const body = req.body || {};
+    let buckets = body.buckets;
+    if (!buckets && longterm) buckets = longterm.getBuckets();
+    if (!buckets) return res.status(400).json({ ok:false, reason:'no buckets supplied or initialized' });
+
+    let holdingsValueINR = Number(body.holdingsValueINR);
+    let paperEquityINR   = Number(body.paperEquityINR);
+    let cashINR          = Number(body.cashINR);
+
+    if (!Number.isFinite(holdingsValueINR)) {
+      try {
+        const hs = await broker.getHoldings();
+        holdingsValueINR = (hs || []).reduce((s, h) => s + (h.quantity || 0) * (h.last_price || h.ltp || 0), 0);
+      } catch (_e) { holdingsValueINR = 0; }
+    }
+    if (!Number.isFinite(paperEquityINR) && paper) {
+      const ps = paper.stats() || {};
+      paperEquityINR = ps.totalEquity || 0;
+    }
+    if (!Number.isFinite(cashINR) && paper) {
+      const ps = paper.stats() || {};
+      // Use cash sitting in paper trading as a rough proxy for emergency funds.
+      cashINR = ps.cash || 0;
+    }
+
+    const out = rebalance.suggest({
+      buckets,
+      holdingsValueINR: holdingsValueINR || 0,
+      paperEquityINR:   paperEquityINR   || 0,
+      cashINR:          cashINR          || 0,
+      thresholdPct:     body.thresholdPct,
+    });
     res.json(out);
   } catch (e) {
     res.status(400).json({ ok:false, reason:e.message });
