@@ -1857,17 +1857,34 @@ app.get('/api/orders', async (req, res) => {
   }
 });
 
-app.get('/api/profile', async (_req, res) => {
+// Tier 63: helper to pick user's broker if authenticated+connected, else fall back to global.
+// Keeps unauthenticated callers working (returns the admin broker), authenticated callers
+// get their own. Returns null only if even the global broker is unavailable.
+async function pickBroker(req) {
   try {
-    res.json({ ok: true, profile: await broker.getProfile() });
+    if (req.user && req.user.id && _brokerResolver) {
+      const r = await _brokerResolver.resolveForRequest({ db, vault, globalBroker: null, fallbackToGlobal: false }, req);
+      if (r.broker) return { broker: r.broker, isUserOwn: true };
+    }
+  } catch (_) {}
+  return { broker: broker || null, isUserOwn: false };
+}
+
+app.get('/api/profile', async (req, res) => {
+  try {
+    const p = await pickBroker(req);
+    if (!p.broker) return res.status(503).json({ ok: false, reason: 'broker_unavailable' });
+    res.json({ ok: true, profile: await p.broker.getProfile(), isUserOwn: p.isUserOwn });
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
   }
 });
 
-app.get('/api/margins', async (_req, res) => {
+app.get('/api/margins', async (req, res) => {
   try {
-    res.json({ ok: true, margins: await broker.getMargins() });
+    const p = await pickBroker(req);
+    if (!p.broker) return res.status(503).json({ ok: false, reason: 'broker_unavailable' });
+    res.json({ ok: true, margins: await p.broker.getMargins(), isUserOwn: p.isUserOwn });
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
   }
@@ -2658,7 +2675,8 @@ app.post('/api/rebalance', async (req, res) => {
 
     if (!Number.isFinite(holdingsValueINR)) {
       try {
-        const hs = await broker.getHoldings();
+        const p = await pickBroker(req);
+        const hs = p.broker ? await p.broker.getHoldings() : [];
         holdingsValueINR = (hs || []).reduce((s, h) => s + (h.quantity || 0) * (h.last_price || h.ltp || 0), 0);
       } catch (_e) { holdingsValueINR = 0; }
     }
@@ -3026,14 +3044,15 @@ app.post('/api/orders/confirm-2fa/:token', async (req, res) => {
   if (!c.ok) {
     return res.status(c.reason === 'expired' ? 410 : 404).json({ ok:false, reason: c.reason });
   }
-  if (typeof broker.placeOrder !== 'function') {
+  const p = await pickBroker(req);
+  if (!p.broker || typeof p.broker.placeOrder !== 'function') {
     audit('order.2fa.blocked.notImplemented', { token });
     return res.status(501).json({ ok:false, reason:'PLACE_ORDER_NOT_IMPLEMENTED' });
   }
-  audit('order.2fa.placing', { token, clientOrderId: c.payload && c.payload.clientOrderId });
+  audit('order.2fa.placing', { token, clientOrderId: c.payload && c.payload.clientOrderId, isUserOwn: p.isUserOwn });
   try {
     _orderRateRecord();
-    const result = await broker.placeOrder(c.payload);
+    const result = await p.broker.placeOrder(c.payload);
     audit('order.placed.viaTwoFactor', { clientOrderId: c.payload.clientOrderId, result });
     res.json({ ok:true, confirmed:true, clientOrderId: c.payload.clientOrderId, ...result });
   } catch (err) {
@@ -3069,12 +3088,13 @@ app.post('/api/orders/cancel', async (req, res) => {
   if (!orderId) return res.status(400).json({ ok: false, reason: 'missing:orderId' });
   if (KILL_SWITCH)  { audit('order.cancel.blocked.killSwitch', { orderId }); return res.status(503).json({ ok:false, reason:'KILL_SWITCH_ON' }); }
   if (!LIVE_TRADING){ audit('order.cancel.blocked.liveTradingDisabled', { orderId }); return res.status(503).json({ ok:false, reason:'LIVE_TRADING_DISABLED' }); }
-  if (typeof broker.cancelOrder !== 'function') {
+  const p = await pickBroker(req);
+  if (!p.broker || typeof p.broker.cancelOrder !== 'function') {
     audit('order.cancel.blocked.notImplemented', { orderId });
     return res.status(501).json({ ok: false, reason: 'CANCEL_ORDER_NOT_IMPLEMENTED' });
   }
   try {
-    const r = await broker.cancelOrder({ orderId, variety });
+    const r = await p.broker.cancelOrder({ orderId, variety });
     audit('order.cancelled', { orderId, result: r });
     res.json({ ok: true, ...r });
   } catch (e) {
