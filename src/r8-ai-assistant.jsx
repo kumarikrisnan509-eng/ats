@@ -184,7 +184,7 @@ const TodaysPlan = () => {
       try {
         const [scan, exp, paper, sweep, profile] = await Promise.all([
           window.fetchApi('/api/scanner/history?limit=300').catch(() => null),
-          window.fetchApi('/api/expiries?underlying=NIFTY').catch(() => null),
+          window.fetchApi('/api/option-expiries?underlying=NIFTY').catch(() => null),
           window.fetchApi('/api/paper').catch(() => null),
           window.fetchApi('/api/sweep/evaluate').catch(() => null),
           window.fetchApi('/api/profile').catch(() => null),

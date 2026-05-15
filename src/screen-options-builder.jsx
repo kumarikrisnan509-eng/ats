@@ -2,7 +2,7 @@
 /* Options payoff builder — visual P&L diagram with Greeks */
 
 const OptionsBuilderScreen = () => {
-  // ---- live /api/expiries + /api/option-chain ----
+  // ---- live /api/option-expiries + /api/option-chain ----
   const [liveExpiries, setLiveExpiries] = React.useState(null);
   const [liveChain, setLiveChain] = React.useState(null);
   React.useEffect(() => {
@@ -10,7 +10,7 @@ const OptionsBuilderScreen = () => {
     let cancelled = false;
     (async () => {
       try {
-        const d = await window.fetchApi('/api/expiries?underlying=NIFTY');
+        const d = await window.fetchApi('/api/option-expiries?underlying=NIFTY');
         if (!cancelled && d && d.ok) {
           setLiveExpiries(d.expiries || []);
           // Fetch chain for nearest expiry

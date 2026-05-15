@@ -3,14 +3,14 @@
    Critical for tax filing and catching any order/fill/fee discrepancy. */
 
 const ReconScreen = () => {
-  // ---- live /api/recon ----
+  // ---- live /api/reconcile ----
   const [liveRecon, setLiveRecon] = React.useState(null);
   React.useEffect(() => {
     if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
     let cancelled = false;
     (async () => {
       try {
-        const d = await window.fetchApi('/api/recon');
+        const d = await window.fetchApi('/api/reconcile');
         if (!cancelled && d && d.ok) setLiveRecon(d);
       } catch (e) {}
     })();
