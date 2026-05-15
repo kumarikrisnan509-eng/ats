@@ -390,6 +390,23 @@ const DashboardScreen = () => {
   // Tier 8: live dashboard metrics
   const [liveDash, setLiveDash] = React.useState(null);
   const [liveProfile, setLiveProfile] = React.useState(null);
+
+  // Tier 60: per-user summary aggregator -- single endpoint replaces 4 hardcoded fallbacks.
+  const [liveSummary, setLiveSummary] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const r = await fetch('/api/me/dashboard-summary', { credentials: 'include' });
+        if (cancelled) return;
+        if (r.status === 200) setLiveSummary(await r.json());
+        else if (r.status === 401) setLiveSummary({ ok: false, reason: 'auth_required' });
+      } catch (e) {}
+    };
+    load();
+    const id = setInterval(load, 30000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
   React.useEffect(() => {
     if (demo) return;
     let cancelled = false;
@@ -645,33 +662,59 @@ const DashboardScreen = () => {
       {/* Today's run — live heartbeat */}
       <TodaysRun/>
 
-      {/* KPI row */}
+      {/* KPI row -- Tier 60: every number derived from /api/me/dashboard-summary. No mock fallbacks. */}
       <div className="grid grid-4" style={{ marginBottom: 16 }}>
-        <Card>
-          <Stat label="Portfolio value" value={inrCompact((liveDash && liveDash.portfolioValue) || 4827340)} delta={pct((liveDash && liveDash.portfolioPnlPct) || 2.14)} deltaKind={(liveDash && liveDash.portfolioPnl >= 0) ? "up" : "down"} sub={liveDash ? (liveDash.holdingsCount + " holdings") : "today"}/>
-          <div style={{ marginTop: 10 }}>
-            <LiveSparkline symbol="NIFTY" seed={1} color="var(--up)"/>
-          </div>
-        </Card>
-        <Card>
-          <Stat
-            label="Today's P&L"
-            value={<><CountUp value={((liveDash && liveDash.paperTotalPnl) || 18420) + livePnL.total} format={v => inr(Math.round(v))}/></>}
-            delta={pct((18420 + livePnL.total) / 4827340 * 100)}
-            deltaKind={(18420 + livePnL.total) >= 0 ? "up" : "down"}
-            sub={<>realized + MTM <StaleIndicator/></>}/>
-          <div style={{ marginTop: 10 }}>
-            <LiveSparkline symbol="BANKNIFTY" seed={2} color="var(--up)"/>
-          </div>
-        </Card>
-        <Card>
-          <Stat label="Deployed capital" value={inrCompact((liveDash && liveDash.paperEquity) || 2840000)} delta={liveDash ? "paper" : "59%"} deltaKind="muted" sub={liveDash ? "totalEquity" : "of INR 48.3L"}/>
-          <div style={{ marginTop: 14 }}><Progress value={59} kind="info"/></div>
-        </Card>
-        <Card>
-          <Stat label="Win rate (30d)" value={(liveDash && liveDash.winRate != null) ? (liveDash.winRate.toFixed(1) + "%") : "64.2%"} delta={(liveDash && liveDash.totalTrades != null) ? (liveDash.totalTrades + " trades") : "+3.1pp"} deltaKind="up" sub={liveDash ? "paper trades" : "vs 30-d ago"}/>
-          <div style={{ marginTop: 14 }}><Progress value={(liveDash && liveDash.winRate != null) ? Math.max(0, Math.min(100, liveDash.winRate)) : 64.2} kind="up"/></div>
-        </Card>
+        {(() => {
+          const ds = liveSummary;
+          const hasData = ds && ds.ok;
+          const brokerOn = hasData && ds.brokerConnected;
+          const fmt = (v) => (v == null || isNaN(v)) ? "--" : inrCompact(v);
+          const pctFmt = (v) => (v == null || isNaN(v)) ? "--" : pct(v);
+          return (
+            <>
+              <Card>
+                <Stat
+                  label="Portfolio value"
+                  value={brokerOn ? fmt(ds.portfolioValue) : "--"}
+                  delta={brokerOn ? pctFmt(ds.portfolioPnlPct) : "no broker"}
+                  deltaKind={brokerOn && ds.portfolioPnl >= 0 ? "up" : (brokerOn ? "down" : "muted")}
+                  sub={brokerOn ? (ds.holdingsCount + " holdings") : "Connect Zerodha to see live data"}/>
+                <div style={{ marginTop: 10 }}><LiveSparkline symbol="NIFTY" seed={1} color="var(--up)"/></div>
+              </Card>
+              <Card>
+                <Stat
+                  label="Today's P&L"
+                  value={hasData ? <CountUp value={(ds.todayPnl || 0) + livePnL.total} format={v => inr(Math.round(v))}/> : "--"}
+                  delta={hasData && ds.portfolioValue > 0 ? pct(((ds.todayPnl || 0) + livePnL.total) / ds.portfolioValue * 100) : "--"}
+                  deltaKind={hasData && ((ds.todayPnl || 0) + livePnL.total) >= 0 ? "up" : "down"}
+                  sub={<>realized + MTM <StaleIndicator/></>}/>
+                <div style={{ marginTop: 10 }}><LiveSparkline symbol="BANKNIFTY" seed={2} color="var(--up)"/></div>
+              </Card>
+              <Card>
+                <Stat
+                  label="Deployed capital"
+                  value={hasData ? fmt(ds.deployedCapital) : "--"}
+                  delta={hasData && ds.initialCapital > 0 ? `${((ds.deployedCapital / ds.initialCapital) * 100).toFixed(0)}%` : "--"}
+                  deltaKind="muted"
+                  sub={hasData ? `of ${inrCompact(ds.initialCapital)} initial` : "Set capital in onboarding"}/>
+                <div style={{ marginTop: 14 }}>
+                  <Progress value={hasData && ds.initialCapital > 0 ? Math.min(100, (ds.deployedCapital / ds.initialCapital) * 100) : 0} kind="info"/>
+                </div>
+              </Card>
+              <Card>
+                <Stat
+                  label="Win rate (30d)"
+                  value={hasData && ds.winRate30d != null ? (ds.winRate30d.toFixed(1) + "%") : "--"}
+                  delta={hasData ? (ds.totalTrades30d + " trades") : "no trades yet"}
+                  deltaKind="up"
+                  sub={hasData ? "paper trades last 30d" : "Place your first paper trade"}/>
+                <div style={{ marginTop: 14 }}>
+                  <Progress value={hasData && ds.winRate30d != null ? Math.max(0, Math.min(100, ds.winRate30d)) : 0} kind="up"/>
+                </div>
+              </Card>
+            </>
+          );
+        })()}
       </div>
 
       {/* Pipeline flow diagram — how trades move through the system */}

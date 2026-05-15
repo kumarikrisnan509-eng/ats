@@ -2325,6 +2325,69 @@ app.get('/api/me/pnl', withAuth((req, res) => {
   res.json({ ok:true, rows: db.pnl.recent(req.user.id, n) });
 }));
 
+// ---------- Tier 60: per-user dashboard summary aggregator ----------
+app.get('/api/me/dashboard-summary', withAuth(async (req, res) => {
+  try {
+    const uid = req.user.id;
+    const out = {
+      brokerConnected: false,
+      portfolioValue: 0, portfolioPnl: 0, portfolioPnlPct: 0, portfolioInvested: 0,
+      holdingsCount: 0,
+      todayPnl: 0, paperRealized: 0, paperUnrealized: 0,
+      deployedCapital: 0, initialCapital: 0,
+      cashPaper: 0,
+      winRate30d: null, totalTrades30d: 0, totalWins30d: 0,
+      asOf: new Date().toISOString(),
+    };
+    try {
+      const r = await _brokerResolver.resolveForRequest({ db, vault, globalBroker: null, fallbackToGlobal: false }, req);
+      if (r.broker) {
+        out.brokerConnected = true;
+        const holdings = await r.broker.getHoldings();
+        const rows = Array.isArray(holdings) ? holdings : [];
+        out.holdingsCount = rows.length;
+        for (const h of rows) {
+          const qty = Number(h.quantity || h.qty || 0);
+          const ltp = Number(h.ltp || h.last_price || h.lastPrice || 0);
+          const avg = Number(h.average_price || h.avgPrice || h.avg_price || 0);
+          const pnl = Number(h.pnl || h.unrealised || 0) || ((ltp - avg) * qty);
+          out.portfolioValue    += qty * ltp;
+          out.portfolioInvested += qty * avg;
+          out.portfolioPnl      += pnl;
+        }
+        if (out.portfolioInvested > 0) {
+          out.portfolioPnlPct = (out.portfolioPnl / out.portfolioInvested) * 100;
+        }
+      }
+    } catch (e) { /* per-user holdings failed; leave zeros */ }
+    const paper = db.paper.getState(uid);
+    if (paper) {
+      out.cashPaper      = Number(paper.cash || 0);
+      out.initialCapital = Number(paper.initial_capital || 0);
+      out.paperRealized  = Number(paper.realized_pnl || 0);
+      const positions   = db.paper.listPositions(uid) || [];
+      out.paperUnrealized = 0;
+      out.todayPnl        = out.paperRealized + out.paperUnrealized;
+      out.deployedCapital = Math.max(0,
+        (out.initialCapital - out.cashPaper) +
+        positions.reduce((s, p) => s + (p.qty * p.avg_price), 0));
+    }
+    try {
+      const rows30 = db._conn.prepare(
+        "SELECT pnl FROM paper_closed_trades WHERE user_id = ? AND exited_at >= datetime('now','-30 days')"
+      ).all(uid);
+      out.totalTrades30d = rows30.length;
+      out.totalWins30d = rows30.filter(r => Number(r.pnl) > 0).length;
+      if (out.totalTrades30d > 0) {
+        out.winRate30d = (out.totalWins30d / out.totalTrades30d) * 100;
+      }
+    } catch (e) { /* empty for new users */ }
+    res.json({ ok: true, ...out });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: 'summary_failed', detail: e.message });
+  }
+}));
+
 // ---------- Tier 57: per-user broker credentials ----------
 // Lazy-mount so we wait until vault is ready (vault.open is async, but route
 // registration runs synchronously at module load). On first request, if the
