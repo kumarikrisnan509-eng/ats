@@ -40,6 +40,7 @@ const { MPT }          = require('./mpt');
 const { FactorTilt }   = require('./factor-tilt');
 const { WormAudit }    = require('./worm-audit');
 const { SpanSim }      = require('./span-sim');
+const { buildIpAllowlist } = require('./ip-allowlist');
 const { Rebalance }    = require('./rebalance');
 const { Replay }       = require('./replay');
 const { EmailAlerts }  = require('./email-alerts');
@@ -275,6 +276,14 @@ app.use((req, _res, next) => {
   console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
   next();
 });
+
+// ---------- Tier 35: static IP allowlist (SEBI access-control compliance) ----------
+// Off by default. Set API_IP_WHITELIST env to a comma-separated CIDR list to enable.
+// Set API_IP_WHITELIST_MODE=audit to log-only without blocking (safe rollout).
+// Bypass list: /api/health and /api/brokers/zerodha/callback are always allowed
+// (uptime monitors + Kite OAuth redirect from kite.zerodha.com).
+const ipAllowlist = buildIpAllowlist({ audit: (e, d) => { try { audit(e, d); } catch (_) {} } });
+app.use(ipAllowlist);
 
 // ---------- Rate limit (per-IP, in-memory, /api/* only) ----------
 // Loopback + Docker private networks are whitelisted (internal auto-login flows).
@@ -2166,6 +2175,14 @@ app.get('/api/audit/tail', (req, res) => {
   if (!wormAudit) return res.status(503).json({ ok:false, reason:'worm_not_initialized' });
   try { res.json({ ok:true, entries: wormAudit.tail(Number(req.query.n) || 100) }); }
   catch (e) { res.status(500).json({ ok:false, reason:e.message }); }
+});
+
+// ---------- Tier 35: IP allowlist state (for the Brokers/Compliance UI) ----------
+app.get('/api/security/ip-allowlist', (_req, res) => {
+  if (!ipAllowlist || typeof ipAllowlist.state !== 'function') {
+    return res.status(503).json({ ok:false, reason:'ip_allowlist_not_initialized' });
+  }
+  res.json({ ok:true, ...ipAllowlist.state() });
 });
 
 // Tier 23: rebalance suggestions. Auto-derives buckets + holdings + paper equity + cash if not in body.
