@@ -615,7 +615,7 @@ const DashboardScreen = () => {
     <>
       <div className="page-header">
         <div>
-          <h1 className="page-header__title" style={{ fontSize: 24, marginBottom: 4 }}>Welcome back, {liveProfile && liveProfile.userName ? liveProfile.userName.split(' ')[0] : 'Rajasekar'} · <span className="muted" style={{ fontWeight: 400 }}>{fmtDate()}</span></h1>
+          <h1 className="page-header__title" style={{ fontSize: 24, marginBottom: 4 }}>Welcome back, {(window.atsCurrentUser && window.atsCurrentUser.name) ? window.atsCurrentUser.name.split(' ')[0] : 'trader'} · <span className="muted" style={{ fontWeight: 400 }}>{fmtDate()}</span></h1>
           <div className="page-header__sub">{demo ? "Demo mode · clean slate · no live data" : (() => {
             const status = (typeof window.marketStatus === 'function') ? window.marketStatus() : { open:false, label:'' };
             const market = status.open ? 'Markets are live' : (status.label ? `Markets ${status.label.toLowerCase()}` : 'Markets closed');
@@ -929,4 +929,4 @@ const DashboardScreenWithModals = (props) => {
   return <DashboardScreen {...props}/>;
 };
 
-Object.assign(window, { DashboardScreen });
+Object.assign(window, {

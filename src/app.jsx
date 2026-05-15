@@ -59,6 +59,9 @@ function App() {
   const persist = (s) => { try { localStorage.setItem("rc_session", JSON.stringify(s)); } catch (_) {} setSession(s); };
 
   // Boot probe: ask the server who we are. If 401, drop to login screen.
+  // Tier 59: also expose user globally + broker connection status so screens
+  // can read the logged-in user's name (NOT the broker's account holder) and
+  // demo banners can gate on auth state.
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -68,8 +71,21 @@ function App() {
         if (r.status === 200) {
           const j = await r.json();
           persist({ authed: true, onboarded: true, user: j.user });
+          window.atsCurrentUser = j.user;
+          // Also probe broker connection so banners can decide demo vs live
+          fetch('/api/me/broker', { credentials: 'include' })
+            .then(rr => rr.ok ? rr.json() : null)
+            .then(b => {
+              window.atsBrokerStatus = b && b.brokers && b.brokers.length > 0
+                ? { connected: true, hasAccessToken: !!b.brokers[0].has_access_token, broker: b.brokers[0] }
+                : { connected: false };
+              window.dispatchEvent(new CustomEvent('ats-auth-changed', { detail: { user: j.user, broker: window.atsBrokerStatus } }));
+            }).catch(() => {});
         } else {
           persist({ authed: false, onboarded: false });
+          window.atsCurrentUser = null;
+          window.atsBrokerStatus = { connected: false };
+          window.dispatchEvent(new CustomEvent('ats-auth-changed', { detail: { user: null } }));
         }
       } catch (_) { /* network blip; keep cached state */ }
     })();
@@ -240,31 +256,4 @@ function App() {
                 ["G P", "Portfolio"], ["G R", "Risk"], ["G A", "Audit trail"],
                 ["G B", "Backtest"], ["G N", "News"], ["G M", "Modes"], ["G G", "Goals"],
               ].map(([k, l]) => (
-                <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0" }}>
-                  <span style={{ color: "var(--text-2)" }}>{l}</span>
-                  <span style={{ fontFamily: "var(--mono)", background: "var(--bg-soft)", padding: "2px 8px", borderRadius: 4, fontSize: 11 }}>{k}</span>
-                </div>
-              ))}
-            </div>
-            <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ display: "flex", gap: 6 }}>
-                <span style={{ fontSize: 12, color: "var(--text-3)" }}>Density:</span>
-                {["compact","comfortable","spacious"].map(d => (
-                  <button key={d} onClick={() => setDensity(d)} style={{
-                    fontSize: 11, padding: "3px 8px", borderRadius: 4,
-                    background: density === d ? "var(--accent)" : "var(--bg-soft)",
-                    color: density === d ? "white" : "var(--text-2)",
-                    border: "1px solid var(--border)",
-                  }}>{d}</button>
-                ))}
-              </div>
-              <button onClick={() => setShortcutsOpen(false)} style={{ fontSize: 11, color: "var(--text-3)" }}>Close (Esc)</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+                <div key={k} style={{ display: "flex", justifyContent: "space-between
