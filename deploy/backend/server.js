@@ -2326,23 +2326,28 @@ app.get('/api/me/pnl', withAuth((req, res) => {
 }));
 
 // ---------- Tier 57: per-user broker credentials ----------
-// Mounted as a sub-router so it can use express.Router(), middleware, and its own JSON limit.
-// The router internally uses auth.requireAuth -- which is auth.optionalAuth + 401 fallback.
-try {
-  if (db && auth && vault) {
-    const { createMeBrokerRouter } = require('./me-broker');
-    app.use('/api/me/broker', createMeBrokerRouter({ db, vault, requireAuth: auth.requireAuth }));
-  } else {
-    // Without DB/auth/vault wired, register a friendly 503 placeholder so the UI knows what's wrong.
-    app.use('/api/me/broker', (_req, res) => res.status(503).json({
+// Lazy-mount so we wait until vault is ready (vault.open is async, but route
+// registration runs synchronously at module load). On first request, if the
+// deps are ready we build + cache the router; otherwise return a 503.
+let _meBrokerRouter = null;
+app.use('/api/me/broker', (req, res, next) => {
+  try {
+    if (_meBrokerRouter) return _meBrokerRouter(req, res, next);
+    if (db && auth && vault) {
+      const { createMeBrokerRouter } = require('./me-broker');
+      _meBrokerRouter = createMeBrokerRouter({ db, vault, requireAuth: auth.requireAuth });
+      return _meBrokerRouter(req, res, next);
+    }
+    return res.status(503).json({
       ok: false,
       reason: 'broker_storage_not_initialized',
-      detail: 'db/auth/vault unavailable -- check MASTER_KEY_PATH and SQLite mount',
-    }));
+      detail: 'vault/db/auth not yet ready -- retry in a moment',
+    });
+  } catch (e) {
+    console.error('[server] /api/me/broker mount error:', e && e.message);
+    return res.status(500).json({ ok: false, reason: 'mount_failed', detail: e.message });
   }
-} catch (e) {
-  console.error('[server] failed to mount /api/me/broker router:', e && e.message);
-}
+});
 
 // ---------- Tier 50/51: auth endpoints (signup, login, logout, verify, reset) ----------
 app.post('/api/auth/signup', async (req, res) => {
