@@ -338,49 +338,46 @@ const BacktestQueue = () => {
   );
 };
 
-// ============ #24 Copy-trading leaderboard ============
+// ============ #24 Copy-trading leaderboard -- Tier 15: demo-gated ============
+// Previously rendered hardcoded 'SEBI-verified track records' for fake traders.
+// Regulatory landmine per trading_platform_plan.md §0 (no guaranteed returns,
+// no impersonation). Until /api/leaderboard exists and is backed by audited
+// live-account performance, this is demo-mode-only.
 const Leaderboard = () => {
-  const traders = [
-    { rank: 1,  name: "Arjun Mehta",     handle: "@quant_arjun", cagr: 42.4, sharpe: 2.1, copiers: 1820, you: false },
-    { rank: 2,  name: "Sneha Reddy",     handle: "@sneha_alpha", cagr: 38.7, sharpe: 1.94, copiers: 1240, you: false },
-    { rank: 18, name: "You",             handle: "@rajasekar",   cagr: 24.1, sharpe: 1.42, copiers: 12,   you: true  },
-    { rank: 3,  name: "Vikram Iyer",     handle: "@v_iyer",      cagr: 36.2, sharpe: 1.78, copiers:  980, you: false },
-    { rank: 4,  name: "Priya Kapoor",    handle: "@priya_kap",   cagr: 33.5, sharpe: 1.61, copiers:  720, you: false },
-    { rank: 5,  name: "Karthik Nair",    handle: "@k_nair",      cagr: 29.8, sharpe: 1.55, copiers:  640, you: false },
-  ].sort((a, b) => a.rank - b.rank);
-  return (
-    <div className="card card--flush">
-      <div className="card__head" style={{ padding: "16px 20px 0" }}>
-        <div>
-          <div className="card__title">Public leaderboard · 12-month</div>
-          <div className="card__sub">SEBI-verified track records · risk-adjusted ranking</div>
-        </div>
-        <div className="segmented">
-          <button className="on">12m</button><button>3m</button><button>YTD</button>
+  const [demo] = window.useDemoMode ? window.useDemoMode() : [false];
+  if (!demo) {
+    return (
+      <div className="card" style={{ padding: 16 }}>
+        <div className="card__title">Leaderboard</div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+          Coming soon. Verified-track-record rankings require live-broker integration
+          with our empanelment partner. Enable Demo mode in your profile menu to preview the planned UI.
         </div>
       </div>
-      <table className="table" style={{ marginTop: 12 }}>
-        <thead>
-          <tr><th style={{ width: 60 }}>Rank</th><th>Trader</th><th className="num">CAGR</th><th className="num">Sharpe</th><th className="num">Copiers</th><th></th></tr>
-        </thead>
-        <tbody>
-          {traders.map(t => (
-            <tr key={t.rank} style={{ background: t.you ? "var(--accent-soft)" : "" }}>
-              <td className="mono" style={{ fontWeight: 600 }}>#{t.rank}</td>
-              <td>
-                <div style={{ fontWeight: t.you ? 600 : 500 }}>{t.name} {t.you && <span className="pill pill--acc" style={{ marginLeft: 6, fontSize: 9 }}>YOU</span>}</div>
-                <div className="muted mono" style={{ fontSize: 11 }}>{t.handle}</div>
-              </td>
-              <td className="num up">{t.cagr.toFixed(1)}%</td>
-              <td className="num">{t.sharpe.toFixed(2)}</td>
-              <td className="num">{t.copiers.toLocaleString("en-IN")}</td>
-              <td style={{ textAlign: "right" }}>
-                {!t.you && <button className="btn btn--sm">Copy</button>}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    );
+  }
+  const traders = [
+    { rank: 1, name: "Demo User A", handle: "@demo_a", monthlyPct: 8.4 },
+    { rank: 2, name: "Demo User B", handle: "@demo_b", monthlyPct: 7.1 },
+    { rank: 3, name: "Demo User C", handle: "@demo_c", monthlyPct: 5.8 },
+  ];
+  return (
+    <div className="card">
+      <div className="card__head">
+        <div>
+          <div className="card__title">Leaderboard (demo preview)</div>
+          <div className="card__sub">Not a real ranking · no SEBI verification</div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+        {traders.map(t => (
+          <div key={t.handle} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderTop: '1px solid var(--border)' }}>
+            <span className="mono muted" style={{ width: 24 }}>#{t.rank}</span>
+            <span style={{ flex: 1, fontSize: 13 }}>{t.name} <span className="muted" style={{ fontSize: 11 }}>{t.handle}</span></span>
+            <span className="mono up" style={{ fontSize: 12 }}>+{t.monthlyPct}%</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };

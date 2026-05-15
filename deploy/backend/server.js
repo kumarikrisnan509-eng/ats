@@ -43,6 +43,11 @@ const KILL_SWITCH     = String(process.env.KILL_SWITCH || 'true').toLowerCase() 
 // Tier 11: even with KILL_SWITCH=false, live trading also requires LIVE_TRADING=true.
 // Two independent env gates so flipping one doesn't accidentally start real trading.
 const LIVE_TRADING    = String(process.env.LIVE_TRADING || 'false').toLowerCase() === 'true';
+// Tier 15: pre-trade risk-gate circuits. All values default to safe levels.
+const MAX_DAILY_LOSS_INR     = Number(process.env.MAX_DAILY_LOSS_INR     || 10000);   // halt new orders if today's paper realizedPnl <= -₹10k
+const MAX_ORDERS_PER_MIN     = Number(process.env.MAX_ORDERS_PER_MIN     || 30);      // per-user (today: global)
+const MAX_POSITION_SIZE_INR  = Number(process.env.MAX_POSITION_SIZE_INR  || 500000);  // qty*price cap per order (₹5L)
+const MAX_AGGREGATE_EXPOSURE = Number(process.env.MAX_AGGREGATE_EXPOSURE || 2000000); // sum(holdings + open paper positions) cap (₹20L)
 const ENV_NAME        = process.env.ENV_NAME || 'dev';
 const AUDIT_LOG       = process.env.AUDIT_LOG || path.join(__dirname, 'audit.log');
 const MAX_WS_CLIENTS  = parseInt(process.env.MAX_WS_CLIENTS || '200', 10);
@@ -55,6 +60,19 @@ const DEFAULT_SYMBOLS = (process.env.DEFAULT_SYMBOLS || 'NIFTY 50,BANKNIFTY,RELI
 
 // ---------- Audit ----------
 let auditSeq = 0;
+// Tier 15: rolling-window order rate counter (in-memory, per-process).
+// On restart this resets, which is fine -- the cap is per-minute, not per-day.
+const _orderTimes = [];
+function _orderRateOk() {
+  const now = Date.now();
+  const cutoff = now - 60 * 1000;
+  while (_orderTimes.length && _orderTimes[0] < cutoff) _orderTimes.shift();
+  return _orderTimes.length < MAX_ORDERS_PER_MIN;
+}
+function _orderRateRecord() {
+  _orderTimes.push(Date.now());
+}
+
 function audit(event, data) {
   auditSeq += 1;
   try {
@@ -375,6 +393,15 @@ app.get('/api/system/info', (_req, res) => {
       tax:       tax       ? tax.stats()       : null,
       ai:        ai        ? ai.stats()        : null,
       sweep:     sweep     ? sweep.stats()     : null,
+      riskCaps: {
+        killSwitch: KILL_SWITCH,
+        liveTrading: LIVE_TRADING,
+        maxDailyLossINR: MAX_DAILY_LOSS_INR,
+        maxOrdersPerMin: MAX_ORDERS_PER_MIN,
+        maxPositionSizeINR: MAX_POSITION_SIZE_INR,
+        maxAggregateExposureINR: MAX_AGGREGATE_EXPOSURE,
+        ordersInWindow: _orderTimes.length,
+      },
     },
     auditLog: { path: AUDIT_LOG, sizeBytes: auditSize, lastWriteTs: auditLastTs, seq: auditSeq },
     config: {
@@ -1786,7 +1813,10 @@ const VALID_VALIDITY      = new Set(['DAY', 'IOC', 'TTL']);
 
 app.post('/api/orders/place', (req, res) => {
   const body = req.body || {};
-  const required = ['strategyTag', 'symbol', 'side', 'quantity', 'product', 'orderType'];
+  // Tier 15: SEBI Algo-ID is now required. Under the 1 Apr 2026 framework every
+  // algo-routed order must carry an exchange-issued Algo-ID. We require the caller
+  // to pass it explicitly -- the value comes from the broker after empanelment.
+  const required = ['strategyTag', 'algoId', 'symbol', 'side', 'quantity', 'product', 'orderType'];
   for (const k of required) {
     if (!(k in body)) return res.status(400).json({ ok: false, reason: `missing:${k}` });
   }
@@ -1818,9 +1848,12 @@ app.post('/api/orders/place', (req, res) => {
 
   const normalizedPayload = {
     strategyTag: String(body.strategyTag),
+    algoId:      String(body.algoId),
     symbol, exchange, side, quantity, product, orderType, variety, validity,
     price, triggerPrice: triggerPx,
     clientOrderId,
+    // Tier 15: rationale captured for audit trail (SEBI traceability)
+    rationale:   body.rationale ? String(body.rationale).slice(0, 500) : null,
   };
 
   // Hard safety: while kill-switch is on, NEVER route to broker. Just audit.
@@ -1848,6 +1881,45 @@ app.post('/api/orders/place', (req, res) => {
     });
   }
 
+  // Tier 15 pre-trade risk-gate #1: order-rate circuit
+  if (!_orderRateOk()) {
+    audit('order.blocked.rateLimit', { ...normalizedPayload, ordersInWindow: _orderTimes.length, capPerMin: MAX_ORDERS_PER_MIN });
+    return res.status(429).json({
+      ok: false,
+      reason: 'ORDER_RATE_LIMIT',
+      message: `Max ${MAX_ORDERS_PER_MIN} orders/minute exceeded. ${_orderTimes.length} already placed in the last 60s.`,
+      clientOrderId,
+    });
+  }
+
+  // Tier 15 pre-trade risk-gate #2: per-order notional size cap
+  const refPrice = Number(normalizedPayload.price || 0);
+  const orderNotional = refPrice > 0 ? refPrice * normalizedPayload.quantity : 0;
+  if (orderNotional > MAX_POSITION_SIZE_INR) {
+    audit('order.blocked.notionalCap', { ...normalizedPayload, orderNotional, capINR: MAX_POSITION_SIZE_INR });
+    return res.status(400).json({
+      ok: false,
+      reason: 'ORDER_NOTIONAL_TOO_LARGE',
+      message: `Order notional ₹${Math.round(orderNotional)} exceeds per-order cap ₹${MAX_POSITION_SIZE_INR}.`,
+      clientOrderId,
+    });
+  }
+
+  // Tier 15 pre-trade risk-gate #3: daily-loss circuit (uses paper realizedPnl as proxy today)
+  try {
+    const stats = paper ? paper.stats() : null;
+    const realizedToday = stats ? (stats.realizedPnl || 0) : 0;
+    if (realizedToday <= -Math.abs(MAX_DAILY_LOSS_INR)) {
+      audit('order.blocked.dailyLoss', { ...normalizedPayload, realizedToday, capINR: MAX_DAILY_LOSS_INR });
+      return res.status(503).json({
+        ok: false,
+        reason: 'MAX_DAILY_LOSS_HIT',
+        message: `Today's realized P&L ${realizedToday} has hit the daily-loss circuit (cap ₹${MAX_DAILY_LOSS_INR}). New live orders are blocked until tomorrow.`,
+        clientOrderId,
+      });
+    }
+  } catch (_e) {}
+
   if (typeof broker.placeOrder !== 'function') {
     audit('order.blocked.notImplemented', normalizedPayload);
     return res.status(501).json({
@@ -1860,6 +1932,7 @@ app.post('/api/orders/place', (req, res) => {
   }
 
   // Reserved for the future. Unreachable today.
+  _orderRateRecord();
   broker.placeOrder(normalizedPayload)
     .then((result) => {
       audit('order.placed', { clientOrderId, result });
