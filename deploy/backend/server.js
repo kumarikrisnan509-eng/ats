@@ -2404,6 +2404,11 @@ app.post('/api/orders/place', async (req, res) => {
   if (!Number.isFinite(quantity) || quantity <= 0) return res.status(400).json({ ok:false, reason:'quantity must be > 0' });
   if (orderType === 'LIMIT' && (!Number.isFinite(price) || price <= 0))
     return res.status(400).json({ ok:false, reason:'LIMIT order requires price > 0' });
+  if (product === 'BO') {
+    const sq = Number(body.squareoff || body.targetOffset || 0);
+    const sl = Number(body.stoploss || body.slOffset || 0);
+    if (sq <= 0 || sl <= 0) return res.status(400).json({ ok:false, reason:'BO requires squareoff (target offset) and stoploss (offset) > 0' });
+  }
   if ((orderType === 'SL' || orderType === 'SL-M') && (!Number.isFinite(triggerPx) || triggerPx <= 0))
     return res.status(400).json({ ok:false, reason:`${orderType} order requires triggerPrice > 0` });
 
@@ -2415,6 +2420,17 @@ app.post('/api/orders/place', async (req, res) => {
     symbol, exchange, side, quantity, product, orderType, variety, validity,
     price, triggerPrice: triggerPx,
     clientOrderId,
+    // Tier 45: BRACKET (BO) and Cover (CO) order extras. Zerodha's BO/CO products
+    // require these absolute-points fields. Accept them from the body OR derive
+    // from the offset shape the UI sends (Tier 33 Bracket builder).
+    ...(product === 'BO' ? {
+      squareoff:        Number(body.squareoff        || body.targetOffset || 0),
+      stoploss:         Number(body.stoploss         || body.slOffset     || 0),
+      trailing_stoploss:Number(body.trailing_stoploss || 0),
+    } : {}),
+    ...(product === 'CO' && triggerPx != null ? {
+      trigger_price: triggerPx,
+    } : {}),
     // Tier 15: rationale captured for audit trail (SEBI traceability)
     rationale:   body.rationale ? String(body.rationale).slice(0, 500) : null,
   };
