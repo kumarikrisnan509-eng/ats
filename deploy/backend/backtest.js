@@ -57,6 +57,14 @@ function runBacktest({ candles, strategy, params, qty }) {
     signal = signalOBV(candles, params);
   } else if (strategy === 'psar') {
     signal = signalPSAR(candles, params);
+  } else if (strategy === 'aroon') {
+    signal = signalAroon(candles, params);
+  } else if (strategy === 'cmf') {
+    signal = signalCMF(candles, params);
+  } else if (strategy === 'atr_trail') {
+    signal = signalATRTrail(candles, params);
+  } else if (strategy === 'ichimoku') {
+    signal = signalIchimoku(candles, params);
   } else {
     throw new Error(`unknown strategy: ${strategy}`);
   }
@@ -532,6 +540,115 @@ function signalPSAR(candles, params) {
   return out;
 }
 
+/** Aroon -- highest-high / lowest-low position over N periods.
+ *  Aroon Up = ((N - periods since highest high) / N) * 100.
+ *  BUY when Aroon Up crosses above Aroon Down. SELL when crosses below. */
+function signalAroon(candles, params) {
+  const period = params.period || 14;
+  const n = candles.length;
+  const aUp = new Array(n).fill(NaN);
+  const aDn = new Array(n).fill(NaN);
+  for (let i = period; i < n; i++) {
+    let maxIdx = i, minIdx = i;
+    for (let j = i - period; j <= i; j++) {
+      if (candles[j].high >= candles[maxIdx].high) maxIdx = j;
+      if (candles[j].low  <= candles[minIdx].low)  minIdx = j;
+    }
+    aUp[i] = ((period - (i - maxIdx)) / period) * 100;
+    aDn[i] = ((period - (i - minIdx)) / period) * 100;
+  }
+  const out = new Array(n).fill(null);
+  for (let i = period + 1; i < n; i++) {
+    if (!Number.isFinite(aUp[i]) || !Number.isFinite(aDn[i])) continue;
+    const crossUp   = aUp[i] > aDn[i] && aUp[i-1] <= aDn[i-1];
+    const crossDown = aUp[i] < aDn[i] && aUp[i-1] >= aDn[i-1];
+    if (crossUp)   out[i] = 'BUY';
+    if (crossDown) out[i] = 'SELL';
+  }
+  return out;
+}
+
+/** Chaikin Money Flow (CMF) -- volume-weighted accumulation/distribution.
+ *  BUY  when CMF crosses up through +threshold (default 0.05).
+ *  SELL when CMF crosses down through -threshold. */
+function signalCMF(candles, params) {
+  const period    = params.period    || 20;
+  const threshold = params.threshold || 0.05;
+  const n = candles.length;
+  const cmf = new Array(n).fill(NaN);
+  for (let i = period - 1; i < n; i++) {
+    let mfvSum = 0, volSum = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      const c = candles[j];
+      const range = c.high - c.low;
+      const mfm = range === 0 ? 0 : ((c.close - c.low) - (c.high - c.close)) / range;
+      const v = c.volume || 0;
+      mfvSum += mfm * v;
+      volSum += v;
+    }
+    cmf[i] = volSum === 0 ? 0 : mfvSum / volSum;
+  }
+  const out = new Array(n).fill(null);
+  for (let i = period + 1; i < n; i++) {
+    const cNow = cmf[i], cPrev = cmf[i - 1];
+    if (!Number.isFinite(cNow) || !Number.isFinite(cPrev)) continue;
+    if (cNow > threshold && cPrev <= threshold) out[i] = 'BUY';
+    if (cNow < -threshold && cPrev >= -threshold) out[i] = 'SELL';
+  }
+  return out;
+}
+
+/** ATR trailing stop -- exit-driven.
+ *  Enters on close > EMA(period). Trailing stop = highest_high - k*ATR.
+ *  SELL when close drops below the trailing stop. */
+function signalATRTrail(candles, params) {
+  const period = params.period || 14;
+  const k      = params.multiplier || 3;
+  const closes = candles.map(c => c.close);
+  const e = ema(closes, period);
+  const a = atr(candles, period);
+  const out = new Array(candles.length).fill(null);
+  let inPos = false, highSince = 0, lastBuyIdx = -1;
+  for (let i = period; i < candles.length; i++) {
+    if (!Number.isFinite(e[i]) || !Number.isFinite(a[i])) continue;
+    const c = candles[i].close;
+    if (!inPos && c > e[i]) {
+      inPos = true; highSince = candles[i].high; lastBuyIdx = i;
+      out[i] = 'BUY';
+      continue;
+    }
+    if (inPos) {
+      if (candles[i].high > highSince) highSince = candles[i].high;
+      const stop = highSince - k * a[i];
+      if (c < stop) { inPos = false; out[i] = 'SELL'; }
+    }
+  }
+  return out;
+}
+
+/** Ichimoku Tenkan / Kijun cross (simplified). */
+function signalIchimoku(candles, params) {
+  const tenkanP = params.tenkan || 9;
+  const kijunP  = params.kijun  || 26;
+  const n = candles.length;
+  const high = (start, end) => { let h = -Infinity; for (let j = start; j <= end; j++) if (candles[j].high > h) h = candles[j].high; return h; };
+  const low  = (start, end) => { let l =  Infinity; for (let j = start; j <= end; j++) if (candles[j].low  < l) l = candles[j].low;  return l; };
+  const tenkan = new Array(n).fill(NaN);
+  const kijun  = new Array(n).fill(NaN);
+  for (let i = kijunP; i < n; i++) {
+    tenkan[i] = (high(i - tenkanP + 1, i) + low(i - tenkanP + 1, i)) / 2;
+    kijun[i]  = (high(i - kijunP  + 1, i) + low(i - kijunP  + 1, i)) / 2;
+  }
+  const out = new Array(n).fill(null);
+  for (let i = kijunP + 1; i < n; i++) {
+    const tN = tenkan[i], tP = tenkan[i-1], kN = kijun[i], kP = kijun[i-1];
+    if (!Number.isFinite(tN) || !Number.isFinite(kN)) continue;
+    if (tN > kN && tP <= kP) out[i] = 'BUY';
+    if (tN < kN && tP >= kP) out[i] = 'SELL';
+  }
+  return out;
+}
+
 function computeSignal({ candles, strategy, params }) {
   if (!Array.isArray(candles) || candles.length < 30) return [];
   const closes = candles.map(c => c.close);
@@ -550,6 +667,10 @@ function computeSignal({ candles, strategy, params }) {
   if (strategy === 'keltner')         return signalKeltner(candles, params);
   if (strategy === 'obv')             return signalOBV(candles, params);
   if (strategy === 'psar')            return signalPSAR(candles, params);
+  if (strategy === 'aroon')           return signalAroon(candles, params);
+  if (strategy === 'cmf')             return signalCMF(candles, params);
+  if (strategy === 'atr_trail')       return signalATRTrail(candles, params);
+  if (strategy === 'ichimoku')        return signalIchimoku(candles, params);
   throw new Error('unknown strategy: ' + strategy);
 }
 

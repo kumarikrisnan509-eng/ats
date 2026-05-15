@@ -985,6 +985,46 @@ const STRATEGIES = [
       { name: 'maxAcceleration', type: 'float', default: 0.2,  min: 0.05,  max: 0.5 },
     ],
   },
+  // ---------- Tier 19: 4 more TA strategies (18 total) ----------
+  {
+    id: 'aroon',
+    name: 'Aroon oscillator',
+    description: 'Long-only: BUY when Aroon Up crosses above Aroon Down; SELL when crosses below. Trend-strength oscillator.',
+    bias: 'trending markets, regime-change',
+    params: [
+      { name: 'period', type: 'int', default: 14, min: 5, max: 50 },
+    ],
+  },
+  {
+    id: 'cmf',
+    name: 'Chaikin Money Flow',
+    description: 'Long-only: BUY when CMF crosses up through +threshold (accumulation); SELL when CMF crosses down through -threshold (distribution).',
+    bias: 'volume-confirmation, trending',
+    params: [
+      { name: 'period',    type: 'int',   default: 20,   min: 5,    max: 100 },
+      { name: 'threshold', type: 'float', default: 0.05, min: 0.01, max: 0.3 },
+    ],
+  },
+  {
+    id: 'atr_trail',
+    name: 'ATR trailing stop',
+    description: 'Long-only: enter when close above EMA; exit when close drops below highest-high minus k*ATR trailing stop.',
+    bias: 'trending markets, exit-discipline',
+    params: [
+      { name: 'period',     type: 'int',   default: 14, min: 5,   max: 50 },
+      { name: 'multiplier', type: 'float', default: 3,  min: 1,   max: 8 },
+    ],
+  },
+  {
+    id: 'ichimoku',
+    name: 'Ichimoku Tenkan/Kijun cross',
+    description: 'Long-only: BUY when Tenkan (9-period mid) crosses above Kijun (26-period mid); SELL on opposite cross. Simplified Ichimoku.',
+    bias: 'trending markets, momentum',
+    params: [
+      { name: 'tenkan', type: 'int', default: 9,  min: 3, max: 30 },
+      { name: 'kijun',  type: 'int', default: 26, min: 9, max: 60 },
+    ],
+  },
 ];
 
 app.get('/api/strategies', (_req, res) => {
