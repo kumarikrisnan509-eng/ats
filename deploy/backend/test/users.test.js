@@ -4,13 +4,6 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 
-const Module = require('module');
-const origResolve = Module._resolveFilename;
-Module._resolveFilename = function (req, ...rest) {
-  if (req === 'better-sqlite3') return require.resolve('/tmp/sqlite-test/node_modules/better-sqlite3');
-  if (req === 'bcrypt')         return require.resolve('/tmp/sqlite-test/node_modules/bcrypt');
-  return origResolve.call(this, req, ...rest);
-};
 
 const TMP = path.join(os.tmpdir(), 'ats-users-' + Date.now() + '.db');
 process.env.ATS_DB_PATH = TMP;

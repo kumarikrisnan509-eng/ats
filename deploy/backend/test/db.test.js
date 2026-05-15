@@ -5,12 +5,6 @@ const fs    = require('fs');
 const os    = require('os');
 
 // Point db.js at a temp file and point require resolution at our installed dep.
-const Module = require('module');
-const origResolve = Module._resolveFilename;
-Module._resolveFilename = function (req, ...rest) {
-  if (req === 'better-sqlite3') return require.resolve('/tmp/sqlite-test/node_modules/better-sqlite3');
-  return origResolve.call(this, req, ...rest);
-};
 
 // Use a fresh temp path per test run.
 const TMP = path.join(os.tmpdir(), 'ats-db-' + Date.now() + '.db');
