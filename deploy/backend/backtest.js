@@ -49,6 +49,14 @@ function runBacktest({ candles, strategy, params, qty }) {
     signal = signalWilliamsR(candles, params);
   } else if (strategy === 'heikin_ashi') {
     signal = signalHeikinAshi(candles, params);
+  } else if (strategy === 'cci') {
+    signal = signalCCI(candles, params);
+  } else if (strategy === 'keltner') {
+    signal = signalKeltner(candles, params);
+  } else if (strategy === 'obv') {
+    signal = signalOBV(candles, params);
+  } else if (strategy === 'psar') {
+    signal = signalPSAR(candles, params);
   } else {
     throw new Error(`unknown strategy: ${strategy}`);
   }
@@ -403,6 +411,127 @@ function signalHeikinAshi(candles, params) {
   return out;
 }
 
+/** CCI (Commodity Channel Index) -- mean-reversion oscillator.
+ *  BUY  when CCI crosses up through -threshold (oversold exit).
+ *  SELL when CCI crosses down through +threshold (overbought exit). */
+function signalCCI(candles, params) {
+  const period    = params.period    || 20;
+  const threshold = params.threshold || 100;
+  const n = candles.length;
+  const tp = candles.map(c => (c.high + c.low + c.close) / 3);
+  const cci = new Array(n).fill(NaN);
+  for (let i = period - 1; i < n; i++) {
+    let sum = 0;
+    for (let j = i - period + 1; j <= i; j++) sum += tp[j];
+    const sma = sum / period;
+    let md = 0;
+    for (let j = i - period + 1; j <= i; j++) md += Math.abs(tp[j] - sma);
+    md /= period;
+    cci[i] = md === 0 ? 0 : (tp[i] - sma) / (0.015 * md);
+  }
+  const out = new Array(n).fill(null);
+  for (let i = period; i < n; i++) {
+    const cNow = cci[i], cPrev = cci[i - 1];
+    if (!Number.isFinite(cNow) || !Number.isFinite(cPrev)) continue;
+    if (cNow > -threshold && cPrev <= -threshold) out[i] = 'BUY';
+    if (cNow <  threshold && cPrev >=  threshold) out[i] = 'SELL';
+  }
+  return out;
+}
+
+/** Keltner channels = EMA(close, period) +/- multiplier * ATR.
+ *  BUY  when close breaks above upper band.
+ *  SELL when close breaks below lower band. */
+function signalKeltner(candles, params) {
+  const period     = params.period     || 20;
+  const multiplier = params.multiplier || 2;
+  const closes = candles.map(c => c.close);
+  const e = ema(closes, period);
+  const a = atr(candles, period);
+  const out = new Array(candles.length).fill(null);
+  for (let i = period; i < candles.length; i++) {
+    if (!Number.isFinite(e[i]) || !Number.isFinite(a[i])) continue;
+    const upper = e[i] + multiplier * a[i];
+    const lower = e[i] - multiplier * a[i];
+    const c    = candles[i].close;
+    const cP   = candles[i - 1].close;
+    const uP   = e[i-1] + multiplier * a[i-1];
+    const lP   = e[i-1] - multiplier * a[i-1];
+    if (c > upper && cP <= uP) out[i] = 'BUY';
+    if (c < lower && cP >= lP) out[i] = 'SELL';
+  }
+  return out;
+}
+
+/** OBV (On-Balance Volume) divergence:
+ *  BUY  when price makes lower low BUT OBV makes higher low (bullish divergence).
+ *  SELL when price makes higher high BUT OBV makes lower high (bearish divergence). */
+function signalOBV(candles, params) {
+  const lookback = params.lookback || 20;
+  const n = candles.length;
+  const obv = new Array(n).fill(0);
+  for (let i = 1; i < n; i++) {
+    const v = candles[i].volume || 0;
+    if (candles[i].close > candles[i-1].close) obv[i] = obv[i-1] + v;
+    else if (candles[i].close < candles[i-1].close) obv[i] = obv[i-1] - v;
+    else obv[i] = obv[i-1];
+  }
+  const out = new Array(n).fill(null);
+  for (let i = lookback; i < n; i++) {
+    const cNow = candles[i].close, cBack = candles[i - lookback].close;
+    const oNow = obv[i], oBack = obv[i - lookback];
+    // Bullish divergence: price down, OBV up
+    if (cNow < cBack && oNow > oBack) out[i] = 'BUY';
+    // Bearish divergence: price up, OBV down
+    else if (cNow > cBack && oNow < oBack) out[i] = 'SELL';
+  }
+  return out;
+}
+
+/** Parabolic SAR -- trend-following stop-and-reverse.
+ *  BUY  on SAR flip from below price to ... wait, the canonical interpretation:
+ *  BUY when SAR was above price (downtrend) and flips below (uptrend starts).
+ *  SELL on opposite. */
+function signalPSAR(candles, params) {
+  const startAcc = params.acceleration   || 0.02;
+  const maxAcc   = params.maxAcceleration || 0.2;
+  const accStep  = startAcc;
+  const n = candles.length;
+  if (n < 2) return new Array(n).fill(null);
+  const sar = new Array(n).fill(NaN);
+  let trendUp = candles[1].close > candles[0].close;
+  let ep = trendUp ? candles[0].high : candles[0].low;   // extreme point
+  let acc = startAcc;
+  sar[0] = trendUp ? candles[0].low : candles[0].high;
+  const out = new Array(n).fill(null);
+  for (let i = 1; i < n; i++) {
+    sar[i] = sar[i-1] + acc * (ep - sar[i-1]);
+    if (trendUp) {
+      if (candles[i].low < sar[i]) {
+        // Flip to downtrend
+        trendUp = false;
+        sar[i] = ep;        // SAR jumps to old EP
+        ep = candles[i].low;
+        acc = startAcc;
+        out[i] = 'SELL';
+      } else {
+        if (candles[i].high > ep) { ep = candles[i].high; acc = Math.min(maxAcc, acc + accStep); }
+      }
+    } else {
+      if (candles[i].high > sar[i]) {
+        trendUp = true;
+        sar[i] = ep;
+        ep = candles[i].high;
+        acc = startAcc;
+        out[i] = 'BUY';
+      } else {
+        if (candles[i].low < ep) { ep = candles[i].low; acc = Math.min(maxAcc, acc + accStep); }
+      }
+    }
+  }
+  return out;
+}
+
 function computeSignal({ candles, strategy, params }) {
   if (!Array.isArray(candles) || candles.length < 30) return [];
   const closes = candles.map(c => c.close);
@@ -417,6 +546,10 @@ function computeSignal({ candles, strategy, params }) {
   if (strategy === 'stochastic')      return signalStochastic(candles, params);
   if (strategy === 'williams_r')      return signalWilliamsR(candles, params);
   if (strategy === 'heikin_ashi')     return signalHeikinAshi(candles, params);
+  if (strategy === 'cci')             return signalCCI(candles, params);
+  if (strategy === 'keltner')         return signalKeltner(candles, params);
+  if (strategy === 'obv')             return signalOBV(candles, params);
+  if (strategy === 'psar')            return signalPSAR(candles, params);
   throw new Error('unknown strategy: ' + strategy);
 }
 

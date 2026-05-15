@@ -34,6 +34,7 @@ const { NewsFeed }     = require('./news');
 const { TaxPlanner }   = require('./tax');
 const { ClaudeAI }     = require('./ai');
 const { SweepEngine }  = require('./sweep');
+const { LongTerm }     = require('./longterm');
 const { runPreflight } = require('./preflight');
 const csvImport        = require('./csv-import');
 
@@ -87,7 +88,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm;
 
 async function init() {
   broker = createBroker(process.env);
@@ -168,6 +169,13 @@ async function init() {
     storePath: process.env.SWEEP_PATH || '/var/lib/ats/tokens/_sweep.json',
   });
   sweep.load();
+
+  // Tier 18: long-term wealth engine (SIPs, buckets, SWP simulator, goal inflation).
+  longterm = new LongTerm({
+    audit,
+    storePath: process.env.LONGTERM_PATH || '/var/lib/ats/tokens/_longterm.json',
+  });
+  longterm.load();
 
   if (BROKER_NAME === 'zerodha') {
     if (!fs.existsSync(MASTER_KEY_PATH)) {
@@ -393,6 +401,7 @@ app.get('/api/system/info', (_req, res) => {
       tax:       tax       ? tax.stats()       : null,
       ai:        ai        ? ai.stats()        : null,
       sweep:     sweep     ? sweep.stats()     : null,
+      longterm:  longterm  ? longterm.stats()  : null,
       riskCaps: {
         killSwitch: KILL_SWITCH,
         liveTrading: LIVE_TRADING,
@@ -934,6 +943,46 @@ const STRATEGIES = [
     bias: 'trending markets, momentum',
     params: [
       { name: 'run', type: 'int', default: 3, min: 2, max: 10 },
+    ],
+  },
+  // ---------- Tier 18: 4 more TA strategies (14 total) ----------
+  {
+    id: 'cci',
+    name: 'Commodity Channel Index',
+    description: 'Long-only: BUY when CCI crosses up through -threshold (oversold exit); SELL when CCI crosses down through +threshold.',
+    bias: 'mean-reverting markets',
+    params: [
+      { name: 'period',    type: 'int',   default: 20,  min: 5,  max: 100 },
+      { name: 'threshold', type: 'float', default: 100, min: 50, max: 200 },
+    ],
+  },
+  {
+    id: 'keltner',
+    name: 'Keltner Channels',
+    description: 'Long-only: BUY on close break above EMA + k*ATR; SELL on close break below EMA - k*ATR. Breakout strategy.',
+    bias: 'trending markets, breakout',
+    params: [
+      { name: 'period',     type: 'int',   default: 20, min: 5,   max: 100 },
+      { name: 'multiplier', type: 'float', default: 2,  min: 0.5, max: 5 },
+    ],
+  },
+  {
+    id: 'obv',
+    name: 'OBV divergence',
+    description: 'Long-only: BUY on bullish OBV/price divergence (price lower-low + OBV higher-low); SELL on bearish divergence.',
+    bias: 'turn-detection, mean-reverting',
+    params: [
+      { name: 'lookback', type: 'int', default: 20, min: 5, max: 100 },
+    ],
+  },
+  {
+    id: 'psar',
+    name: 'Parabolic SAR',
+    description: 'Long-only: BUY on SAR flip from downtrend to uptrend; SELL on flip back. Trend-following stop-and-reverse.',
+    bias: 'trending markets, stop-and-reverse',
+    params: [
+      { name: 'acceleration',    type: 'float', default: 0.02, min: 0.005, max: 0.1 },
+      { name: 'maxAcceleration', type: 'float', default: 0.2,  min: 0.05,  max: 0.5 },
     ],
   },
 ];
@@ -1856,6 +1905,70 @@ app.post('/api/backtest/watchlist', async (req, res) => {
     res.json({ ok: true, strategy, from, to, qty: Number(qty) || 1, aggregate, results, errors: Object.keys(errors).length ? errors : null });
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
+// ---------- Tier 18: Long-term wealth endpoints (SIP / buckets / SWP / inflate) ----------
+app.get('/api/sip', (_req, res) => {
+  if (!longterm) return res.status(503).json({ ok:false, reason:'longterm_not_initialized' });
+  res.json({ ok:true, sips: longterm.getSips(), stats: longterm.stats() });
+});
+app.put('/api/sip', (req, res) => {
+  if (!longterm) return res.status(503).json({ ok:false, reason:'longterm_not_initialized' });
+  try {
+    const sips = longterm.setSips((req.body && req.body.sips) || []);
+    res.json({ ok:true, sips });
+  } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
+});
+app.get('/api/buckets', (_req, res) => {
+  if (!longterm) return res.status(503).json({ ok:false, reason:'longterm_not_initialized' });
+  res.json({ ok:true, buckets: longterm.getBuckets() });
+});
+app.put('/api/buckets', (req, res) => {
+  if (!longterm) return res.status(503).json({ ok:false, reason:'longterm_not_initialized' });
+  try {
+    const b = longterm.setBuckets((req.body && req.body.buckets) || {});
+    res.json({ ok:true, buckets: b });
+  } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
+});
+app.post('/api/swp/simulate', (req, res) => {
+  if (!longterm) return res.status(503).json({ ok:false, reason:'longterm_not_initialized' });
+  try {
+    const r = longterm.simulateSwp(req.body || {});
+    res.json({ ok:true, ...r });
+  } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
+});
+app.post('/api/goals/inflate', (req, res) => {
+  if (!longterm) return res.status(503).json({ ok:false, reason:'longterm_not_initialized' });
+  try {
+    const r = longterm.inflateGoal(req.body || {});
+    res.json({ ok:true, ...r });
+  } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
+});
+
+// Tier 18: AI-generated monthly review narrative (spec §4 Stage 4).
+app.post('/api/ai/monthly-review', async (req, res) => {
+  if (!ai || !ai.enabled()) return res.status(503).json({ ok:false, reason:'ai_disabled', detail:'set ANTHROPIC_API_KEY env to enable' });
+  try {
+    const body = req.body || {};
+    let arg = body;
+    if (!body.trades && paper) {
+      const stats = paper.stats() || {};
+      const trades = paper.trades ? paper.trades(50) : [];
+      arg = {
+        month: new Date().toLocaleString('en-IN', { month: 'long', year: 'numeric' }),
+        realizedPnl: stats.realizedPnl || 0,
+        winRate: stats.winRate,
+        tradeCount: stats.tradeCount || 0,
+        totalEquity: stats.totalEquity || 0,
+        trades: trades.slice(0, 30),
+        ...body,
+      };
+    }
+    const out = await ai.monthlyReview(arg);
+    res.json({ ok:true, ...out });
+  } catch (e) {
+    res.status(500).json({ ok:false, reason:e.message });
   }
 });
 

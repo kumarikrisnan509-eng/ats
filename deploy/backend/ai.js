@@ -127,6 +127,19 @@ class ClaudeAI {
     const { text } = await this._call(sys, usr);
     return { summary: text };
   }
+
+  /**
+   * Tier 18: AI-generated monthly P&L review narrative.
+   * Input: { month, realizedPnl, trades:[], winRate, topWinners, topLosers, byStrategy }
+   * Output: { narrative: '... markdown bullets ...' }
+   * Per master spec §4 Stage 4: 'AI-generated monthly review by Claude'.
+   */
+  async monthlyReview(arg) {
+    const sys = 'You are a calm, evidence-based portfolio review writer for an Indian retail trader. Output 6-10 short markdown bullets covering: (1) overall verdict, (2) what worked, (3) what did not work, (4) one behavioural pattern visible in the trade timestamps or hold-times if data permits, (5) one actionable change for next month. Indian rupees only (₹). No advice, no recommendations, no emojis, no preamble.';
+    const usr = 'Review this trader\'s month:\n' + JSON.stringify(arg);
+    const { text } = await this._call(sys, usr);
+    return { narrative: text };
+  }
 }
 
 module.exports = { ClaudeAI };
