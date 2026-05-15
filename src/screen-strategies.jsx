@@ -1,6 +1,179 @@
 /* eslint-disable */
 /* Strategies screen — mode is the primary grouping dimension */
 
+
+/* ============================================================
+ * Tier 43: AutorunPanel -- frontend for the Tier 3 auto-runner.
+ * Wires GET/PUT/POST/DELETE /api/autorun:
+ *   GET    -> current config + last 25 runs + stats
+ *   PUT    -> save config (strategy, symbol, qty, interval, etc.)
+ *   POST   /api/autorun/run -- one-shot evaluation
+ *   DELETE -> clear config + stop timer
+ * ============================================================ */
+const AutorunPanel = () => {
+  const [data, setData] = React.useState(null);
+  const [strategies, setStrategies] = React.useState([]);
+  const [busy, setBusy] = React.useState(false);
+  const [msg, setMsg] = React.useState(null);
+
+  // Form state -- seeded from server config when it arrives.
+  const [form, setForm] = React.useState({
+    enabled: false,
+    strategy: 'rsi-mean-reversion',
+    symbol: 'RELIANCE',
+    qty: 1,
+    interval: 'day',
+    intervalMinutes: 60,
+    candleLookbackDays: 60,
+  });
+
+  const load = React.useCallback(async () => {
+    try {
+      const [a, s] = await Promise.all([
+        window.fetchApi('/api/autorun').catch(() => null),
+        window.fetchApi('/api/strategies').catch(() => null),
+      ]);
+      if (a) {
+        setData(a);
+        if (a.config) setForm(prev => ({ ...prev, ...a.config }));
+      }
+      const sList = s && (s.strategies || s.list || s);
+      if (Array.isArray(sList)) {
+        setStrategies(sList.map(x => (typeof x === 'string' ? x : (x.id || x.name))).filter(Boolean));
+      }
+    } catch (_) {}
+  }, []);
+  React.useEffect(() => { load(); }, [load]);
+
+  const save = async (overrides) => {
+    setBusy(true); setMsg(null);
+    const body = { ...form, ...(overrides || {}) };
+    try {
+      const r = await window.fetchApi('/api/autorun', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      setMsg(r && r.ok ? '✓ saved' : '✗ ' + (r && r.reason));
+      await load();
+    } catch (e) { setMsg('✗ ' + e.message); }
+    finally { setBusy(false); }
+  };
+
+  const runNow = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await window.fetchApi('/api/autorun/run', { method: 'POST' });
+      setMsg(r && r.ok ? '✓ evaluation triggered' : '✗ ' + (r && r.reason));
+      await load();
+    } catch (e) { setMsg('✗ ' + e.message); }
+    finally { setBusy(false); }
+  };
+
+  const clearCfg = async () => {
+    if (!window.confirm('Clear auto-runner config and stop the timer?')) return;
+    setBusy(true); setMsg(null);
+    try {
+      const r = await window.fetchApi('/api/autorun', { method: 'DELETE' });
+      setMsg(r && r.ok ? '✓ cleared' : '✗ ' + (r && r.reason));
+      await load();
+    } catch (e) { setMsg('✗ ' + e.message); }
+    finally { setBusy(false); }
+  };
+
+  const inputStyle = {
+    width: '100%', padding: '6px 8px',
+    background: 'var(--bg-sunk)', border: '1px solid var(--border)',
+    borderRadius: 'var(--r-md)', fontFamily: 'var(--mono)', fontSize: 12,
+  };
+  const cardStyle = { padding: 14, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, marginBottom: 16 };
+
+  const history = data && (data.history || data.runs) || [];
+
+  return (
+    <div style={cardStyle}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <div style={{ fontSize: 14, fontWeight: 600 }}>Strategy auto-runner</div>
+        <span style={{
+          fontSize: 11, padding: '2px 8px', borderRadius: 999,
+          background: form.enabled ? 'var(--up-soft, #dcfce7)' : 'var(--bg-soft)',
+          color: form.enabled ? 'var(--up)' : 'var(--text-3)',
+          fontWeight: 600,
+        }}>{form.enabled ? 'ENABLED' : 'DISABLED'}</span>
+      </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+        <label style={{ flex: '2 1 180px' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4 }}>Strategy</div>
+          <select style={inputStyle} value={form.strategy} onChange={ev => setForm({ ...form, strategy: ev.target.value })}>
+            {strategies.length > 0
+              ? strategies.map(s => <option key={s} value={s}>{s}</option>)
+              : <option value={form.strategy}>{form.strategy}</option>}
+          </select>
+        </label>
+        <label style={{ flex: '1 1 110px' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4 }}>Symbol</div>
+          <input style={inputStyle} value={form.symbol} onChange={ev => setForm({ ...form, symbol: ev.target.value.toUpperCase() })}/>
+        </label>
+        <label style={{ flex: '1 1 70px' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4 }}>Qty</div>
+          <input style={inputStyle} type="number" min="1" value={form.qty} onChange={ev => setForm({ ...form, qty: Number(ev.target.value) })}/>
+        </label>
+        <label style={{ flex: '1 1 90px' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4 }}>Bar interval</div>
+          <select style={inputStyle} value={form.interval} onChange={ev => setForm({ ...form, interval: ev.target.value })}>
+            <option value="day">day</option><option value="60minute">60m</option>
+            <option value="15minute">15m</option><option value="5minute">5m</option>
+          </select>
+        </label>
+        <label style={{ flex: '1 1 100px' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4 }}>Schedule (min)</div>
+          <input style={inputStyle} type="number" min="1" value={form.intervalMinutes} onChange={ev => setForm({ ...form, intervalMinutes: Number(ev.target.value) })}/>
+        </label>
+        <label style={{ flex: '1 1 100px' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4 }}>Lookback days</div>
+          <input style={inputStyle} type="number" min="30" value={form.candleLookbackDays} onChange={ev => setForm({ ...form, candleLookbackDays: Number(ev.target.value) })}/>
+        </label>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button disabled={busy} className={form.enabled ? 'btn' : 'btn btn--accent'}
+                onClick={() => save({ enabled: !form.enabled })}>
+          {form.enabled ? 'Disable' : 'Enable + save'}
+        </button>
+        <button disabled={busy} onClick={() => save({})}>Save config</button>
+        <button disabled={busy} onClick={runNow}>Run once</button>
+        <button disabled={busy} onClick={clearCfg}>Clear</button>
+        {msg && <span style={{ fontSize: 11, color: msg.startsWith('✓') ? 'var(--up)' : 'var(--down)' }}>{msg}</span>}
+      </div>
+
+      {/* Recent run history */}
+      {Array.isArray(history) && history.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4 }}>Last {history.length} runs</div>
+          <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--r-md)' }}>
+            <table className="tbl" style={{ width: '100%', fontSize: 10 }}>
+              <thead><tr><th>ts</th><th>strategy</th><th>symbol</th><th>signal</th><th>action</th><th>note</th></tr></thead>
+              <tbody>
+                {history.slice(-25).reverse().map((h, i) => (
+                  <tr key={i}>
+                    <td className="mono">{String(h.ts || h.t || '').slice(0, 19).replace('T', ' ')}</td>
+                    <td className="mono">{h.strategy || form.strategy}</td>
+                    <td className="mono">{h.symbol || form.symbol}</td>
+                    <td className="mono">{h.signal || '—'}</td>
+                    <td>{h.action || h.status || '—'}</td>
+                    <td style={{ fontSize: 10, color: 'var(--text-3)' }}>{h.note || h.reason || ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const StrategiesScreen = () => {
   // Real backend strategy registry + watchlist backtest trigger, exposed via window helpers.
   const [backendStrats, setBackendStrats] = React.useState([]);
@@ -94,6 +267,7 @@ const StrategiesScreen = () => {
     return (
       <Card key={`${s.mode}-${i}`} style={gated ? { opacity: 0.55, background: "repeating-linear-gradient(135deg, var(--bg-soft) 0 10px, var(--bg-sunk) 10px 11px)" } : null}>
         <div className="between" style={{ marginBottom: 10 }}>
+      <AutorunPanel />
           <div style={{ minWidth: 0 }}>
             <div className="row" style={{ marginBottom: 4, flexWrap: "wrap", gap: 6 }}>
               <strong style={{ fontSize: 15, letterSpacing: "-0.01em" }}>{s.n}</strong>
