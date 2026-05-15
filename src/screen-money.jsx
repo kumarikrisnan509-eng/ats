@@ -23,6 +23,47 @@ const MoneyScreen = () => {
   // Tier 24: rebalance suggestions
   const [rebal, setRebal]         = React.useState(null);
   const [rebalBusy, setRebalBusy] = React.useState(false);
+  // Tier 25: MPT portfolio optimiser
+  const [mptInputs, setMptInputs] = React.useState([
+    { symbol: 'NIFTYBEES', expectedReturnPct: 12, volPct: 18 },
+    { symbol: 'GOLDBEES',  expectedReturnPct: 8,  volPct: 15 },
+    { symbol: 'BOND-G7',   expectedReturnPct: 7,  volPct: 7  },
+  ]);
+  const [mptResult, setMptResult] = React.useState(null);
+  const [mptBusy, setMptBusy]     = React.useState(false);
+  const runOptimize = async () => {
+    setMptBusy(true); setMptResult(null);
+    try {
+      // Build inputs from current state
+      const n = mptInputs.length;
+      const symbols = mptInputs.map(x => x.symbol);
+      const expectedReturns = mptInputs.map(x => Number(x.expectedReturnPct) / 100);
+      // Diagonal cov matrix from vol (simple, user can refine later)
+      const covMatrix = [];
+      for (let i = 0; i < n; i++) {
+        const row = [];
+        for (let j = 0; j < n; j++) {
+          if (i === j) row.push(Math.pow(Number(mptInputs[i].volPct) / 100, 2));
+          else row.push(0.001); // small cross-asset correlation default
+        }
+        covMatrix.push(row);
+      }
+      const r = await window.fetchApi('/api/portfolio/optimize', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ symbols, expectedReturns, covMatrix, samples: 20000 }),
+      });
+      if (r && r.ok) setMptResult(r);
+      else setMptResult({ ok: false, reason: (r && r.reason) || 'failed' });
+    } catch (e) { setMptResult({ ok: false, reason: e.message }); }
+    finally { setMptBusy(false); }
+  };
+  const addMptAsset = () => setMptInputs([...mptInputs, { symbol: '', expectedReturnPct: 10, volPct: 15 }]);
+  const removeMptAsset = (i) => setMptInputs(mptInputs.filter((_, k) => k !== i));
+  const updateMptAsset = (i, field, value) => {
+    const next = mptInputs.slice();
+    next[i] = { ...next[i], [field]: value };
+    setMptInputs(next);
+  };
   const runRebalance = async () => {
     setRebalBusy(true);
     try {
@@ -289,6 +330,85 @@ const MoneyScreen = () => {
         {buckets && (buckets.emergency + buckets.shortTerm + buckets.longTerm < 100) && (
           <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-3)' }}>
             Unallocated: {100 - (buckets.emergency + buckets.shortTerm + buckets.longTerm)}% (working capital / trading book)
+          </div>
+        )}
+      </div>
+
+      {/* Tier 25: Portfolio optimiser (MPT) */}
+      <div style={{ padding: 16, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase' }}>Portfolio optimiser</div>
+            <div style={{ fontSize: 18, fontWeight: 600, marginTop: 2 }}>Modern Portfolio Theory · max-Sharpe + min-variance</div>
+          </div>
+          <button onClick={runOptimize} disabled={mptBusy || mptInputs.length < 2} style={{
+            padding: '6px 12px', fontSize: 12, fontWeight: 500,
+            background: 'var(--acc)', color: 'white', border: 0, borderRadius: 6,
+            cursor: mptBusy ? 'wait' : 'pointer',
+          }}>{mptBusy ? 'Solving...' : 'Optimize'}</button>
+        </div>
+
+        {/* Asset input table */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 30px', gap: 8, fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', padding: '0 6px' }}>
+            <div>Symbol</div>
+            <div>Expected return %/yr</div>
+            <div>Volatility %/yr</div>
+            <div></div>
+          </div>
+          {mptInputs.map((a, i) => (
+            <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 30px', gap: 8, alignItems: 'center' }}>
+              <input value={a.symbol} onChange={e => updateMptAsset(i, 'symbol', e.target.value)} style={mptInpStyle} placeholder="NIFTYBEES"/>
+              <input type="number" step="0.5" value={a.expectedReturnPct} onChange={e => updateMptAsset(i, 'expectedReturnPct', Number(e.target.value) || 0)} style={mptInpStyle}/>
+              <input type="number" step="0.5" value={a.volPct} onChange={e => updateMptAsset(i, 'volPct', Number(e.target.value) || 0)} style={mptInpStyle}/>
+              <button onClick={() => removeMptAsset(i)} disabled={mptInputs.length <= 2} style={{
+                fontSize: 12, color: 'var(--down)', background: 'transparent', border: 0,
+                cursor: mptInputs.length > 2 ? 'pointer' : 'not-allowed',
+              }}>x</button>
+            </div>
+          ))}
+          {mptInputs.length < 10 && (
+            <button onClick={addMptAsset} style={{
+              padding: '4px 10px', fontSize: 11, alignSelf: 'flex-start',
+              background: 'var(--bg-soft)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer',
+            }}>+ Add asset</button>
+          )}
+        </div>
+
+        {mptResult && mptResult.ok === false && (
+          <div style={{ padding: 10, background: 'var(--down-soft)', color: 'var(--down)', borderRadius: 6, fontSize: 12 }}>
+            Error: {mptResult.reason}
+          </div>
+        )}
+
+        {mptResult && mptResult.maxSharpe && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <PortfolioCard
+              title="Max Sharpe"
+              subtitle="tangency portfolio"
+              data={mptResult.maxSharpe}
+              symbols={mptResult.symbols}
+              tone="up"
+            />
+            <PortfolioCard
+              title="Min Variance"
+              subtitle="lowest-risk portfolio"
+              data={mptResult.minVariance}
+              symbols={mptResult.symbols}
+              tone="info"
+            />
+          </div>
+        )}
+
+        {mptResult && mptResult.frontier && (
+          <div style={{ marginTop: 10, fontSize: 11, color: 'var(--text-3)' }}>
+            Efficient frontier sampled at {mptResult.frontier.length} points · {mptResult.samples} Monte Carlo trials · risk-free {(mptResult.riskFreeRate * 100).toFixed(1)}%
+          </div>
+        )}
+
+        {!mptResult && (
+          <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
+            Enter 2-10 assets with expected annual return and volatility. Click <b>Optimize</b> to solve for max-Sharpe and min-variance weights.
           </div>
         )}
       </div>
@@ -565,6 +685,46 @@ const MoneyField = ({ label, children }) => (
   <div style={{ marginTop: 10 }}>
     <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4 }}>{label}</div>
     {children}
+  </div>
+);
+
+const mptInpStyle = { padding: '6px 10px', fontSize: 12, background: 'var(--bg-soft)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-1)' };
+
+const PortfolioCard = ({ title, subtitle, data, symbols, tone }) => {
+  const color = tone === 'up' ? 'var(--up)' : tone === 'info' ? 'var(--info)' : 'var(--text-1)';
+  return (
+    <div style={{ padding: 12, background: 'var(--bg-soft)', borderRadius: 8 }}>
+      <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase' }}>{title}</div>
+      <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{subtitle}</div>
+      <div style={{ marginTop: 8, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+        <MptStat sub="Sharpe"  value={data.sharpe.toFixed(2)}  color={color}/>
+        <MptStat sub="Return"  value={(data.expectedReturn * 100).toFixed(1) + '%'} color={color}/>
+        <MptStat sub="Vol"     value={(data.volatility * 100).toFixed(1) + '%'} color={color}/>
+      </div>
+      <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {symbols.map((s, i) => {
+          const wPct = data.weights[i] * 100;
+          return (
+            <div key={s} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, fontSize: 11, alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span style={{ minWidth: 80 }}>{s}</span>
+                <div style={{ flex: 1, height: 4, background: 'var(--surface)', borderRadius: 99, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: wPct + '%', background: color }}/>
+                </div>
+              </div>
+              <span className="mono" style={{ fontWeight: 500 }}>{wPct.toFixed(1)}%</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+const MptStat = ({ sub, value, color }) => (
+  <div>
+    <div style={{ fontSize: 10, color: 'var(--text-3)' }}>{sub}</div>
+    <div style={{ fontSize: 14, fontWeight: 600, color, marginTop: 1 }} className="mono">{value}</div>
   </div>
 );
 
