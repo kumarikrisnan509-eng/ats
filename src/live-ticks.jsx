@@ -121,12 +121,16 @@
             let hits = 0;
             for (const [key, row] of Object.entries(body.quotes)) {
               if (!row || typeof row.last_price !== "number") continue;
-              // backend returns "NSE:RELIANCE" — strip prefix.
               const sym = key.includes(":") ? key.split(":")[1] : key;
-              if (!SYMBOLS[sym]) SYMBOLS[sym] = { ltp: row.last_price, prev: row.last_price };
+              // Tier 65: prev = previous day's close (from ohlc.close), not the seed ltp.
+              // This is what Kite returns as the day's prior reference, so change% is meaningful.
+              const prevClose = (row.ohlc && typeof row.ohlc.close === "number")
+                ? row.ohlc.close
+                : (typeof row.previous_close === "number" ? row.previous_close : row.last_price);
+              if (!SYMBOLS[sym]) SYMBOLS[sym] = { ltp: row.last_price, prev: prevClose };
               else {
-                SYMBOLS[sym].prev = SYMBOLS[sym].ltp;
                 SYMBOLS[sym].ltp = row.last_price;
+                SYMBOLS[sym].prev = prevClose;
               }
               hits++;
             }
@@ -148,11 +152,18 @@
         return;
       }
       if (msg.type === "tick" && typeof msg.symbol === "string" && typeof msg.ltp === "number") {
+        // Tier 65: ONLY update ltp on tick. Never touch prev -- it's the prior day's close,
+        // a stable reference point for change% calculations.
         if (!SYMBOLS[msg.symbol]) {
+          // First sighting of a symbol with no snapshot -- use the tick as both anchors.
           SYMBOLS[msg.symbol] = { ltp: msg.ltp, prev: msg.ltp };
         } else {
-          SYMBOLS[msg.symbol].prev = SYMBOLS[msg.symbol].ltp;
           SYMBOLS[msg.symbol].ltp = msg.ltp;
+          // If prev hasn't been set from a real snapshot (still equal to original seed),
+          // and msg includes ohlc.close, use it.
+          if (typeof msg.prev === "number" && msg.prev > 0) {
+            SYMBOLS[msg.symbol].prev = msg.prev;
+          }
         }
         tickCount++;
         lastTickAt = Date.now();
@@ -258,7 +269,14 @@ const LiveTicker = () => {
       <div style={{
         display: "flex", alignItems: "center", gap: 6, padding: "0 14px",
         flexShrink: 0, borderRight: "1px solid var(--border)", height: "100%",
-        background: tick.connected ? "#059669" : "#dc2626",
+        background: (() => {
+          const ms = (typeof window.marketStatus === "function") ? window.marketStatus() : { open: true };
+          if (!tick.connected) return "#dc2626"; // red: reconnecting
+          if (!ms.open) return "#6b7280"; // grey: market closed
+          const fresh = (Date.now() - (tick.lastTickAt || 0)) < 30000;
+          if (!fresh) return "#d97706"; // amber: stale during open hours
+          return "#059669"; // green: live
+        })(),
         color: "#fff",
         fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase",
         position: "relative", zIndex: 2,
@@ -268,7 +286,14 @@ const LiveTicker = () => {
           boxShadow: tick.connected ? "0 0 0 3px color-mix(in oklab, var(--up) 25%, transparent)" : "none",
           animation: tick.connected ? "pulse 2s infinite" : "none",
         }}/>
-        {tick.connected ? "LIVE" : "RECONNECTING"}
+        {(() => {
+          const ms = (typeof window.marketStatus === "function") ? window.marketStatus() : { open: true, label: "" };
+          if (!tick.connected) return "RECONNECTING";
+          if (!ms.open) return ms.label || "CLOSED";
+          const fresh = (Date.now() - (tick.lastTickAt || 0)) < 30000;
+          if (!fresh) return "STALE";
+          return "LIVE";
+        })()}
       </div>
       <div style={{ display: "flex", overflow: "hidden", flex: 1, gap: 24, padding: "0 14px", whiteSpace: "nowrap", animation: "ticker-scroll 60s linear infinite" }}>
         {[...symbols, ...symbols].map(([sym, data], i) => {
