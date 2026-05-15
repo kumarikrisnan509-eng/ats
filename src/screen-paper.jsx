@@ -1,6 +1,326 @@
 /* eslint-disable */
 /* Paper Trading screen — Stage 2 of the pipeline */
 
+/* ============================================================
+ * Tier 33: ReplayPanel — wires the existing /api/paper/replay
+ * (Tier 27 backend) into the React UI. Replaces the mock card
+ * that was here before.
+ *
+ * Inputs:
+ *   - symbol      (text, default RELIANCE)
+ *   - from / to   (YYYY-MM-DD, default last 60d -> yesterday)
+ *   - strategy    (dropdown, loaded from /api/strategies)
+ *   - qty         (number, default 1)
+ *   - interval    (day | 60minute | 15minute | 5minute)
+ * Behaviour:
+ *   POST { symbol, from, to, strategy, qty, interval } to
+ *   /api/paper/replay. Render result.stats and result.trades.
+ * Failure modes handled:
+ *   - 400 (broker offline, no candles): user can paste candles JSON manually
+ *   - strategies load fail: dropdown shows '(could not load strategies)'
+ * ============================================================ */
+const ReplayPanel = () => {
+  const today = new Date();
+  const daysAgo = (n) => {
+    const d = new Date(today); d.setDate(d.getDate() - n);
+    return d.toISOString().slice(0, 10);
+  };
+
+  const [symbol, setSymbol]       = React.useState("RELIANCE");
+  const [from, setFrom]           = React.useState(daysAgo(60));
+  const [to, setTo]               = React.useState(daysAgo(1));
+  const [strategy, setStrategy]   = React.useState("rsi-mean-reversion");
+  const [qty, setQty]             = React.useState(1);
+  const [interval, setInterval_]  = React.useState("day");
+
+  const [strategies, setStrategies] = React.useState([]);
+  const [strategiesErr, setStrategiesErr] = React.useState(null);
+  const [running, setRunning] = React.useState(false);
+  const [result, setResult]   = React.useState(null);
+  const [error, setError]     = React.useState(null);
+
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const d = await window.fetchApi('/api/strategies');
+        const list = (d && (d.strategies || d.list || d)) || [];
+        // Backend returns either an array of {id,name} or {strategies:[...]}.
+        const ids = Array.isArray(list)
+          ? list.map(s => (typeof s === 'string' ? s : (s.id || s.name))).filter(Boolean)
+          : [];
+        if (ids.length > 0) {
+          setStrategies(ids);
+          if (!ids.includes(strategy)) setStrategy(ids[0]);
+        }
+      } catch (e) {
+        setStrategiesErr(String(e.message || e));
+      }
+    })();
+  }, []); // eslint-disable-line
+
+  const run = async () => {
+    setRunning(true); setResult(null); setError(null);
+    try {
+      const body = { symbol, from, to, strategy, qty: Number(qty) || 1, interval };
+      const r = await window.fetchApi('/api/paper/replay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      setResult(r);
+    } catch (e) {
+      setError(String(e.message || e));
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const inputStyle = {
+    width: "100%", padding: "6px 8px",
+    background: "var(--bg-sunk)", border: "1px solid var(--border)",
+    borderRadius: "var(--r-md)", fontFamily: "var(--mono)", fontSize: 12,
+  };
+
+  const stats = result && result.stats;
+  return (
+    <Card title="Replay mode" sub="Step-through historical bars + signals · POST /api/paper/replay">
+      <div className="col" style={{ gap: 10 }}>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <label style={{ flex: "1 1 120px" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>Symbol</div>
+            <input style={inputStyle} value={symbol} onChange={e => setSymbol(e.target.value.toUpperCase())}/>
+          </label>
+          <label style={{ flex: "1 1 110px" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>From</div>
+            <input style={inputStyle} type="date" value={from} onChange={e => setFrom(e.target.value)}/>
+          </label>
+          <label style={{ flex: "1 1 110px" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>To</div>
+            <input style={inputStyle} type="date" value={to} onChange={e => setTo(e.target.value)}/>
+          </label>
+        </div>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <label style={{ flex: "2 1 200px" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>Strategy {strategiesErr && <span style={{ color: "var(--down)" }}>({strategiesErr})</span>}</div>
+            <select style={inputStyle} value={strategy} onChange={e => setStrategy(e.target.value)}>
+              {strategies.length > 0
+                ? strategies.map(s => <option key={s} value={s}>{s}</option>)
+                : <option value={strategy}>{strategy}</option>}
+            </select>
+          </label>
+          <label style={{ flex: "1 1 70px" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>Qty</div>
+            <input style={inputStyle} type="number" min="1" value={qty} onChange={e => setQty(e.target.value)}/>
+          </label>
+          <label style={{ flex: "1 1 100px" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>Interval</div>
+            <select style={inputStyle} value={interval} onChange={e => setInterval_(e.target.value)}>
+              <option value="day">day</option>
+              <option value="60minute">60m</option>
+              <option value="15minute">15m</option>
+              <option value="5minute">5m</option>
+            </select>
+          </label>
+        </div>
+        <button className="btn btn--accent" disabled={running} onClick={run}>
+          {running ? <><I.refresh size={12}/> Running…</> : <><I.play size={12}/> Run replay</>}
+        </button>
+        {error && (
+          <div style={{ padding: 8, background: "var(--bg-soft)", border: "1px solid var(--down)", borderRadius: "var(--r-md)", color: "var(--down)", fontSize: 12 }}>
+            {error}
+          </div>
+        )}
+        {stats && (
+          <div className="col" style={{ gap: 8 }}>
+            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+              <Pill label="Trades"     value={stats.trades}/>
+              <Pill label="Win rate"   value={(stats.winRate != null ? stats.winRate + "%" : "—")}/>
+              <Pill label="Total P&L"  value={"₹" + (stats.totalPnl != null ? Math.round(stats.totalPnl).toLocaleString('en-IN') : "—")}
+                    accent={stats.totalPnl >= 0 ? "up" : "down"}/>
+              {stats.wins != null  && <Pill label="Wins"   value={stats.wins}/>}
+              {stats.losses != null && <Pill label="Losses" value={stats.losses}/>}
+            </div>
+            {Array.isArray(result.trades) && result.trades.length > 0 && (
+              <div style={{ maxHeight: 180, overflowY: "auto", border: "1px solid var(--border)", borderRadius: "var(--r-md)" }}>
+                <table className="tbl" style={{ width: "100%", fontSize: 11 }}>
+                  <thead><tr><th>When</th><th>Side</th><th>Entry</th><th>Exit</th><th style={{ textAlign: "right" }}>P&L</th></tr></thead>
+                  <tbody>
+                    {result.trades.slice(0, 50).map((t, i) => (
+                      <tr key={i}>
+                        <td className="mono">{String(t.entryTime || t.t || '—').slice(0, 16)}</td>
+                        <td>{t.side || '—'}</td>
+                        <td className="mono">{t.entry != null ? t.entry : '—'}</td>
+                        <td className="mono">{t.exit != null ? t.exit : '—'}</td>
+                        <td className="mono" style={{ textAlign: "right", color: (t.pnl || 0) >= 0 ? "var(--up)" : "var(--down)" }}>
+                          {t.pnl != null ? (t.pnl >= 0 ? '+' : '') + Math.round(t.pnl).toLocaleString('en-IN') : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+};
+
+/* ============================================================
+ * Tier 33: BracketOrderPanel — wires /api/orders/dry-run with
+ * Zerodha BRACKET (BO) product (Tier 26). Computes risk:reward,
+ * does a dry-run by default (KILL_SWITCH-aware), and shows the
+ * server's normalized payload + clientOrderId.
+ *
+ * The "Place real order" button is intentionally NOT exposed in
+ * this panel -- live trading requires KILL_SWITCH=false AND
+ * LIVE_TRADING=true (Tier 11), and the canonical place flow lives
+ * on the Brokers screen with the algo-id + strategy-tag gate.
+ * ============================================================ */
+const BracketOrderPanel = () => {
+  const [symbol, setSymbol]   = React.useState("RELIANCE");
+  const [side, setSide]       = React.useState("BUY");
+  const [qty, setQty]         = React.useState(50);
+  const [entry, setEntry]     = React.useState(2950);
+  const [slOffset, setSlOff]  = React.useState(15);   // points away from entry
+  const [tgtOffset, setTgtOff]= React.useState(30);
+
+  const [submitting, setSubmitting] = React.useState(false);
+  const [result, setResult]   = React.useState(null);
+  const [error, setError]     = React.useState(null);
+
+  // Bracket maths
+  const e = Number(entry), sl = Number(slOffset), tgt = Number(tgtOffset), q = Number(qty);
+  const stopPx   = side === "BUY" ? e - sl  : e + sl;
+  const targetPx = side === "BUY" ? e + tgt : e - tgt;
+  const risk     = sl  * q;
+  const reward   = tgt * q;
+  const rr       = sl > 0 ? +(tgt / sl).toFixed(2) : null;
+
+  const inputStyle = {
+    width: "100%", padding: "6px 8px",
+    background: "var(--bg-sunk)", border: "1px solid var(--border)",
+    borderRadius: "var(--r-md)", fontFamily: "var(--mono)", fontSize: 12,
+  };
+
+  const dryRun = async () => {
+    setSubmitting(true); setResult(null); setError(null);
+    try {
+      const body = {
+        strategyTag: "ui.bracket-builder",
+        instrument:  symbol,
+        side, quantity: q, product: "BO",
+        orderType: "LIMIT", price: e,
+        bracket: { stopLossOffset: sl, targetOffset: tgt, stopLossPrice: stopPx, targetPrice: targetPx },
+        rationale: `R:R ${rr || '?'} on ${symbol} ${side} @ ${e}`,
+      };
+      const r = await window.fetchApi('/api/orders/dry-run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      setResult(r);
+    } catch (ex) {
+      setError(String(ex.message || ex));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Card
+      title="Bracket order builder"
+      sub="Entry + stop-loss + target as a single BO product · /api/orders/dry-run"
+      style={{ marginTop: 16 }}>
+      <div className="col" style={{ gap: 10 }}>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <label style={{ flex: "1 1 130px" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>Symbol</div>
+            <input style={inputStyle} value={symbol} onChange={e => setSymbol(e.target.value.toUpperCase())}/>
+          </label>
+          <label style={{ flex: "1 1 80px" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>Side</div>
+            <select style={inputStyle} value={side} onChange={e => setSide(e.target.value)}>
+              <option value="BUY">BUY</option>
+              <option value="SELL">SELL</option>
+            </select>
+          </label>
+          <label style={{ flex: "1 1 80px" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>Qty</div>
+            <input style={inputStyle} type="number" min="1" value={qty} onChange={e => setQty(e.target.value)}/>
+          </label>
+          <label style={{ flex: "1 1 110px" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>Entry ₹</div>
+            <input style={inputStyle} type="number" step="0.05" value={entry} onChange={e => setEntry(e.target.value)}/>
+          </label>
+          <label style={{ flex: "1 1 100px" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>SL offset (pts)</div>
+            <input style={inputStyle} type="number" step="0.05" min="0" value={slOffset} onChange={e => setSlOff(e.target.value)}/>
+          </label>
+          <label style={{ flex: "1 1 100px" }}>
+            <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>Target offset (pts)</div>
+            <input style={inputStyle} type="number" step="0.05" min="0" value={tgtOffset} onChange={e => setTgtOff(e.target.value)}/>
+          </label>
+        </div>
+
+        {/* live R:R card */}
+        <div style={{ padding: 10, background: "var(--bg-soft)", border: "1px solid var(--border)", borderRadius: "var(--r-md)" }}>
+          <div className="row" style={{ gap: 14, flexWrap: "wrap", fontSize: 12 }}>
+            <div><span style={{ color: "var(--text-3)" }}>Stop @</span> <span className="mono">₹{stopPx.toFixed(2)}</span></div>
+            <div><span style={{ color: "var(--text-3)" }}>Target @</span> <span className="mono">₹{targetPx.toFixed(2)}</span></div>
+            <div><span style={{ color: "var(--text-3)" }}>Risk</span> <span className="mono" style={{ color: "var(--down)" }}>-₹{Math.round(risk).toLocaleString('en-IN')}</span></div>
+            <div><span style={{ color: "var(--text-3)" }}>Reward</span> <span className="mono" style={{ color: "var(--up)" }}>+₹{Math.round(reward).toLocaleString('en-IN')}</span></div>
+            <div><span style={{ color: "var(--text-3)" }}>R:R</span> <span className="mono" style={{ fontWeight: 600 }}>1 : {rr != null ? rr : '?'}</span></div>
+          </div>
+        </div>
+
+        <button className="btn btn--accent" disabled={submitting || sl <= 0 || tgt <= 0 || q <= 0} onClick={dryRun}>
+          {submitting ? <><I.refresh size={12}/> Submitting…</> : <><I.play size={12}/> Dry-run order</>}
+        </button>
+        <div style={{ fontSize: 10, color: "var(--text-3)" }}>
+          Live placement is intentionally not exposed here — use the Brokers screen with Algo-ID + KILL_SWITCH=false.
+        </div>
+
+        {error && (
+          <div style={{ padding: 8, background: "var(--bg-soft)", border: "1px solid var(--down)", borderRadius: "var(--r-md)", color: "var(--down)", fontSize: 12 }}>
+            {error}
+          </div>
+        )}
+        {result && (
+          <div style={{ padding: 10, background: "var(--bg-soft)", border: "1px solid var(--border)", borderRadius: "var(--r-md)", fontFamily: "var(--mono)", fontSize: 11 }}>
+            <div className="row between" style={{ marginBottom: 6, fontFamily: "var(--font)" }}>
+              <span style={{ fontWeight: 500 }}>{result.ok ? '✓ accepted (dry-run)' : '✗ rejected'}</span>
+              <span style={{ color: "var(--text-3)" }}>{result.mode || ''}</span>
+            </div>
+            {result.clientOrderId && <div>clientOrderId: {result.clientOrderId}</div>}
+            {result.reason && <div style={{ color: "var(--down)" }}>reason: {result.reason}</div>}
+            {result.note && <div style={{ color: "var(--text-3)", fontFamily: "var(--font)", fontSize: 11 }}>{result.note}</div>}
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+};
+
+/* ============================================================
+ * Tiny stat pill used by ReplayPanel for the result row.
+ * ============================================================ */
+const Pill = ({ label, value, accent }) => (
+  <div style={{
+    padding: "6px 10px",
+    background: "var(--bg-soft)",
+    border: "1px solid var(--border)",
+    borderRadius: "var(--r-md)",
+    minWidth: 80,
+  }}>
+    <div style={{ fontSize: 10, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.4 }}>{label}</div>
+    <div className="mono" style={{ fontSize: 13, fontWeight: 500, color: accent === "up" ? "var(--up)" : accent === "down" ? "var(--down)" : undefined }}>
+      {value}
+    </div>
+  </div>
+);
+
 const PaperScreen = () => {
   const [account, setAccount] = useState("50L");
   const [, bump] = useState(0);
@@ -70,286 +390,4 @@ const PaperScreen = () => {
             <div className="mono" style={{ fontSize: 13, color: livePaper.realizedPnl >= 0 ? "var(--up)" : "var(--down)" }}>realized INR {livePaper.realizedPnl}</div>
             <div className="mono" style={{ fontSize: 13, color: livePaper.unrealizedPnl >= 0 ? "var(--up)" : "var(--down)" }}>unrealized INR {livePaper.unrealizedPnl}</div>
             <div className="mono" style={{ fontSize: 13 }}>positions {livePaper.openPositions}</div>
-            <div className="mono" style={{ fontSize: 13 }}>orders {livePaper.filledOrders}/{livePaper.totalOrders}</div>
-            <div className="mono" style={{ fontSize: 13 }}>winRate {livePaper.winRate}%</div>
-          </div>
-          {Array.isArray(livePositions) && livePositions.length > 0 && (
-            <div style={{ marginTop: 12, fontSize: 12 }}>
-              {livePositions.map(p => (
-                <div key={p.symbol} style={{ display: "flex", gap: 16, padding: "4px 0" }}>
-                  <span className="mono" style={{ minWidth: 100, fontWeight: 600 }}>{p.symbol}</span>
-                  <span className="mono">qty={p.qty}</span>
-                  <span className="mono">avg=INR {p.avgPrice}</span>
-                  <span className="mono">ltp=INR {p.ltp != null ? p.ltp : "-"}</span>
-                  <span className="mono" style={{ color: p.unrealizedPnl >= 0 ? "var(--up)" : "var(--down)" }}>unrealized=INR {p.unrealizedPnl}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-      <div className="page-header">
-        <div>
-          <h1 className="page-header__title">Paper trading</h1>
-          <div className="page-header__sub">Virtual capital, real market fills. Stage 2 of the pipeline — build confidence before live.</div>
-        </div>
-        <div className="page-header__right">
-          <button className="btn"><I.refresh size={14}/> Reset account</button>
-          <button className="btn btn--accent"><I.play size={14}/> Replay historical day</button>
-        </div>
-      </div>
-
-      {/* Account selector + KPIs */}
-      <Card style={{ marginBottom: 16 }}>
-        <div className="between" style={{ marginBottom: 18 }}>
-          <div className="row" style={{ gap: 12 }}>
-            <div className="muted" style={{ fontSize: 12 }}>Virtual account</div>
-            <Segmented value={account} onChange={setAccount}
-              options={accounts.map(a => ({ value: a.id, label: "₹" + a.id }))}/>
-            <Pill kind="acc" dot>Paper · identical to live layout</Pill>
-          </div>
-          <div className="row" style={{ gap: 8 }}>
-            <span className="mono" style={{ fontSize: 11, color: "var(--text-3)" }}>Since inception · 48 trading days</span>
-          </div>
-        </div>
-        <div className="grid grid-4">
-          <Stat label="Virtual capital" value={inrCompact(acc.cap)} delta={`${((acc.used/acc.cap)*100).toFixed(0)}% deployed`} deltaKind="muted"/>
-          <Stat label="Paper P&L" value={inr(acc.pnl)} delta={pct((acc.pnl/acc.cap)*100)} deltaKind={acc.pnl >= 0 ? "up" : "down"}/>
-          <Stat label="Trades" value={acc.trades} delta={`${acc.winR}% win rate`} deltaKind="muted"/>
-          <Stat label="Sharpe (ann.)" value="1.84" delta="target ≥ 1.5" deltaKind="up"/>
-        </div>
-      </Card>
-
-      {/* Per-mode paper activity — hierarchy roll-up */}
-      <Card style={{ marginBottom: 16 }} title="Paper by mode" sub="How each mode is performing in simulation — promotion gates tracked per-mode">
-        <div className="grid grid-4" style={{ gap: 10 }}>
-          {window.MODE_IDS.map(id => {
-            const meta = window.MODE_META[id];
-            const stats = {
-              intraday: { trades: 86, winR: 64, pnl: 82340,  ready: 2, testing: 1, nextPromo: "Momentum AI in 3d" },
-              swing:    { trades: 22, winR: 68, pnl: 34120,  ready: 1, testing: 2, nextPromo: "Trend Follow ready" },
-              options:  { trades: 18, winR: 72, pnl: 24820,  ready: 1, testing: 1, nextPromo: "Iron Condor in 5d" },
-              futures:  { trades: 0,  winR: 0,  pnl: 0,      ready: 0, testing: 1, nextPromo: "NIFTY Fut started" },
-            }[id];
-            const active = window.isModeActive(id);
-            return (
-              <div key={id} style={{
-                padding: 12, borderRadius: "var(--r-md)",
-                borderLeft: `3px solid ${meta.color}`,
-                background: meta.colorSoft,
-                opacity: active ? 1 : 0.5,
-              }}>
-                <div className="between" style={{ marginBottom: 8 }}>
-                  <div>
-                    <div style={{ fontSize: 10, fontFamily: "var(--mono)", color: meta.color, fontWeight: 500, letterSpacing: "0.03em" }}>{meta.shortLabel}</div>
-                    <div style={{ fontSize: 14, fontWeight: 500, marginTop: 1 }}>{meta.label}</div>
-                  </div>
-                  {!active && <Pill kind="warn">OFF</Pill>}
-                </div>
-                <div className="mono" style={{ fontSize: 18, fontWeight: 600, color: stats.pnl > 0 ? "var(--up)" : stats.pnl < 0 ? "var(--down)" : "var(--text-3)" }}>
-                  {stats.pnl > 0 ? "+" : ""}{inr(stats.pnl)}
-                </div>
-                <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-                  {stats.trades} trades · {stats.winR}% win
-                </div>
-                <div className="divider" style={{ margin: "8px 0" }}/>
-                <div className="row" style={{ justifyContent: "space-between", fontSize: 11 }}>
-                  <span><span className="mono" style={{ color: "var(--up)" }}>{stats.ready}</span> <span className="muted">ready</span></span>
-                  <span><span className="mono" style={{ color: "var(--info)" }}>{stats.testing}</span> <span className="muted">testing</span></span>
-                </div>
-                <div className="muted" style={{ fontSize: 10, marginTop: 6, fontStyle: "italic" }}>{stats.nextPromo}</div>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
-
-      {/* P&L chart */}
-      <div className="grid grid-2-1" style={{ marginBottom: 16 }}>
-        <Card title="Paper equity curve" sub="₹ vs virtual capital baseline" right={<Segmented value="30d" onChange={()=>{}} options={["7d","30d","All"]}/>}>
-          <AreaChart data={pnlSeries} height={220} color="var(--accent)" formatter={v => inrCompact(v)}
-            labels={[window.daysAgo(55), window.daysAgo(40), window.daysAgo(24), window.daysAgo(9), window.TODAY_SHORT]}/>
-        </Card>
-        <Card title="Fill quality" sub="Paper fills are calibrated to live">
-          <div className="col" style={{ gap: 14 }}>
-            {paperVsLive.map((r,i) => (
-              <div key={i}>
-                <div className="between" style={{ marginBottom: 2 }}>
-                  <div style={{ fontSize: 12, fontWeight: 500 }}>{r.k}</div>
-                  <span className="mono" style={{ fontSize: 11, color: "var(--text-3)" }}>{r.delta}</span>
-                </div>
-                <div className="row" style={{ gap: 10 }}>
-                  <span className="mono" style={{ fontSize: 11 }}><span style={{ color: "var(--text-3)" }}>paper </span>{r.paper}</span>
-                  <span style={{ color: "var(--border-strong)" }}>·</span>
-                  <span className="mono" style={{ fontSize: 11 }}><span style={{ color: "var(--text-3)" }}>live </span>{r.live}</span>
-                </div>
-                <div className="muted" style={{ fontSize: 10, marginTop: 2 }}>{r.note}</div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
-
-      {/* Paper order book + replay mode */}
-      <div className="grid grid-2-1" style={{ marginBottom: 16 }}>
-        <Card title="Paper order book" sub="Real bid/ask fills · Gaussian slippage model" flush>
-          <table className="table">
-            <thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th className="num-l">Qty</th><th className="num-l">Req</th><th className="num-l">Fill</th><th className="num-l">Slip</th><th>Strategy</th><th>Status</th></tr></thead>
-            <tbody>
-              {paperOrders.map((o,i) => (
-                <tr key={i}>
-                  <td className="mono" style={{ fontSize: 11, color: "var(--text-3)" }}>{o.t}</td>
-                  <td style={{ fontWeight: 500 }}>{o.s}</td>
-                  <td><Pill kind={o.side === "BUY" ? "up" : "down"}>{o.side}</Pill></td>
-                  <td className="num">{o.qty}</td>
-                  <td className="num">{o.req.toFixed(2)}</td>
-                  <td className="num">{o.fill.toFixed(2)}</td>
-                  <td className="num" style={{ color: o.slip > 0.3 ? "var(--warn)" : "var(--text-3)" }}>{o.slip.toFixed(2)}</td>
-                  <td><span className="muted" style={{ fontSize: 12 }}>{o.strat}</span></td>
-                  <td>{o.st === "filled" ? <Pill kind="up" dot>filled</Pill> : <Pill kind="info" dot>pending</Pill>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
-
-        <Card title="Replay mode" sub={<span>&quot;Would I have been in this trade?&quot;</span>}>
-          <div className="col" style={{ gap: 14 }}>
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 6 }}>Historical date</div>
-              <input type="text" value={window.daysAgo(7)} readOnly style={{ width: "100%", padding: "8px 10px", background: "var(--bg-sunk)", border: "1px solid var(--border)", borderRadius: "var(--r-md)", fontFamily: "var(--mono)", fontSize: 12 }}/>
-            </div>
-            <div>
-              <div className="between" style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>
-                <span>09:15</span><span>12:30</span><span>15:30</span>
-              </div>
-              <div style={{ position: "relative", height: 6, background: "var(--bg-sunk)", borderRadius: 999 }}>
-                <div style={{ width: "62%", height: "100%", background: "var(--accent)", borderRadius: 999 }}/>
-                <div style={{ position: "absolute", left: "62%", top: -4, width: 14, height: 14, borderRadius: "50%", background: "var(--accent)", border: "2px solid var(--surface)" }}/>
-              </div>
-              <div className="mono" style={{ fontSize: 11, color: "var(--text-3)", marginTop: 6, textAlign: "center" }}>
-                Playing · 13:22 IST · 4× speed
-              </div>
-            </div>
-            <div style={{ padding: 10, background: "var(--bg-soft)", border: "1px solid var(--border)", borderRadius: "var(--r-md)" }}>
-              <div style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>Signal that would have fired</div>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>BUY RELIANCE @ 2946.20</div>
-              <div className="mono" style={{ fontSize: 11, color: "var(--up)" }}>Outcome: +₹2,180 in 42min</div>
-            </div>
-            <div className="row" style={{ gap: 8 }}>
-              <button className="btn btn--sm" style={{ flex: 1 }}><I.pause size={12}/> Pause</button>
-              <button className="btn btn--sm" style={{ flex: 1 }}><I.refresh size={12}/> Restart</button>
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      {/* Promotion readiness — explicit 4-gate criteria */}
-      <Card
-        title="Promotion to live"
-        sub="A strategy auto-promotes only when ALL 4 gates pass. Any failing gate blocks promotion."
-        right={
-          <div className="row" style={{ gap: 10, fontSize: 11, color: "var(--text-3)" }}>
-            <span>Gates:</span>
-            <span className="mono">≥14 days</span>
-            <span>·</span>
-            <span className="mono">≥30 trades</span>
-            <span>·</span>
-            <span className="mono">≥60% win</span>
-            <span>·</span>
-            <span className="mono">≥1.2 Sharpe</span>
-          </div>
-        }
-        flush
-      >
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Strategy</th>
-              <th>Mode</th>
-              <th className="num-l">Days</th>
-              <th className="num-l">Trades</th>
-              <th className="num-l">Win %</th>
-              <th className="num-l">Sharpe</th>
-              <th className="num-l">Max DD</th>
-              <th style={{ textAlign: "center" }}>Gates (days / trades / win / sharpe)</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {[
-              { n: "Momentum AI",        d: 48, t: 142, w: 71, sh: 1.84, dd: "-3.2%" },
-              { n: "Mean Reversion v2",  d: 42, t:  89, w: 66, sh: 1.42, dd: "-4.8%" },
-              { n: "Iron Condor Weekly", d: 45, t:  34, w: 82, sh: 2.14, dd: "-1.8%" },
-              { n: "Breakout Scalper",   d: 22, t:  62, w: 58, sh: 1.10, dd: "-2.6%" },
-              { n: "Covered Call",       d: 28, t:  12, w: 66, sh: 1.40, dd: "-1.2%" },
-              { n: "Grid Trader",        d: 80, t: 310, w: 52, sh: 0.72, dd: "-7.2%" },
-              { n: "Stock Futures Momentum", d: 22, t: 6, w: 58, sh: 1.20, dd: "-2.4%" },
-            ].map((s, i) => {
-              const stratMeta = window.getStrategy(s.n);
-              const mode = stratMeta?.mode || "intraday";
-              const modeMeta = window.MODE_META[mode];
-              // 4 independent gates
-              const gates = [
-                { id: "days",   ok: s.d >= 14,  label: `${s.d}d`,        tip: "Min 14 paper days" },
-                { id: "trades", ok: s.t >= 30,  label: `${s.t}`,         tip: "Min 30 paper trades" },
-                { id: "win",    ok: s.w >= 60,  label: `${s.w}%`,        tip: "Min 60% win rate" },
-                { id: "sharpe", ok: s.sh >= 1.2,label: s.sh.toFixed(2),  tip: "Min 1.2 Sharpe" },
-              ];
-              const allPass = gates.every(g => g.ok);
-              const failingGate = gates.find(g => !g.ok);
-              return (
-                <tr key={i}>
-                  <td style={{ fontWeight: 500 }}>{s.n}</td>
-                  <td>
-                    <span className="row" style={{ gap: 6 }}>
-                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: modeMeta.color }}/>
-                      <span className="mono" style={{ fontSize: 11, color: modeMeta.color }}>{modeMeta.shortLabel}</span>
-                    </span>
-                  </td>
-                  <td className="num">{s.d}</td>
-                  <td className="num">{s.t}</td>
-                  <td className="num">{s.w}%</td>
-                  <td className="num" style={{ color: s.sh >= 1.2 ? "var(--up)" : "var(--warn)" }}>{s.sh.toFixed(2)}</td>
-                  <td className="num">{s.dd}</td>
-                  <td>
-                    <div className="row" style={{ gap: 3, justifyContent: "center" }}>
-                      {gates.map(g => (
-                        <span key={g.id} title={g.tip + " — " + g.label}
-                          style={{
-                            width: 20, height: 20, borderRadius: 4,
-                            display: "grid", placeItems: "center",
-                            background: g.ok ? "var(--up-soft)" : "var(--down-soft)",
-                            color: g.ok ? "var(--up)" : "var(--down)",
-                            fontSize: 11, fontWeight: 600,
-                          }}>
-                          {g.ok ? "✓" : "✕"}
-                        </span>
-                      ))}
-                    </div>
-                  </td>
-                  <td>
-                    {allPass ? (
-                      <button className="btn btn--sm btn--primary" style={{ whiteSpace: "nowrap" }}>→ Promote to live</button>
-                    ) : (
-                      <button className="btn btn--sm" disabled style={{ opacity: 0.5, whiteSpace: "nowrap" }}>
-                        Blocked: {failingGate.id}
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", background: "var(--bg-soft)", fontSize: 11, color: "var(--text-3)" }}>
-          <I.info size={12} style={{ verticalAlign: -1, marginRight: 6 }}/>
-          Gates are enforced by <code>ai-router</code> before every <code>paper.promote_to_live()</code> call. Override requires manual confirmation + audit log entry.
-        </div>
-      </Card>
-      </Wrap>
-    </>
-  );
-};
-
-Object.assign(window, { PaperScreen });
+            <div className="mono" style={{ fontSize: 13 }}>orders {liv
