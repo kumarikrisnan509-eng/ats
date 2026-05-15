@@ -3,6 +3,26 @@
 
 const SettingsScreen = () => {
   const [tab, setTab] = useState("Profile");
+  // Tier 17: live profile + system info for the Profile + API Keys tabs
+  const [liveProf, setLiveProf] = React.useState(null);
+  const [liveInfo, setLiveInfo] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const [p, i] = await Promise.all([
+          window.fetchApi('/api/profile').catch(() => null),
+          window.fetchApi('/api/system/info').catch(() => null),
+        ]);
+        if (cancelled) return;
+        if (p && p.ok) setLiveProf(p);
+        if (i) setLiveInfo(i);
+      } catch (_e) {}
+    };
+    load();
+    const t = setInterval(load, 60000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
   const [, bump] = useState(0);
   React.useEffect(() => {
     const h = () => bump(n => n + 1);

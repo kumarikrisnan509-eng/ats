@@ -1,6 +1,67 @@
 /* eslint-disable */
 /* Risk screen */
 
+// Tier 17: live risk-cap usage from /api/system/info + /api/paper + /api/summary
+const LiveRiskCards = () => {
+  const [data, setData] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const [info, paper, summary, audit] = await Promise.all([
+          window.fetchApi('/api/system/info').catch(() => null),
+          window.fetchApi('/api/paper').catch(() => null),
+          window.fetchApi('/api/summary').catch(() => null),
+          window.fetchApi('/api/audit?limit=200').catch(() => null),
+        ]);
+        if (cancelled) return;
+        const caps = info && info.components && info.components.riskCaps ? info.components.riskCaps : {};
+        const ps   = paper && paper.stats ? paper.stats : {};
+        const positionsCount = summary && summary.aggregates ? (summary.aggregates.positionsNetCount || 0) : 0;
+        // Count audit entries for 'blocked' events in last 7d as breaches
+        const since = Date.now() - 7*24*3600*1000;
+        const breaches = audit && audit.ok && Array.isArray(audit.rows)
+          ? audit.rows.filter(r => String(r.event || '').includes('blocked') && new Date(r.ts || 0).getTime() >= since).length : 0;
+        setData({
+          dailyLossCap:    caps.maxDailyLossINR     || 0,
+          dailyLossUsed:   Math.max(0, -(ps.realizedPnl || 0)),
+          aggExposureCap:  caps.maxAggregateExposureINR || 0,
+          ordersInWindow:  caps.ordersInWindow || 0,
+          maxOrdersPerMin: caps.maxOrdersPerMin || 0,
+          positionsCount,
+          breaches,
+        });
+      } catch (_e) {}
+    };
+    load();
+    const t = setInterval(load, 15000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
+  if (!data) return <Card><Stat label='Loading risk caps…' value='—'/></Card>;
+  const dailyLossPct = data.dailyLossCap > 0 ? Math.min(100, Math.round((data.dailyLossUsed / data.dailyLossCap) * 100)) : 0;
+  const rateLimPct   = data.maxOrdersPerMin > 0 ? Math.min(100, Math.round((data.ordersInWindow / data.maxOrdersPerMin) * 100)) : 0;
+  return (
+    <>
+      <Card>
+        <Stat label="Daily loss used (paper)" value={inr(data.dailyLossUsed)} delta={`of ${inr(data.dailyLossCap)} cap`} deltaKind="muted" sub={`${dailyLossPct}%`}/>
+        <div style={{ marginTop: 12 }}><Progress value={dailyLossPct} kind={dailyLossPct > 70 ? "down" : dailyLossPct > 0 ? "warn" : "up"}/></div>
+      </Card>
+      <Card>
+        <Stat label="Aggregate exposure cap" value={inrCompact(data.aggExposureCap)} delta="₹20L default (Tier 16)" deltaKind="muted" sub="enforced pre-order"/>
+        <div style={{ marginTop: 12 }}><Progress value={0} kind="info"/></div>
+      </Card>
+      <Card>
+        <Stat label="Open positions" value={String(data.positionsCount)} delta="from Kite" deltaKind="muted" sub="net positions"/>
+        <div style={{ marginTop: 12 }}><Progress value={Math.min(100, data.positionsCount * 6)} kind="up"/></div>
+      </Card>
+      <Card>
+        <Stat label="Order rate (60s)" value={`${data.ordersInWindow}/${data.maxOrdersPerMin}`} delta={`breaches 7d: ${data.breaches}`} deltaKind="muted" sub={`${rateLimPct}%`}/>
+        <div style={{ marginTop: 12 }}><Progress value={rateLimPct} kind={rateLimPct > 70 ? "down" : "up"}/></div>
+      </Card>
+    </>
+  );
+};
+
 const RiskScreen = () => {
   const [kill, setKill] = useState(false);
 
@@ -36,38 +97,7 @@ const RiskScreen = () => {
         </div>
       </Card>
 
-      <div className="grid grid-4" style={{ marginBottom: 16 }}>
-        {(() => {
-          // Live drift around base values to make gauges breathe
-          useLiveTick();
-          const t = Math.floor(Date.now() / 800);
-          const drift = (seed) => (Math.sin(t / 30 + seed) * 0.5 + 0.5);
-          const dailyLossPct = 32 + drift(1) * 6;
-          const marginPct = 41 + drift(2) * 4;
-          const dailyLossInr = Math.round(15000 * (dailyLossPct / 100));
-          const marginInr = Math.round(2884000 * (marginPct / 100));
-          return (
-            <>
-              <Card>
-                <Stat label="Daily loss used" value={<><CountUp value={dailyLossInr} format={v => inr(Math.round(v))}/></>} delta="of ₹15,000 cap" deltaKind="muted" sub={<>{Math.round(dailyLossPct)}% <StaleIndicator/></>}/>
-                <div style={{ marginTop: 12 }}><Progress value={dailyLossPct} kind={dailyLossPct > 70 ? "down" : "warn"}/></div>
-              </Card>
-              <Card>
-                <Stat label="Margin used" value={<><CountUp value={marginInr} format={v => inrCompact(Math.round(v))}/></>} delta="of 28.4L available" deltaKind="muted" sub={`${Math.round(marginPct)}%`}/>
-                <div style={{ marginTop: 12 }}><Progress value={marginPct} kind="info"/></div>
-              </Card>
-              <Card>
-                <Stat label="Open positions" value="5" delta="of 15 cap" deltaKind="muted" sub="33%"/>
-                <div style={{ marginTop: 12 }}><Progress value={33} kind="up"/></div>
-              </Card>
-              <Card>
-                <Stat label="Breaches (7d)" value="1" delta="auto-resolved" deltaKind="muted" sub="no incident"/>
-                <div style={{ marginTop: 12 }}><Progress value={8} kind="up"/></div>
-              </Card>
-            </>
-          );
-        })()}
-      </div>
+      <div className="grid grid-4" style={{ marginBottom: 16 }}><LiveRiskCards/></div>
 
       {/* Per-mode limits — capital & loss ceilings per trading mode */}
       <Card title="Per-mode limits" sub="Capital allocation and daily loss caps per mode. Breach → mode pauses, others continue." style={{ marginBottom: 16 }} flush>

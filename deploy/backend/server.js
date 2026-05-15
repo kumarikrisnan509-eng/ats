@@ -902,6 +902,40 @@ const STRATEGIES = [
       { name: 'period', type: 'int', default: 20, min: 5, max: 100 },
     ],
   },
+  // ---------- Tier 17: 3 more TA strategies (10 total, building toward 22-layer goal) ----------
+  {
+    id: 'stochastic',
+    name: 'Stochastic %K cross',
+    description: 'Long-only: BUY when %K crosses above %D in oversold region; SELL when %K crosses below %D in overbought region.',
+    bias: 'mean-reverting markets, oscillating',
+    params: [
+      { name: 'period',     type: 'int',   default: 14, min: 5,  max: 50 },
+      { name: 'smoothK',    type: 'int',   default: 3,  min: 1,  max: 10 },
+      { name: 'smoothD',    type: 'int',   default: 3,  min: 1,  max: 10 },
+      { name: 'oversold',   type: 'float', default: 20, min: 0,  max: 50 },
+      { name: 'overbought', type: 'float', default: 80, min: 50, max: 100 },
+    ],
+  },
+  {
+    id: 'williams_r',
+    name: "Williams %R",
+    description: 'Long-only: BUY when %R crosses up through oversold (-80 default); SELL when %R crosses down through overbought (-20).',
+    bias: 'mean-reverting markets, oscillating',
+    params: [
+      { name: 'period',     type: 'int',   default: 14, min: 5,    max: 50 },
+      { name: 'oversold',   type: 'float', default: -80, min: -100, max: -50 },
+      { name: 'overbought', type: 'float', default: -20, min: -50,  max: 0   },
+    ],
+  },
+  {
+    id: 'heikin_ashi',
+    name: 'Heikin-Ashi trend',
+    description: 'Long-only: BUY after N consecutive bullish Heikin-Ashi candles; SELL after N consecutive bearish ones.',
+    bias: 'trending markets, momentum',
+    params: [
+      { name: 'run', type: 'int', default: 3, min: 2, max: 10 },
+    ],
+  },
 ];
 
 app.get('/api/strategies', (_req, res) => {

@@ -43,6 +43,12 @@ function runBacktest({ candles, strategy, params, qty }) {
     signal = signalAdxTrend(candles, params);
   } else if (strategy === 'donchian') {
     signal = signalDonchian(candles, params);
+  } else if (strategy === 'stochastic') {
+    signal = signalStochastic(candles, params);
+  } else if (strategy === 'williams_r') {
+    signal = signalWilliamsR(candles, params);
+  } else if (strategy === 'heikin_ashi') {
+    signal = signalHeikinAshi(candles, params);
   } else {
     throw new Error(`unknown strategy: ${strategy}`);
   }
@@ -293,6 +299,110 @@ function signalDonchian(candles, params) {
   return out;
 }
 
+/**
+ * Stochastic oscillator (slow): K = SMA(raw_k, smoothK); D = SMA(K, smoothD).
+ *   BUY  when K crosses above D in oversold region (<oversold).
+ *   SELL when K crosses below D in overbought region (>overbought).
+ */
+function signalStochastic(candles, params) {
+  const period      = params.period      || 14;
+  const smoothK     = params.smoothK     || 3;
+  const smoothD     = params.smoothD     || 3;
+  const oversold    = params.oversold    || 20;
+  const overbought  = params.overbought  || 80;
+  const n = candles.length;
+  const rawK = new Array(n).fill(NaN);
+  for (let i = period - 1; i < n; i++) {
+    let hi = -Infinity, lo = Infinity;
+    for (let j = i - period + 1; j <= i; j++) {
+      if (candles[j].high > hi) hi = candles[j].high;
+      if (candles[j].low  < lo) lo = candles[j].low;
+    }
+    const c = candles[i].close;
+    rawK[i] = hi === lo ? 50 : ((c - lo) / (hi - lo)) * 100;
+  }
+  const sma = (arr, p, i) => {
+    let s = 0;
+    for (let j = i - p + 1; j <= i; j++) {
+      if (!Number.isFinite(arr[j])) return NaN;
+      s += arr[j];
+    }
+    return s / p;
+  };
+  const k = new Array(n).fill(NaN);
+  for (let i = period + smoothK - 2; i < n; i++) k[i] = sma(rawK, smoothK, i);
+  const d = new Array(n).fill(NaN);
+  for (let i = period + smoothK + smoothD - 3; i < n; i++) d[i] = sma(k, smoothD, i);
+  const out = new Array(n).fill(null);
+  for (let i = period + smoothK + smoothD; i < n; i++) {
+    const kNow = k[i], kPrev = k[i - 1];
+    const dNow = d[i], dPrev = d[i - 1];
+    if (!Number.isFinite(kNow) || !Number.isFinite(dNow)) continue;
+    const crossUp   = kNow > dNow && kPrev <= dPrev;
+    const crossDown = kNow < dNow && kPrev >= dPrev;
+    if (crossUp && kNow < oversold + 20) out[i] = 'BUY';
+    else if (crossDown && kNow > overbought - 20) out[i] = 'SELL';
+  }
+  return out;
+}
+
+/**
+ * Williams %R: -100 * (highest_high - close) / (highest_high - lowest_low) over N bars.
+ *   Range: -100 (oversold) to 0 (overbought).
+ *   BUY  when %R crosses up through oversold threshold (default -80).
+ *   SELL when %R crosses down through overbought threshold (default -20).
+ */
+function signalWilliamsR(candles, params) {
+  const period     = params.period     || 14;
+  const oversold   = params.oversold   || -80;
+  const overbought = params.overbought || -20;
+  const n = candles.length;
+  const wr = new Array(n).fill(NaN);
+  for (let i = period - 1; i < n; i++) {
+    let hi = -Infinity, lo = Infinity;
+    for (let j = i - period + 1; j <= i; j++) {
+      if (candles[j].high > hi) hi = candles[j].high;
+      if (candles[j].low  < lo) lo = candles[j].low;
+    }
+    const c = candles[i].close;
+    wr[i] = hi === lo ? -50 : -100 * (hi - c) / (hi - lo);
+  }
+  const out = new Array(n).fill(null);
+  for (let i = period + 1; i < n; i++) {
+    const w = wr[i], wPrev = wr[i - 1];
+    if (!Number.isFinite(w) || !Number.isFinite(wPrev)) continue;
+    if (w > oversold   && wPrev <= oversold)   out[i] = 'BUY';
+    if (w < overbought && wPrev >= overbought) out[i] = 'SELL';
+  }
+  return out;
+}
+
+/**
+ * Heikin-Ashi trend: smoothed candles. BUY when N consecutive HA candles are bullish
+ * (HA close > HA open) after a bearish run; SELL after N consecutive bearish HA candles.
+ */
+function signalHeikinAshi(candles, params) {
+  const run = params.run || 3;
+  const n = candles.length;
+  const haO = new Array(n).fill(NaN);
+  const haC = new Array(n).fill(NaN);
+  for (let i = 0; i < n; i++) {
+    const c = candles[i];
+    haC[i] = (c.open + c.high + c.low + c.close) / 4;
+    haO[i] = i === 0 ? (c.open + c.close) / 2 : (haO[i-1] + haC[i-1]) / 2;
+  }
+  const out = new Array(n).fill(null);
+  let bullRun = 0, bearRun = 0, lastSig = null;
+  for (let i = 1; i < n; i++) {
+    const bull = haC[i] > haO[i];
+    if (bull) { bullRun++; bearRun = 0; }
+    else      { bearRun++; bullRun = 0; }
+    if (bullRun === run && lastSig !== 'BUY')   { out[i] = 'BUY';  lastSig = 'BUY';  }
+    if (bearRun === run && lastSig !== 'SELL')  { out[i] = 'SELL'; lastSig = 'SELL'; }
+  }
+  return out;
+}
+
 function computeSignal({ candles, strategy, params }) {
   if (!Array.isArray(candles) || candles.length < 30) return [];
   const closes = candles.map(c => c.close);
@@ -304,6 +414,9 @@ function computeSignal({ candles, strategy, params }) {
   if (strategy === 'supertrend')      return signalSupertrend(candles, params);
   if (strategy === 'adx_trend')       return signalAdxTrend(candles, params);
   if (strategy === 'donchian')        return signalDonchian(candles, params);
+  if (strategy === 'stochastic')      return signalStochastic(candles, params);
+  if (strategy === 'williams_r')      return signalWilliamsR(candles, params);
+  if (strategy === 'heikin_ashi')     return signalHeikinAshi(candles, params);
   throw new Error('unknown strategy: ' + strategy);
 }
 

@@ -2,6 +2,26 @@
 /* Compliance screen — SEBI algo framework readiness */
 
 const ComplianceScreen = () => {
+  // Tier 17: this screen has zero backend wiring. Showing fully fabricated data in
+  // production is a regulatory and trust risk. Demo-gated until a real backend
+  // module lands. Enable Demo mode in your profile menu to preview the planned UI.
+  const [_demo] = window.useDemoMode ? window.useDemoMode() : [false];
+  if (!_demo) {
+    return (
+      <div style={{ padding: 24, maxWidth: 720, margin: '40px auto', textAlign: 'center' }}>
+        <div style={{ fontSize: 12, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.6 }}>Compliance & SEBI readiness</div>
+        <div style={{ fontSize: 22, fontWeight: 600, marginTop: 4 }}>Coming soon</div>
+        <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 8, lineHeight: 1.5 }}>
+          This screen does not yet have a real backend wired. Until compliance & sebi readiness data is sourced from live broker / partner APIs, showing hardcoded sample data is misleading and unsafe.
+          Enable <b>Demo mode</b> in your profile menu to preview the planned UI.
+        </div>
+        <div style={{ marginTop: 16, fontSize: 11, color: 'var(--text-3)' }}>
+          Backend module: not yet implemented. Track progress in repo deploy/backend/.
+        </div>
+      </div>
+    );
+  }
+
   const [shape, setShape] = useState("byok");
 
   const checklist = [
