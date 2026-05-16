@@ -550,31 +550,46 @@ const NotificationsBell = ({ setRoute }) => {
 // Falls back to "—" with a "Kite reconnect needed" badge when token expired.
 const ProfileMenu = ({ setRoute }) => {
   const [open, setOpen] = React.useState(false);
-  const [demo, setDemo] = window.useDemoMode();
-  const [me, setMe] = React.useState(null);
-  const [meErr, setMeErr] = React.useState(false);
+  // T83: source identity from the authenticated USER (not global Kite profile),
+  // and broker status from the user's own brokers (not /api/health).
+  const [meBroker, setMeBroker] = React.useState(null);
   React.useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
-        const r = await window.fetchApi('/api/profile');
+        const r = await window.fetchApi('/api/v1/me/brokers');
         if (cancelled) return;
-        if (r && r.ok && (r.user_name || r.email)) { setMe(r); setMeErr(false); }
-        else setMeErr(true);
-      } catch (_e) { setMeErr(true); }
+        if (r && r.ok && Array.isArray(r.brokers) && r.brokers.length > 0) {
+          // Pick the default broker, else first.
+          const def = r.brokers.find(b => b.is_default) || r.brokers[0];
+          setMeBroker(def);
+        } else {
+          setMeBroker(null);
+        }
+      } catch (_e) { setMeBroker(null); }
     };
     load();
     const t = setInterval(load, 60000);
     return () => { cancelled = true; clearInterval(t); };
   }, []);
+  const user = window.atsCurrentUser || {};
+  const fullName = user.name || (user.email ? user.email.split('@')[0] : '');
   const initials = (() => {
-    const n = (me && (me.user_name || me.user_shortname)) || '';
-    if (!n) return 'RS';
-    const parts = n.trim().split(/\s+/);
+    if (!fullName) return 'RS';
+    const parts = fullName.trim().split(/\s+/);
     return ((parts[0] || '')[0] || '') + ((parts[parts.length-1] || '')[0] || '') || 'RS';
   })().toUpperCase();
-  const displayName  = (me && (me.user_name || me.user_shortname)) || (meErr ? 'Kite — reconnect' : '…');
-  const displayEmail = (me && me.email) || (meErr ? 'Token expired or broker disconnected' : '');
+  const displayName  = fullName || user.email || 'You';
+  // T83 broker badge: derive subtitle from per-user broker status.
+  let displayEmail = user.email || '';
+  if (meBroker) {
+    if (meBroker.token_status === 'valid') displayEmail = `Kite · connected · ${meBroker.broker_user_id}`;
+    else if (meBroker.token_status === 'expiring_soon') displayEmail = `Kite · expiring soon · click Brokers`;
+    else if (meBroker.token_status === 'expired') displayEmail = `Kite · token expired · click Brokers`;
+    else displayEmail = `Kite · needs OAuth`;
+  } else if (!meBroker && user.id) {
+    displayEmail = 'No broker connected · click Brokers to add one';
+  }
   const nav = (r) => { setOpen(false); setRoute && setRoute(r); };
   return (
     <div style={{ position: "relative" }}>
@@ -624,19 +639,7 @@ const ProfileMenu = ({ setRoute }) => {
                 </button>
               ))}
             </div>
-            <div style={{ borderTop: "1px solid var(--border)", padding: "8px 16px" }}>
-              <div className="between" style={{ padding: "4px 0" }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}>
-                    <I.sparkle size={12}/> Demo mode
-                  </div>
-                  <div className="muted" style={{ fontSize: 10, marginTop: 1 }}>
-                    {demo ? "Clean slate · empty data" : "Seeded sample data"}
-                  </div>
-                </div>
-                <Toggle on={demo} onClick={() => setDemo(!demo)}/>
-              </div>
-            </div>
+
             <div style={{ borderTop: "1px solid var(--border)", padding: "6px 0" }}>
               <button
                 className="btn btn--ghost"
