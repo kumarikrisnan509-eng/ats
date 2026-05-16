@@ -27,7 +27,9 @@ const { Alerts }       = require('./alerts');
 const { Watchlist }    = require('./watchlist');
 const { Scanner, classifyRegime } = require('./scanner');
 const { NseSurveillance } = require('./nse-surveillance');     // T99-E2 ASM/GSM/T2T gate
+const { EarningsCalendar } = require('./earnings-calendar');   // E4 NSE event-calendar feed
 let _surveillance = null;     // T99-E2 NseSurveillance instance (lazy refresh)
+let _earningsCal = null;       // E4 EarningsCalendar instance (lazy refresh)
 const { runBacktest, computeSignal } = require('./backtest');
 const { PaperTrading } = require('./paper');
 const { PnlAttribution } = require('./pnl-attribution');
@@ -133,6 +135,10 @@ async function init() {
   _surveillance = new NseSurveillance({});
   // Kick off a warm-up refresh in the background; don't block boot.
   _surveillance.refresh().catch(e => console.warn('[server] surveillance warm-up failed:', e.message));
+
+  // E4 earnings calendar
+  _earningsCal = new EarningsCalendar({});
+  _earningsCal.refresh().catch(e => console.warn('[server] earnings-cal warm-up failed:', e.message));
 
   scanner = new Scanner({
     broker,
@@ -497,6 +503,15 @@ app.get('/api/health-deep', async (_req, res) => {
       checks.surveillance = false;
     }
   } catch (e) { checks.surveillance = false; }
+  // E4 earnings calendar staleness
+  try {
+    if (_earningsCal) {
+      const st = _earningsCal.status();
+      checks.earningsCal = st.ready;
+      checks.earningsCalCount = st.eventCount;
+      checks.earningsCalAgeMin = st.ageMs != null ? Math.round(st.ageMs / 60000) : null;
+    } else { checks.earningsCal = false; }
+  } catch (e) { checks.earningsCal = false; }
 
   // T-I1: surface last DR test status (warns when >30 days old)
   try {
@@ -1591,6 +1606,33 @@ app.post('/api/me/paper/promote-check', (req, res) => {
     });
   } catch (e) {
     res.status(500).json({ ok: false, reason: 'promote_check_failed', detail: e.message });
+  }
+});
+
+// ============ E4: NSE earnings / corporate events ============
+// Public-ish (auth-gated). All read from _earningsCal which caches NSE 6h.
+app.get('/api/me/earnings/upcoming', async (req, res) => {
+  if (!req.user || !req.user.id) return res.status(401).json({ ok: false, reason: 'auth_required' });
+  if (!_earningsCal) return res.status(503).json({ ok: false, reason: 'earnings_cal_not_ready' });
+  try {
+    const days = Math.max(1, Math.min(60, parseInt(req.query.days || '14', 10)));
+    const category = req.query.category || null;
+    const events = await _earningsCal.upcoming({ days, category });
+    res.json({ ok: true, days, category: category || 'all', count: events.length, events });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: 'earnings_upcoming_failed', detail: e.message });
+  }
+});
+
+app.get('/api/me/earnings/symbol/:sym', async (req, res) => {
+  if (!req.user || !req.user.id) return res.status(401).json({ ok: false, reason: 'auth_required' });
+  if (!_earningsCal) return res.status(503).json({ ok: false, reason: 'earnings_cal_not_ready' });
+  try {
+    const days = Math.max(7, Math.min(180, parseInt(req.query.days || '60', 10)));
+    const events = await _earningsCal.forSymbol(req.params.sym, { days });
+    res.json({ ok: true, symbol: req.params.sym.toUpperCase(), days, count: events.length, events });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: 'earnings_symbol_failed', detail: e.message });
   }
 });
 
@@ -2979,6 +3021,7 @@ app.use('/api/me/ai-workflows', (req, res, next) => {
       _aiWorkflowsRouter = createAiWorkflowsRouter({
         db, vault, requireAuth: auth.requireAuth, STRATEGIES,
         brokerResolver: _brokerResolver, surveillance: _surveillance,
+        earningsCal: _earningsCal,
       });
       return _aiWorkflowsRouter(req, res, next);
     }

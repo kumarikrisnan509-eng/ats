@@ -79,7 +79,7 @@ function _capCheck(db, userId, workflow, provider, model, est_cost_inr) {
   return { blocked: false };
 }
 
-function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES, brokerResolver, surveillance }) {
+function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES, brokerResolver, surveillance, earningsCal }) {
   const express = require('express');
   const router = express.Router();
   router.use(express.json({ limit: '32kb' }));
@@ -317,6 +317,23 @@ Return JSON review only.`,
         if (surveillance) surveillanceVerdict = surveillance.classifySync(symbol);
       } catch (_) {}
 
+      // 3b. Upcoming corporate events (E4)
+      let earningsContext = null;
+      try {
+        if (earningsCal) {
+          const events = await earningsCal.forSymbol(symbol, { days: 45 });
+          if (events && events.length) {
+            const next = events[0];
+            earningsContext = {
+              days_until: next.days_until,
+              category: next.category,
+              purpose: next.purpose.slice(0, 120),
+              count_within_45d: events.length,
+            };
+          }
+        }
+      } catch (e) { /* non-fatal */ }
+
       // 4. Recent trend summary (last 5 daily closes + volumes)
       const recent = (() => {
         if (!Array.isArray(candles) || candles.length < 5) return null;
@@ -385,11 +402,13 @@ Symbol last 5d volumes: ${recent ? JSON.stringify(recent.last_5_vols) : 'unknown
 Symbol 5d move: ${recent ? recent.pct_move_5d + '%' : 'unknown'}
 NIFTY 50 ${benchMove ? benchMove.days + 'd move' : 'recent move'}: ${benchMove ? benchMove.pct_move + '%' : 'unknown'}
 Surveillance status: ${surveillanceVerdict ? `${surveillanceVerdict.list} (${surveillanceVerdict.reason})` : 'clean'}
+Upcoming corporate event: ${earningsContext ? `${earningsContext.category} in ${earningsContext.days_until} day(s) -- ${earningsContext.purpose}` : 'none in next 45 days'}
 
 Be MORE skeptical when:
 - the symbol is in a different regime than NIFTY (e.g. symbol in high_vol while index in trending_up)
 - the symbol's 5d move is already >5% in the direction the signal suggests
 - surveillance is non-clean (this should usually flip verdict to reject)
+- a financial-results / dividend / fund-raising event is within 3 days (intraday trades into earnings carry asymmetric overnight risk)
 
 Return JSON verdict only.`;
       const fullPrompt = { system: prompt.system, user: enrichedUser };
@@ -414,6 +433,7 @@ Return JSON verdict only.`;
           pct_move_5d: recent ? recent.pct_move_5d : null,
           bench_pct_move: benchMove ? benchMove.pct_move : null,
           surveillance: surveillanceVerdict,
+          earnings: earningsContext,
         },
       };
       _cachePut(cacheKey, { ts: Date.now(), response: norm, cost_inr, provider: routed.provider, model: routed.model, call_id });
