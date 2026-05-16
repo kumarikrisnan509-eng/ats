@@ -30,10 +30,12 @@ const { NseSurveillance } = require('./nse-surveillance');     // T99-E2 ASM/GSM
 const { EarningsCalendar } = require('./earnings-calendar');   // E4 NSE event-calendar feed
 const { FiiDii } = require('./fii-dii');                       // E7 NSE FII/DII activity feed
 const { BulkDeals } = require('./bulk-deals');                 // E8 NSE bulk + block deals
+const { MfData } = require('./mf-data');                       // G8 AMFI scheme master + MFAPI NAVs
 let _surveillance = null;     // T99-E2 NseSurveillance instance (lazy refresh)
 let _earningsCal = null;       // E4 EarningsCalendar instance (lazy refresh)
 let _fiidii = null;             // E7 FiiDii instance (lazy refresh)
 let _bulkDeals = null;          // E8 BulkDeals instance (lazy refresh)
+let _mfData = null;             // G8 MfData instance (lazy refresh)
 const { runBacktest, computeSignal } = require('./backtest');
 const { PaperTrading } = require('./paper');
 const { PnlAttribution } = require('./pnl-attribution');
@@ -151,6 +153,10 @@ async function init() {
   // E8 bulk / block deals
   _bulkDeals = new BulkDeals({});
   _bulkDeals.refresh().catch(e => console.warn('[server] bulk-deals warm-up failed:', e.message));
+
+  // G8 mutual-fund scheme master + NAVs
+  _mfData = new MfData({});
+  _mfData.refreshMaster().catch(e => console.warn('[server] mf-data warm-up failed:', e.message));
 
   scanner = new Scanner({
     broker,
@@ -542,6 +548,15 @@ app.get('/api/health-deep', async (_req, res) => {
       checks.bulkDealsCounts = { bulk: st.bulk, block: st.block, short: st.short };
     } else { checks.bulkDeals = false; }
   } catch (e) { checks.bulkDeals = false; }
+  // G8 MF data staleness
+  try {
+    if (_mfData) {
+      const st = _mfData.status();
+      checks.mfData = st.ready;
+      checks.mfSchemeCount = st.schemeCount;
+      checks.mfAgeMin = st.ageMs != null ? Math.round(st.ageMs / 60000) : null;
+    } else { checks.mfData = false; }
+  } catch (e) { checks.mfData = false; }
 
   // T-I1: surface last DR test status (warns when >30 days old)
   try {
@@ -1700,6 +1715,32 @@ app.get('/api/me/bulk-deals/symbol/:sym', async (req, res) => {
     res.json({ ok: true, symbol: req.params.sym.toUpperCase(), count: deals.length, deals });
   } catch (e) {
     res.status(500).json({ ok: false, reason: 'bulk_deals_symbol_failed', detail: e.message });
+  }
+});
+
+// ============ G8: mutual-fund search + NAV history ============
+app.get('/api/me/mf/search', async (req, res) => {
+  if (!req.user || !req.user.id) return res.status(401).json({ ok: false, reason: 'auth_required' });
+  if (!_mfData) return res.status(503).json({ ok: false, reason: 'mf_not_ready' });
+  try {
+    const q = req.query.q || '';
+    if (!q || q.length < 2) return res.json({ ok: true, q, count: 0, schemes: [] });
+    const limit = Math.max(5, Math.min(50, parseInt(req.query.limit || '20', 10)));
+    const schemes = await _mfData.search(q, { limit });
+    res.json({ ok: true, q, count: schemes.length, schemes });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: 'mf_search_failed', detail: e.message });
+  }
+});
+
+app.get('/api/me/mf/nav/:code', async (req, res) => {
+  if (!req.user || !req.user.id) return res.status(401).json({ ok: false, reason: 'auth_required' });
+  if (!_mfData) return res.status(503).json({ ok: false, reason: 'mf_not_ready' });
+  try {
+    const data = await _mfData.navHistory(req.params.code);
+    res.json({ ok: true, ...data, navs_count: data.navs.length });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: 'mf_nav_failed', detail: e.message });
   }
 });
 
