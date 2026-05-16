@@ -311,6 +311,14 @@ try {
 } catch (e) { console.error('[server] market-meta init failed:', e && e.message); }
 
 app.get('/api/market/holidays', (_req, res) => {
+  // Lazy init: broker may have been async at module-load time
+  if (!_marketMeta && db && broker) {
+    try {
+      const { createMarketMeta } = require('./market-meta');
+      _marketMeta = createMarketMeta({ db, broker });
+      _marketMeta.scheduleDailyRefresh();
+    } catch (e) { console.error('[server] market-meta lazy init failed:', e.message); }
+  }
   if (!_marketMeta) return res.status(503).json({ ok: false, reason: 'market_meta_unavailable' });
   const r = _marketMeta.getHolidays();
   res.json({ ok: true, ...r });
@@ -2373,7 +2381,7 @@ app.get('/api/me/paper', withAuth((req, res) => {
 // Tier 72: paper-trade order placement using live LTP from the global ticker.
 // Body: { symbol, side: 'BUY'|'SELL', qty, slippageBps?, strategy? }
 // The fill price = current WS LTP +/- slippage. Records to paper_orders + paper_positions.
-app.post('/api/me/paper/order', withAuth((req, res) => {
+app.post('/api/me/paper/order', withAuth(async (req, res) => {
   try {
     const b = req.body || {};
     const symbol = String(b.symbol || '').toUpperCase().trim();
@@ -2386,9 +2394,17 @@ app.post('/api/me/paper/order', withAuth((req, res) => {
     // Get current LTP from the global ticker (market data, not user-specific).
     let ltp = null;
     try {
-      if (broker && broker.instruments && typeof broker.instruments.lastTickFor === 'function') {
-        const t = broker.instruments.lastTickFor(symbol);
-        if (t && t.ltp) ltp = Number(t.ltp);
+      // Try the in-memory tick cache on the global broker (zerodha-broker uses _lastLtp Map)
+      if (broker && broker._lastLtp && typeof broker._lastLtp.get === 'function') {
+        const last = broker._lastLtp.get(symbol);
+        if (last && Number(last) > 0) ltp = Number(last);
+      }
+      // Fallback: hit /quote (sync via getQuote)
+      if ((ltp == null || !(ltp > 0)) && broker && typeof broker.getQuote === 'function') {
+        try {
+          const q = await broker.getQuote(symbol);
+          if (q && q.ltp) ltp = Number(q.ltp);
+        } catch (_) {}
       }
     } catch (_) {}
     // Fallback: use most recent quote
