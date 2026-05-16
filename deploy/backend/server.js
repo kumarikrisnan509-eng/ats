@@ -29,9 +29,11 @@ const { Scanner, classifyRegime } = require('./scanner');
 const { NseSurveillance } = require('./nse-surveillance');     // T99-E2 ASM/GSM/T2T gate
 const { EarningsCalendar } = require('./earnings-calendar');   // E4 NSE event-calendar feed
 const { FiiDii } = require('./fii-dii');                       // E7 NSE FII/DII activity feed
+const { BulkDeals } = require('./bulk-deals');                 // E8 NSE bulk + block deals
 let _surveillance = null;     // T99-E2 NseSurveillance instance (lazy refresh)
 let _earningsCal = null;       // E4 EarningsCalendar instance (lazy refresh)
 let _fiidii = null;             // E7 FiiDii instance (lazy refresh)
+let _bulkDeals = null;          // E8 BulkDeals instance (lazy refresh)
 const { runBacktest, computeSignal } = require('./backtest');
 const { PaperTrading } = require('./paper');
 const { PnlAttribution } = require('./pnl-attribution');
@@ -145,6 +147,10 @@ async function init() {
   // E7 FII/DII feed
   _fiidii = new FiiDii({});
   _fiidii.refresh().catch(e => console.warn('[server] fii-dii warm-up failed:', e.message));
+
+  // E8 bulk / block deals
+  _bulkDeals = new BulkDeals({});
+  _bulkDeals.refresh().catch(e => console.warn('[server] bulk-deals warm-up failed:', e.message));
 
   scanner = new Scanner({
     broker,
@@ -527,6 +533,15 @@ app.get('/api/health-deep', async (_req, res) => {
       checks.fiidiiAgeMin = st.ageMs != null ? Math.round(st.ageMs / 60000) : null;
     } else { checks.fiidii = false; }
   } catch (e) { checks.fiidii = false; }
+  // E8 bulk/block deals staleness
+  try {
+    if (_bulkDeals) {
+      const st = _bulkDeals.status();
+      checks.bulkDeals = st.ready;
+      checks.bulkDealsDate = st.asOn;
+      checks.bulkDealsCounts = { bulk: st.bulk, block: st.block, short: st.short };
+    } else { checks.bulkDeals = false; }
+  } catch (e) { checks.bulkDeals = false; }
 
   // T-I1: surface last DR test status (warns when >30 days old)
   try {
@@ -1660,6 +1675,31 @@ app.get('/api/me/fiidii/today', async (req, res) => {
     res.json({ ok: true, ...snap });
   } catch (e) {
     res.status(500).json({ ok: false, reason: 'fiidii_failed', detail: e.message });
+  }
+});
+
+// ============ E8: bulk + block deals ============
+app.get('/api/me/bulk-deals/today', async (req, res) => {
+  if (!req.user || !req.user.id) return res.status(401).json({ ok: false, reason: 'auth_required' });
+  if (!_bulkDeals) return res.status(503).json({ ok: false, reason: 'bulk_deals_not_ready' });
+  try {
+    const limit = Math.max(5, Math.min(100, parseInt(req.query.limit || '30', 10)));
+    const includeShort = req.query.short === '1';
+    const out = await _bulkDeals.today({ limit, includeShort });
+    res.json({ ok: true, ...out });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: 'bulk_deals_failed', detail: e.message });
+  }
+});
+
+app.get('/api/me/bulk-deals/symbol/:sym', async (req, res) => {
+  if (!req.user || !req.user.id) return res.status(401).json({ ok: false, reason: 'auth_required' });
+  if (!_bulkDeals) return res.status(503).json({ ok: false, reason: 'bulk_deals_not_ready' });
+  try {
+    const deals = await _bulkDeals.forSymbol(req.params.sym);
+    res.json({ ok: true, symbol: req.params.sym.toUpperCase(), count: deals.length, deals });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: 'bulk_deals_symbol_failed', detail: e.message });
   }
 });
 
@@ -3048,7 +3088,7 @@ app.use('/api/me/ai-workflows', (req, res, next) => {
       _aiWorkflowsRouter = createAiWorkflowsRouter({
         db, vault, requireAuth: auth.requireAuth, STRATEGIES,
         brokerResolver: _brokerResolver, surveillance: _surveillance,
-        earningsCal: _earningsCal,
+        earningsCal: _earningsCal, bulkDeals: _bulkDeals,
       });
       return _aiWorkflowsRouter(req, res, next);
     }

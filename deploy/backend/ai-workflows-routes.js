@@ -79,7 +79,7 @@ function _capCheck(db, userId, workflow, provider, model, est_cost_inr) {
   return { blocked: false };
 }
 
-function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES, brokerResolver, surveillance, earningsCal }) {
+function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES, brokerResolver, surveillance, earningsCal, bulkDeals }) {
   const express = require('express');
   const router = express.Router();
   router.use(express.json({ limit: '32kb' }));
@@ -334,6 +334,25 @@ Return JSON review only.`,
         }
       } catch (e) { /* non-fatal */ }
 
+      // 3c. Bulk/block deals for this symbol today (E8)
+      let bulkDealsContext = null;
+      try {
+        if (bulkDeals) {
+          const deals = await bulkDeals.forSymbol(symbol);
+          if (deals && deals.length) {
+            const buyCr = deals.filter(d => d.side === 'BUY').reduce((s, d) => s + (d.inr_value || 0), 0) / 1e7;
+            const sellCr = deals.filter(d => d.side === 'SELL').reduce((s, d) => s + (d.inr_value || 0), 0) / 1e7;
+            bulkDealsContext = {
+              count: deals.length,
+              buy_cr: +buyCr.toFixed(2),
+              sell_cr: +sellCr.toFixed(2),
+              net_cr: +(buyCr - sellCr).toFixed(2),
+              top_clients: deals.slice(0, 3).map(d => `${d.side} ${(d.inr_value/1e7).toFixed(1)}Cr by ${(d.client||'?').slice(0,40)}`),
+            };
+          }
+        }
+      } catch (e) { /* non-fatal */ }
+
       // 4. Recent trend summary (last 5 daily closes + volumes)
       const recent = (() => {
         if (!Array.isArray(candles) || candles.length < 5) return null;
@@ -403,12 +422,14 @@ Symbol 5d move: ${recent ? recent.pct_move_5d + '%' : 'unknown'}
 NIFTY 50 ${benchMove ? benchMove.days + 'd move' : 'recent move'}: ${benchMove ? benchMove.pct_move + '%' : 'unknown'}
 Surveillance status: ${surveillanceVerdict ? `${surveillanceVerdict.list} (${surveillanceVerdict.reason})` : 'clean'}
 Upcoming corporate event: ${earningsContext ? `${earningsContext.category} in ${earningsContext.days_until} day(s) -- ${earningsContext.purpose}` : 'none in next 45 days'}
+Today's bulk/block deals: ${bulkDealsContext ? `${bulkDealsContext.count} deals, net ${bulkDealsContext.net_cr >= 0 ? '+' : ''}${bulkDealsContext.net_cr}Cr — top: ${bulkDealsContext.top_clients.join(' | ')}` : 'none'}
 
 Be MORE skeptical when:
 - the symbol is in a different regime than NIFTY (e.g. symbol in high_vol while index in trending_up)
 - the symbol's 5d move is already >5% in the direction the signal suggests
 - surveillance is non-clean (this should usually flip verdict to reject)
 - a financial-results / dividend / fund-raising event is within 3 days (intraday trades into earnings carry asymmetric overnight risk)
+- institutional flow today is opposite to the signal (e.g. signal is BUY but bulk deals show large institutional SELL)
 
 Return JSON verdict only.`;
       const fullPrompt = { system: prompt.system, user: enrichedUser };
@@ -434,6 +455,7 @@ Return JSON verdict only.`;
           bench_pct_move: benchMove ? benchMove.pct_move : null,
           surveillance: surveillanceVerdict,
           earnings: earningsContext,
+          bulk_deals: bulkDealsContext,
         },
       };
       _cachePut(cacheKey, { ts: Date.now(), response: norm, cost_inr, provider: routed.provider, model: routed.model, call_id });
