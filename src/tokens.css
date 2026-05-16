@@ -65,6 +65,91 @@ html[data-density="comfortable"] {
   --row-default: 44px;
 }
 
+/* Tier 68: spacious rule was missing -- the third button in the topbar's density
+   picker was setting data-density="spacious" but had no CSS hook. */
+html[data-density="spacious"] {
+  --space-3: 18px;
+  --space-4: 26px;
+  --space-5: 34px;
+  --space-6: 42px;
+  --text-base: 15px;
+  --text-md: 16px;
+  --row-default: 52px;
+}
+
+/* Tier 68: visible density effects on common patterns. Most screens hardcode
+   padding inline so we attach selectors that scale globally without touching
+   each component file. */
+html[data-density="compact"] .card,
+html[data-density="compact"] [class*="card"]:not([class*="card--no-density"]) {
+  padding: 10px 12px !important;
+  font-size: 12px;
+}
+html[data-density="compact"] .table th,
+html[data-density="compact"] .table td,
+html[data-density="compact"] table th,
+html[data-density="compact"] table td {
+  padding: 4px 8px !important;
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+html[data-density="compact"] .input,
+html[data-density="compact"] input,
+html[data-density="compact"] select,
+html[data-density="compact"] textarea {
+  padding: 6px 10px !important;
+  font-size: 12.5px;
+}
+html[data-density="compact"] .btn,
+html[data-density="compact"] .btn--sm {
+  padding: 4px 10px !important;
+  font-size: 12px;
+}
+html[data-density="compact"] .page-header {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+html[data-density="compact"] .page-header__title {
+  font-size: 18px !important;
+}
+
+html[data-density="spacious"] .card,
+html[data-density="spacious"] [class*="card"]:not([class*="card--no-density"]) {
+  padding: 22px 26px;
+  font-size: 14.5px;
+}
+html[data-density="spacious"] .table th,
+html[data-density="spacious"] .table td,
+html[data-density="spacious"] table th,
+html[data-density="spacious"] table td {
+  padding: 14px 16px !important;
+  font-size: 14px;
+}
+html[data-density="spacious"] .input,
+html[data-density="spacious"] input,
+html[data-density="spacious"] select,
+html[data-density="spacious"] textarea {
+  padding: 12px 16px !important;
+  font-size: 14.5px;
+}
+html[data-density="spacious"] .btn {
+  padding: 10px 18px !important;
+  font-size: 14px;
+}
+html[data-density="spacious"] .page-header__title {
+  font-size: 28px !important;
+}
+
+/* Common: a smooth 120ms transition so the toggle FEELS instant + organic. */
+html[data-density] .card,
+html[data-density] .table th,
+html[data-density] .table td,
+html[data-density] .input,
+html[data-density] input,
+html[data-density] .btn {
+  transition: padding 120ms ease, font-size 120ms ease;
+}
+
 /* ============================================================
  * Tier 48: responsive sweep (mobile + tablet).
  *
