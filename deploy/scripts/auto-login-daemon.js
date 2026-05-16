@@ -86,26 +86,27 @@ async function getBrowser() {
 async function driveKiteLogin({ apiKey, brokerUserId, password, totpSeed }) {
   const browser = await getBrowser();
   const ctx = await browser.newContext({ ignoreHTTPSErrors: true });
-  const page = await ctx.newPage();
 
-  // Capture request_token from any redirect URL — and CRITICALLY,
-  // abort the navigation when Kite redirects to our own /broker-callback
-  // so the OAuth-callback handler doesn't consume the token before we exchange it.
+  // CONTEXT-level route intercepts cross-origin redirects too (page.route does not).
+  // Block every request to ats.rajasekarselvam.com so the OAuth callback never
+  // receives the request_token. We extract the token from the aborted URL.
   let captured = null;
-  await page.route('**/*', async (route) => {
+  await ctx.route('**/*', async (route) => {
     const url = route.request().url();
     const m = url.match(/[?&]request_token=([^&]+)/);
-    if (m && !captured) {
-      captured = decodeURIComponent(m[1]);
-      // If the URL is on our own host, ABORT it so the request_token isn't consumed.
-      if (url.includes('/broker-callback') || url.includes('rajasekarselvam.com')) {
-        try { await route.abort(); } catch (_) {}
-        return;
-      }
+    if (m && !captured) captured = decodeURIComponent(m[1]);
+    // Abort anything pointed at our domain so the backend's callback handler
+    // (both /api/me/broker-callback AND legacy /api/brokers/zerodha/callback) never fires.
+    if (url.includes('rajasekarselvam.com') || url.includes('/broker-callback') || url.includes('/zerodha/callback')) {
+      try { await route.abort(); } catch (_) {}
+      return;
     }
     try { await route.continue(); } catch (_) {}
   });
-  // Fallback request/response listeners (kept for visibility but no consumption risk).
+
+  const page = await ctx.newPage();
+  // Belt-and-suspenders: also capture from page-level request hook in case the
+  // context route misses something (Playwright redirect handling can be edge-casey).
   page.on('request', (req) => {
     const url = req.url();
     const m = url.match(/[?&]request_token=([^&]+)/);
@@ -113,8 +114,13 @@ async function driveKiteLogin({ apiKey, brokerUserId, password, totpSeed }) {
   });
   page.on('response', (res) => {
     const url = res.url();
-    const m = url.match(/[?&]request_token=([^&]+)/);
-    if (m && !captured) captured = decodeURIComponent(m[1]);
+    const loc = res.headers()['location'];
+    if (loc) {
+      const m = loc.match(/[?&]request_token=([^&]+)/);
+      if (m && !captured) captured = decodeURIComponent(m[1]);
+    }
+    const m2 = url.match(/[?&]request_token=([^&]+)/);
+    if (m2 && !captured) captured = decodeURIComponent(m2[1]);
   });
 
   try {
