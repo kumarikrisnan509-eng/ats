@@ -112,6 +112,78 @@ function createAccountRouter({ db, vault, requireAuth, auth }) {
     }
   });
 
+  // ---- NOTIFICATIONS TEST ----
+  // POST { channel: 'email' | 'telegram' | 'webhook' } -> sends a real test message
+  router.post('/notifications/test', async (req, res) => {
+    try {
+      const channel = (req.body && req.body.channel) || '';
+      const n = db.notif.get(req.user.id);
+      const u = db.users.byId(req.user.id);
+      const stamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
+      const testMsg = `[ATS test ${stamp}] Notifications are wired correctly for ${u.email}. If you see this, your channel is healthy.`;
+
+      if (channel === 'email') {
+        if (!n.email_enabled) return res.status(400).json({ ok: false, reason: 'email_disabled' });
+        try {
+          const { sendEmail } = require('./email-alerts');
+          await sendEmail(u.email, 'ATS test alert', `<p>${testMsg.replace(/</g, '&lt;')}</p>`);
+          return res.json({ ok: true, channel: 'email', to: u.email });
+        } catch (e) { return res.status(500).json({ ok: false, channel: 'email', reason: 'send_failed', detail: e.message }); }
+      }
+
+      if (channel === 'telegram') {
+        if (!n.telegram_enabled || !n.telegram_bot_token || !n.telegram_chat_id) {
+          return res.status(400).json({ ok: false, reason: 'telegram_not_configured', detail: 'Enable, paste bot token + chat ID, save first.' });
+        }
+        try {
+          const botToken = await vault.open(n.telegram_bot_token);
+          const https = require('https');
+          await new Promise((resolve, reject) => {
+            const body = JSON.stringify({ chat_id: n.telegram_chat_id, text: testMsg });
+            const req2 = https.request({
+              hostname: 'api.telegram.org', path: `/bot${botToken}/sendMessage`,
+              method: 'POST', headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) }, timeout: 8000,
+            }, (r) => { let b=''; r.on('data', d=>b+=d); r.on('end', () => r.statusCode === 200 ? resolve() : reject(new Error('telegram_http_' + r.statusCode + ': ' + b))); });
+            req2.on('error', reject); req2.on('timeout', () => { req2.destroy(); reject(new Error('telegram_timeout')); });
+            req2.write(body); req2.end();
+          });
+          return res.json({ ok: true, channel: 'telegram', chat_id: n.telegram_chat_id });
+        } catch (e) { return res.status(500).json({ ok: false, channel: 'telegram', reason: 'send_failed', detail: e.message }); }
+      }
+
+      if (channel === 'webhook') {
+        if (!n.webhook_enabled || !n.webhook_url) {
+          return res.status(400).json({ ok: false, reason: 'webhook_not_configured', detail: 'Enable, enter URL, save first.' });
+        }
+        try {
+          const secret = n.webhook_secret ? await vault.open(n.webhook_secret) : '';
+          const url = new URL(n.webhook_url);
+          const protoMod = url.protocol === 'https:' ? require('https') : require('http');
+          const payload = JSON.stringify({ type: 'test', message: testMsg, user_id: req.user.id, ts: stamp });
+          const crypto = require('crypto');
+          const signature = secret ? crypto.createHmac('sha256', secret).update(payload).digest('hex') : '';
+          await new Promise((resolve, reject) => {
+            const opts = {
+              hostname: url.hostname, port: url.port || (url.protocol === 'https:' ? 443 : 80),
+              path: url.pathname + url.search, method: 'POST',
+              headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload), 'user-agent': 'ATS-webhook/1.0' },
+              timeout: 8000,
+            };
+            if (signature) opts.headers['x-ats-signature'] = 'sha256=' + signature;
+            const req2 = protoMod.request(opts, (r) => { let b=''; r.on('data', d=>b+=d); r.on('end', () => r.statusCode >= 200 && r.statusCode < 300 ? resolve() : reject(new Error('webhook_http_' + r.statusCode + ': ' + b.slice(0,200)))); });
+            req2.on('error', reject); req2.on('timeout', () => { req2.destroy(); reject(new Error('webhook_timeout')); });
+            req2.write(payload); req2.end();
+          });
+          return res.json({ ok: true, channel: 'webhook', url: n.webhook_url, signed: !!signature });
+        } catch (e) { return res.status(500).json({ ok: false, channel: 'webhook', reason: 'send_failed', detail: e.message }); }
+      }
+
+      return res.status(400).json({ ok: false, reason: 'unknown_channel', detail: 'channel must be one of: email, telegram, webhook' });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: 'test_internal', detail: e.message });
+    }
+  });
+
   // ---- EXPORT ----
   router.get('/export', (req, res) => {
     try {
