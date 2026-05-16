@@ -326,10 +326,10 @@ function createMeBrokerRouter({ db, vault, requireAuth }) {
 async function runAutoReauth({ db, vault, userId, brokerRow }) {
   let apiKey, apiSecret, totpSeed, password;
   try {
-    apiKey   = await vault.unseal(brokerRow.api_key);
-    apiSecret = await vault.unseal(brokerRow.refresh_token);
-    totpSeed = await vault.unseal(brokerRow.totp_seed);
-    password = await vault.unseal(brokerRow.feed_token);
+    apiKey   = await vault.open(brokerRow.api_key);
+    apiSecret = await vault.open(brokerRow.refresh_token);
+    totpSeed = await vault.open(brokerRow.totp_seed);
+    password = await vault.open(brokerRow.feed_token);
   } catch (e) {
     return { ok: false, reason: 'unseal_failed', detail: e.message };
   }
