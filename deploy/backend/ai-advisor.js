@@ -167,15 +167,22 @@ async function callLLM({ provider, apiKey, model, prompt, fetchImpl }) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        model: resolveModel('openai', model),
-        messages: [
-          { role: 'system', content: prompt.system },
-          { role: 'user',   content: prompt.user },
-        ],
-        max_tokens: 1500,
-        response_format: { type: 'json_object' },
-      }),
+      body: (() => {
+        const resolvedOpenAI = resolveModel('openai', model);
+        // GPT-5+ and o-family reasoning models require max_completion_tokens; legacy gpt-4* still uses max_tokens
+        const isNewerOpenAI = /^(gpt-5|o[0-9])/i.test(resolvedOpenAI);
+        const body = {
+          model: resolvedOpenAI,
+          messages: [
+            { role: 'system', content: prompt.system },
+            { role: 'user',   content: prompt.user },
+          ],
+          response_format: { type: 'json_object' },
+        };
+        if (isNewerOpenAI) body.max_completion_tokens = 1500;
+        else body.max_tokens = 1500;
+        return JSON.stringify(body);
+      })(),
     });
     if (!resp.ok) {
       const txt = await resp.text();
