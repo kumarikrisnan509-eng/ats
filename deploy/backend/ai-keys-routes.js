@@ -61,20 +61,39 @@ function createAiKeysRouter({ db, vault, requireAuth, brokerResolver }) {
   });
 
   // PUT /api/me/ai-keys -- upsert a key for a provider
+  // T98: PUT accepts {provider, apiKey?, model?|model_pref?}.
+  // - With apiKey: full upsert (seal new key + write model_pref)
+  // - Without apiKey: model-only update, requires existing row
   router.put('/', async (req, res) => {
     try {
-      const { provider, apiKey, model } = req.body || {};
-      const p = String(provider || '').toLowerCase();
-      if (!SUPPORTED_PROVIDERS.includes(p)) {
+      const body = req.body || {};
+      const provider = String(body.provider || '').toLowerCase();
+      // accept either 'model' or 'model_pref' field name from clients
+      const incomingModel = body.model || body.model_pref;
+      const apiKey = body.apiKey;
+
+      if (!SUPPORTED_PROVIDERS.includes(provider)) {
         return res.status(400).json({ ok: false, reason: 'unsupported_provider', supported: SUPPORTED_PROVIDERS });
       }
-      if (!apiKey || typeof apiKey !== 'string' || apiKey.length < 10) {
-        return res.status(400).json({ ok: false, reason: 'api_key_required' });
+
+      const hasNewKey = apiKey && typeof apiKey === 'string' && apiKey.length >= 10;
+      const modelPref = (incomingModel && typeof incomingModel === 'string') ? incomingModel.slice(0, 64) : DEFAULT_MODEL_BY_PROVIDER[provider];
+
+      if (hasNewKey) {
+        // Full upsert: new (or replacement) key + model
+        const sealed = await vault.seal(apiKey);
+        upsertStmt.run(req.user.id, provider, sealed, modelPref);
+        return res.json({ ok: true, provider, model_pref: modelPref, updated: 'key+model' });
       }
-      const sealed = await vault.seal(apiKey);
-      const modelPref = (model && typeof model === 'string') ? model.slice(0, 64) : DEFAULT_MODEL_BY_PROVIDER[p];
-      upsertStmt.run(req.user.id, p, sealed, modelPref);
-      res.json({ ok: true, provider: p, model_pref: modelPref });
+
+      // No apiKey -> model-only update. Requires existing row.
+      const existing = getStmt.get(req.user.id, provider);
+      if (!existing) {
+        return res.status(400).json({ ok: false, reason: 'api_key_required', detail: 'No saved key for this provider; paste an API key to create it.' });
+      }
+      db._conn.prepare("UPDATE ai_keys SET model_pref = ? WHERE user_id = ? AND provider = ?")
+        .run(modelPref, req.user.id, provider);
+      return res.json({ ok: true, provider, model_pref: modelPref, updated: 'model_only' });
     } catch (e) {
       res.status(500).json({ ok: false, reason: 'save_failed', detail: e.message });
     }
