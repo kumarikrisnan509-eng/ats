@@ -1,6 +1,16 @@
 /* eslint-disable */
 /* Dashboard screen */
 
+// T100 (v9): NaN guards. .toFixed() / division / parsing on undefined or null
+// data was rendering literal "NaN" in KPI cards. These helpers make the bad
+// path render a dash instead.
+const _isNum = (n) => typeof n === 'number' && Number.isFinite(n);
+const safeFix = (n, dec = 2, fallback = '—') => _isNum(n) ? n.toFixed(dec) : fallback;
+const safePct = (num, den, dec = 2, fallback = 0) => {
+  if (!_isNum(num) || !_isNum(den) || den === 0) return fallback;
+  return ((num - den) / den) * 100;
+};
+
 // Today's run — single compact row showing live system heartbeat
 // Replaces the old Pipeline health strip which duplicated the Pipeline flow diagram below
 const TodaysRun = () => {
@@ -52,7 +62,7 @@ const TodaysRun = () => {
             : null,
           errors: { value: String(errCount), sub: errCount === 0 ? 'all systems nominal' : 'check audit log' },
           realized: typeof realized === 'number'
-            ? { value: (realized >= 0 ? '+' : '') + 'INR ' + realized.toFixed(0), sub: 'realized P&L (paper)' }
+            ? { value: (realized >= 0 ? '+' : '') + 'INR ' + safeFix(realized, 0, '0'), sub: 'realized P&L (paper)' }
             : null,
         });
       } catch (e) {}
@@ -554,7 +564,7 @@ const DashboardScreen = () => {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 4, padding: "4px 0" }}>
         {tiles.map((t, i) => {
           const live = window.LiveTicks.state().symbols[t.s];
-          const pct = live ? ((live.ltp - live.prev) / live.prev) * 100 : 0;
+          const pct = safePct(live ? live.ltp : null, live ? live.prev : null);
           const bg = colorFor(pct);
           const span = t.cap >= 13 ? 2 : 1;
           return (
@@ -570,7 +580,7 @@ const DashboardScreen = () => {
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: -0.2 }}>{t.s}</div>
                 <div style={{ fontSize: 11, fontFamily: "var(--mono)", opacity: 0.9, marginTop: 2 }}>
-                  {live ? live.ltp.toFixed(2) : "—"} · {pct >= 0 ? "+" : ""}{pct.toFixed(2)}%
+                  {safeFix(live && live.ltp, 2)} · {pct >= 0 ? "+" : ""}{safeFix(pct, 2, '0.00')}%
                 </div>
               </div>
             </div>
@@ -694,7 +704,7 @@ const DashboardScreen = () => {
                 <Stat
                   label="Deployed capital"
                   value={hasData ? fmt(ds.deployedCapital) : "--"}
-                  delta={hasData && ds.initialCapital > 0 ? `${((ds.deployedCapital / ds.initialCapital) * 100).toFixed(0)}%` : "--"}
+                  delta={hasData && _isNum(ds.deployedCapital) && _isNum(ds.initialCapital) && ds.initialCapital > 0 ? `${safeFix((ds.deployedCapital / ds.initialCapital) * 100, 0, '--')}%` : "--"}
                   deltaKind="muted"
                   sub={hasData ? `of ${inrCompact(ds.initialCapital)} initial` : "Set capital in onboarding"}/>
                 <div style={{ marginTop: 14 }}>

@@ -9,15 +9,16 @@
 */
 
 const StrategyLabScreen = () => {
+  // T100 (v9): Regime + Benchmark tabs removed — their screens were broken
+  // and have been deleted. Regime context now injects into AI critic prompt (E6);
+  // benchmark vs NIFTY is shown in Performance by regime panel inline.
   const TABS = [
     { id: "backtest",  label: "Backtest",   desc: "Walk-forward, out-of-sample" },
     { id: "tuner",     label: "Tune",       desc: "Bayesian param search" },
-    { id: "regime",    label: "Regime",     desc: "Trending / ranging / volatile" },
-    { id: "benchmark", label: "Benchmark",  desc: "vs NIFTY, peer cohort" },
   ];
 
   const [tab, setTab] = React.useState(() => {
-    try { return localStorage.getItem('ats.lab.tab') || 'backtest'; } catch { return 'backtest'; }
+    try { const v = localStorage.getItem('ats.lab.tab'); return (v === 'regime' || v === 'benchmark') ? 'backtest' : (v || 'backtest'); } catch { return 'backtest'; }
   });
 
   const go = (id) => {
@@ -28,8 +29,6 @@ const StrategyLabScreen = () => {
   const ChildScreen = (
     tab === 'backtest'  && window.BacktestScreen  ? <window.BacktestScreen/>  :
     tab === 'tuner'     && window.TunerScreen     ? <window.TunerScreen/>     :
-    tab === 'regime'    && window.RegimeScreen    ? <window.RegimeScreen/>    :
-    tab === 'benchmark' && window.BenchmarkScreen ? <window.BenchmarkScreen/> :
     null
   );
 
@@ -42,7 +41,7 @@ const StrategyLabScreen = () => {
         <div style={{ fontSize: 12, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.6 }}>Validate</div>
         <div style={{ fontSize: 22, fontWeight: 600 }}>Strategy Lab</div>
         <div style={{ fontSize: 13, color: 'var(--text-2)' }}>
-          One stop for validating strategies before they touch real money. Backtest historically, tune hyperparameters, see the current market regime, then benchmark vs indices.
+          One stop for validating strategies before they touch real money. Backtest historically, then tune hyperparameters.
         </div>
       </div>
 

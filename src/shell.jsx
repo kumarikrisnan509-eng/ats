@@ -94,9 +94,10 @@ const KillSwitchButton = () => {
 
 const NAV_GROUPS = [
   {
-    // Tier 9 IA streamline: 4-step wealth loop is the spine
-    //   AI Signal -> Paper trade -> Live trade -> Money (profits -> reinvest)
-    // Dashboard is the home. Everything else moves to overflow or sub-groups.
+    // T100 (v9 IA reduction): spine is Dashboard + 4-step wealth loop.
+    // Removed: news, regime, benchmark, copy, infra, mobile, abtest (broken/fake).
+    // Merged: backtest -> lab, smallcase + fixed -> portfolio, harvest -> tax.
+    // Hidden: tuner (until D2 in Phase 6), review (until A2 in T99 Day 4).
     label: null,
     items: [
       { id: "dashboard",  label: "Dashboard",      icon: I.dashboard, badge: { text: "LIVE", kind: "live" } },
@@ -117,34 +118,23 @@ const NAV_GROUPS = [
     items: [
       { id: "modes",      label: "Trading modes",  icon: I.layers },
       { id: "strategies", label: "Strategies",     icon: I.strategy,  badge: { text: "8" } },
-      // moved to overflow -- still reachable, just not in the primary scan path
-      { id: "abtest",     label: "A/B testing",       icon: I.code,    overflow: true },
+      // overflow -- still reachable, just not in primary scan path
       { id: "compare",    label: "Compare",           icon: I.scale,   overflow: true },
-      { id: "tuner",      label: "Auto-tuner",        icon: I.sparkle, overflow: true },
-      { id: "news",       label: "News & sentiment",  icon: I.globe,   overflow: true },
-      { id: "regime",     label: "Market regime",     icon: I.compass, overflow: true },
       { id: "alerts",     label: "Alerts builder",    icon: I.pulse,   overflow: true },
       { id: "options",    label: "Options builder",   icon: I.options, overflow: true },
-      { id: "backtest",   label: "Backtest lab",      icon: I.code,    overflow: true },
       { id: "circuits",   label: "Circuit breakers",  icon: I.gauge,   overflow: true },
       { id: "audit",      label: "Audit trail",       icon: I.check,   overflow: true },
       { id: "margin",     label: "Margin calc",       icon: I.scale,   overflow: true },
     ],
   },
   {
-    // Wealth & long-term — Money screen is the primary hub. Portfolio is here
-    // for the read-only holdings view. The rest moved to overflow as mock-heavy.
+    // Long-term: Portfolio is the primary; mock-heavy catalogs (smallcase, fixed)
+    // are merged in as future Portfolio tabs. Harvest folds into Tax & ITR.
     label: "Long-term",
     items: [
       { id: "portfolio",  label: "Portfolio",            icon: I.portfolio },
-      // overflow: still works, just less screen real estate by default
       { id: "goals",      label: "Life goals",           icon: I.target,    overflow: true },
       { id: "stpswp",     label: "STP / SWP plans",      icon: I.refresh,   overflow: true },
-      { id: "smallcase",  label: "Smallcases",           icon: I.basket,    overflow: true },
-      { id: "fixed",      label: "Fixed income & REITs", icon: I.coin,      overflow: true },
-      { id: "benchmark",  label: "Benchmarking",         icon: I.trendUp,   overflow: true },
-      { id: "copy",       label: "Copy trading",         icon: I.user,      overflow: true },
-      { id: "harvest",    label: "Tax-loss harvest",     icon: I.leaf,      overflow: true },
       { id: "tax",        label: "Tax & ITR",            icon: I.calc,      overflow: true },
     ],
   },
@@ -152,8 +142,6 @@ const NAV_GROUPS = [
     label: "Operations",
     items: [
       { id: "brokers",    label: "Brokers",           icon: I.broker, badge: { text: "3/5" } },
-      // overflow
-      { id: "review",      label: "AI monthly review", icon: I.report,    overflow: true },
       { id: "recon",       label: "Reconciliation",    icon: I.sync,      overflow: true },
       { id: "attribution", label: "PnL attribution",   icon: I.breakdown, overflow: true },
     ],
@@ -163,11 +151,8 @@ const NAV_GROUPS = [
     items: [
       { id: "settings",   label: "Settings",       icon: I.settings },
       { id: "ai-keys",    label: "AI providers",   icon: I.sparkle },
-      // overflow
       { id: "risk",       label: "Risk",           icon: I.shield,      overflow: true },
       { id: "compliance", label: "Compliance",     icon: I.shieldCheck, overflow: true },
-      { id: "infra",      label: "Infrastructure", icon: I.server,      overflow: true },
-      { id: "mobile",     label: "Mobile app",     icon: I.phone,       overflow: true },
       { id: "apidocs",    label: "API & Webhooks", icon: I.code,        overflow: true },
     ],
   },
@@ -391,7 +376,7 @@ const TopBar = ({ title, crumb, theme, setTheme, setRoute }) => {
   );
 };
 
-const NOTIF_ROUTE = { 1: "signals", 2: "modes", 3: "portfolio", 4: "compliance", 5: "infra", 6: "settings" };
+const NOTIF_ROUTE = { 1: "signals", 2: "modes", 3: "portfolio", 4: "compliance", 5: "brokers", 6: "settings" };
 
 // Tier 16: Notifications dropdown -- now feeds from /api/scanner/history (last 24h)
 // + /api/sweep (recent executes) + /api/audit (broker events). Replaces 6 hardcoded

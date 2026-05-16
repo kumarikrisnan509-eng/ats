@@ -9,10 +9,7 @@ const ROUTES = [
   { group: "Automate",id: "modes",      label: "Trading modes",        kw: "mis cnc nrml capital allocator" },
   { group: "Automate",id: "strategies", label: "Strategies",           kw: "momentum mean reversion vwap" },
   { group: "Automate",id: "signals",    label: "AI Signals",           kw: "claude gpt promote" },
-  { group: "Automate",id: "abtest",     label: "A/B testing",          kw: "split champion challenger" },
   { group: "Automate",id: "tuner",      label: "Auto-tuner",           kw: "parameter optimisation grid search" },
-  { group: "Automate",id: "news",       label: "News & sentiment",     kw: "headlines fii dii" },
-  { group: "Automate",id: "regime",     label: "Market regime",        kw: "trend chop volatility" },
   { group: "Automate",id: "alerts",     label: "Alerts builder",       kw: "watch trigger notification" },
   { group: "Automate",id: "options",    label: "Options builder",      kw: "iron condor straddle leg" },
   // Validate
@@ -30,8 +27,6 @@ const ROUTES = [
   { group: "Wealth",  id: "smallcase",  label: "Smallcases",           kw: "basket curated themed" },
   { group: "Wealth",  id: "fixed",      label: "Fixed income & REITs", kw: "bond debt reit yield" },
   { group: "Wealth",  id: "harvest",    label: "Tax-loss harvest",     kw: "ltcg stcg offset wash sale" },
-  { group: "Wealth",  id: "copy",       label: "Copy trading",         kw: "follower mirror lead trader" },
-  { group: "Wealth",  id: "benchmark",  label: "Benchmarking",         kw: "nifty alpha peer ranking" },
   { group: "Wealth",  id: "tax",        label: "Tax & ITR",            kw: "itr-3 80c capital gains filing" },
   { group: "Wealth",  id: "brokers",    label: "Brokers",              kw: "zerodha upstox icici routing" },
   // Operations
@@ -41,8 +36,6 @@ const ROUTES = [
   // System
   { group: "System",  id: "risk",       label: "Risk controls",        kw: "limit drawdown var" },
   { group: "System",  id: "compliance", label: "Compliance",           kw: "sebi algo-id regulator" },
-  { group: "System",  id: "infra",      label: "Infrastructure",       kw: "uptime cpu memory broker latency" },
-  { group: "System",  id: "mobile",     label: "Mobile app",           kw: "android ios preview" },
   { group: "System",  id: "settings",   label: "Settings",             kw: "preferences theme account" },
   // Account
   { group: "Account", id: "profile",    label: "Profile",              kw: "user kyc api token plan" },

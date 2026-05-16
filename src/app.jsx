@@ -2,13 +2,13 @@
 /* App root — routes between screens, handles pre-auth flow */
 
 const TITLES = {
+  // T100 (v9 reduction): removed abtest/news/regime/benchmark/copy/infra/mobile.
+  // Kept review + tuner for hash-direct access while hidden from nav.
   dashboard:  ["Overview",     "Dashboard"],
   modes:      ["Automate",     "Trading modes"],
   strategies: ["Automate",     "Strategies"],
   signals:    ["Automate",     "AI Signals"],
-  abtest:     ["Automate",     "A/B testing"],
   tuner:      ["Automate",     "Auto-tuner"],
-  news:       ["Automate",     "News & sentiment"],
   trading:    ["Execute",      "Live trading"],
   audit:      ["Execute",      "Order audit trail"],
   paper:      ["Validate",     "Paper trading"],
@@ -24,18 +24,13 @@ const TITLES = {
   brokers:    ["Wealth",       "Brokers"],
   risk:       ["System",       "Risk controls"],
   compliance: ["System",       "Compliance"],
-  infra:      ["System",       "Infrastructure"],
   settings:   ["System",       "Settings"],
   review:     ["Operations",  "AI monthly review"],
   recon:      ["Operations",  "Broker reconciliation"],
   attribution:["Operations",  "PnL attribution"],
-  copy:       ["Wealth",      "Copy trading"],
-  mobile:     ["System",      "Mobile companion"],
   options:    ["Automate",    "Options strategy builder"],
   margin:     ["Execute",     "Margin calculator"],
-  regime:     ["Automate",    "Market regime"],
   alerts:     ["Automate",    "Alerts builder"],
-  benchmark:  ["Wealth",      "Benchmarking"],
   profile:    ["Account",      "Profile"],
   apidocs:    ["System",       "API & Webhooks"],
   compare:    ["Automate",     "Compare strategies"],
@@ -135,7 +130,7 @@ function App() {
   useEffect(() => { document.documentElement.setAttribute("data-density", density); localStorage.setItem("rc_density", density); }, [density]);
   const goRef = useRef({ armed: false, t: 0 });
   useEffect(() => {
-    const SHORT = { d: "dashboard", t: "trading", s: "strategies", p: "portfolio", r: "risk", a: "audit", b: "backtest", n: "news", m: "modes", g: "goals" };
+    const SHORT = { d: "dashboard", t: "trading", s: "strategies", p: "portfolio", r: "risk", a: "audit", b: "backtest", m: "modes", g: "goals" };
     const onKey = (e) => {
       const tag = (e.target.tagName || "").toLowerCase();
       const typing = tag === "input" || tag === "textarea" || e.target.isContentEditable;
@@ -204,11 +199,12 @@ function App() {
 
   // === Main app shell ===
   const screens = {
+    // T100 (v9 reduction): removed abtest/news/regime/benchmark/copy/infra/mobile
+    // (broken/fake/legally-blocked). tuner and review still routable via hash
+    // for direct-link access but hidden from the sidebar.
     dashboard:  <DashboardScreen/>,
     signals:    <SignalsScreen/>,
-    abtest:     <ABTestScreen/>,
     tuner:      <TunerScreen/>,
-    news:       <NewsScreen/>,
     modes:      <ModesScreen/>,
     strategies: <StrategiesScreen/>,
     paper:      <PaperScreen/>,
@@ -226,18 +222,13 @@ function App() {
     brokers:    <BrokersScreen/>,
     risk:       <RiskScreen/>,
     compliance: <ComplianceScreen/>,
-    infra:      <InfraScreen/>,
     settings:   <SettingsScreen/>,
     review:     <AIReviewScreen/>,
     recon:      <ReconScreen/>,
     attribution:<AttributionScreen/>,
-    copy:       <CopyScreen/>,
-    mobile:     <MobileScreen/>,
     options:    <OptionsBuilderScreen/>,
     margin:     <MarginScreen/>,
-    regime:     <RegimeScreen/>,
     alerts:     <AlertsBuilderScreen/>,
-    benchmark:  <BenchmarkScreen/>,
     profile:    <ProfileScreen/>,
     apidocs:    window.ApiDocsScreen ? <window.ApiDocsScreen/> : null,
     compare:    window.StrategyCompare ? <window.StrategyCompare/> : null,
