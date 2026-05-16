@@ -117,8 +117,8 @@ test('callLLM(gemini) embeds api key in querystring and parses candidates', asyn
       text: async () => '',
     };
   };
-  const out = await callLLM({ provider: 'gemini', apiKey: 'gKey', model: 'gemini-3.1-pro', prompt: { system: 's', user: 'u' }, fetchImpl: fakeFetch });
-  assert.ok(captured.url.includes('gemini-3.1-pro'));
+  const out = await callLLM({ provider: 'gemini', apiKey: 'gKey', model: 'gemini-3.1-flash-lite', prompt: { system: 's', user: 'u' }, fetchImpl: fakeFetch });
+  assert.ok(captured.url.includes('gemini-3.1-flash-lite'));
   assert.ok(captured.url.includes('key=gKey'));
   assert.equal(out.summary, 'g');
 });
