@@ -100,7 +100,23 @@ const AiKeysScreen = () => {
     finally { setBusyFor(provider, null); }
   };
 
-  const testKey = async (provider, useDraftKey = false) => {
+  // T98: auto-save model selection without requiring API key re-entry
+  const saveModelOnly = async (provider, model) => {
+    setBusyFor(provider, 'save');
+    try {
+      const res = await fetch('/api/me/ai-keys', {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, model_pref: model }),
+      });
+      const j = await res.json();
+      if (j.ok) { flash(`Model updated -> ${model}`); await refresh(); }
+      else flash(j.detail || j.reason || 'save failed', false);
+    } catch (e) { flash(e.message, false); }
+    finally { setBusyFor(provider, null); }
+  };
+
+    const testKey = async (provider, useDraftKey = false) => {
     setBusyFor(provider, 'test');
     setResults(r => ({ ...r, [provider]: null }));
     try {
@@ -176,7 +192,12 @@ const AiKeysScreen = () => {
               <label style={{ display: 'block', marginBottom: 10 }}>
                 <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>Model</div>
                 <select className="input" value={draft.model || existing?.model_pref || meta.defaultModel}
-                  onChange={e => setDraft(provider, { model: e.target.value })}>
+                  onChange={e => {
+                    const m = e.target.value;
+                    setDraft(provider, { model: m });
+                    // T98: auto-save if already configured and user isn't mid-typing a new key
+                    if (isConfigured && !draft.key) { saveModelOnly(provider, m); }
+                  }}>
                   {(dynamicModels[provider] || meta.modelOptions).map(m => <option key={m} value={m}>{m}{m === meta.defaultModel ? ' · default' : ''}</option>)}
                 </select>
               </label>
