@@ -118,6 +118,9 @@ function open(opts = {}) {
   // T99-C1: daily AI spend cap (INR/day). Default 50; clamped 0-5000 in prefs.upsert.
   try { conn.exec("ALTER TABLE user_preferences ADD COLUMN daily_ai_cap_inr REAL DEFAULT 50"); }
   catch (e) { /* already migrated */ }
+  // T99-H9: AI quality/economy mode (auto-router uses this when caller doesn't override)
+  try { conn.exec("ALTER TABLE user_preferences ADD COLUMN ai_mode TEXT DEFAULT 'balanced'"); }
+  catch (e) { /* already migrated */ }
 
   // Record schema version 1 if not already
   const v = conn.prepare('SELECT COUNT(*) AS n FROM _schema_version').get().n;
@@ -222,9 +225,9 @@ function makeRepo(conn) {
 
     // Tier 84: preferences
     prefsGet: conn.prepare('SELECT * FROM user_preferences WHERE user_id = ?'),
-    prefsUpsert: conn.prepare(`INSERT INTO user_preferences (user_id, theme, density, currency_format, round_rupees, show_pnl_in_header, daily_ai_cap_inr, updated_at)
-      VALUES (@user_id, @theme, @density, @currency_format, @round_rupees, @show_pnl_in_header, @daily_ai_cap_inr, datetime('now'))
-      ON CONFLICT(user_id) DO UPDATE SET theme=@theme, density=@density, currency_format=@currency_format, round_rupees=@round_rupees, show_pnl_in_header=@show_pnl_in_header, daily_ai_cap_inr=@daily_ai_cap_inr, updated_at=datetime('now')`),
+    prefsUpsert: conn.prepare(`INSERT INTO user_preferences (user_id, theme, density, currency_format, round_rupees, show_pnl_in_header, daily_ai_cap_inr, ai_mode, updated_at)
+      VALUES (@user_id, @theme, @density, @currency_format, @round_rupees, @show_pnl_in_header, @daily_ai_cap_inr, @ai_mode, datetime('now'))
+      ON CONFLICT(user_id) DO UPDATE SET theme=@theme, density=@density, currency_format=@currency_format, round_rupees=@round_rupees, show_pnl_in_header=@show_pnl_in_header, daily_ai_cap_inr=@daily_ai_cap_inr, ai_mode=@ai_mode, updated_at=datetime('now')`),
     // Tier 84: notifications
     notifGet: conn.prepare('SELECT * FROM user_notifications WHERE user_id = ?'),
     notifUpsert: conn.prepare(`INSERT INTO user_notifications (user_id, email_enabled, email_digest_time, telegram_enabled, telegram_bot_token, telegram_chat_id, webhook_enabled, webhook_url, webhook_secret, updated_at)
@@ -285,6 +288,19 @@ function makeRepo(conn) {
       dailyCapInr: (uid) => {
         const row = stmts.aiDailyCap.get(uid);
         return row ? Number(row.cap || 50) : 50;
+      },
+      // T99-H9: user's preferred AI mode (quality | balanced | economy)
+      userMode: (uid) => {
+        try {
+          const row = x.prefsGet.get(uid);
+          const m = row && row.ai_mode;
+          return ['quality','balanced','economy'].includes(m) ? m : 'balanced';
+        } catch (_) { return 'balanced'; }
+      },
+      // T99-F3: cost breakdown by workflow within a time window
+      byWorkflow: (uid, window) => {
+        const stmt = conn.prepare("SELECT workflow, provider, COUNT(*) AS calls, COALESCE(SUM(cost_inr),0) AS cost FROM ai_calls WHERE user_id = ? AND ts > datetime('now', ?) AND status = 'ok' GROUP BY workflow, provider ORDER BY cost DESC");
+        return stmt.all(uid, window);
       },
     },
 
@@ -365,17 +381,20 @@ function makeRepo(conn) {
     prefs: {
       get: (userId) => {
         const row = x.prefsGet.get(userId);
-        // Default cap of ₹50/day matches the column default and the v11 plan's quality-first defaults.
-        // Cap chosen for personal tier (1 user) — bump in Settings when ready to use more.
-        const base = { user_id: userId, theme: 'auto', density: 'comfortable', currency_format: 'abbrev', round_rupees: 0, show_pnl_in_header: 1, daily_ai_cap_inr: 50 };
+        const base = { user_id: userId, theme: 'auto', density: 'comfortable', currency_format: 'abbrev', round_rupees: 0, show_pnl_in_header: 1, daily_ai_cap_inr: 50, ai_mode: 'balanced' };
         if (!row) return base;
-        return { ...base, ...row, daily_ai_cap_inr: row.daily_ai_cap_inr == null ? 50 : Number(row.daily_ai_cap_inr) };
+        return {
+          ...base, ...row,
+          daily_ai_cap_inr: row.daily_ai_cap_inr == null ? 50 : Number(row.daily_ai_cap_inr),
+          ai_mode: ['quality','balanced','economy'].includes(row.ai_mode) ? row.ai_mode : 'balanced',
+        };
       },
       upsert: (row) => {
         // T99-C1: clamp cap to [0, 5000] to avoid fat-finger ₹50,000 entries
         let cap = Number(row.daily_ai_cap_inr);
         if (!Number.isFinite(cap)) cap = 50;
         cap = Math.max(0, Math.min(5000, cap));
+        const ai_mode = ['quality','balanced','economy'].includes(row.ai_mode) ? row.ai_mode : 'balanced';
         return x.prefsUpsert.run({
           user_id: row.user_id,
           theme: ['light','dark','auto'].includes(row.theme) ? row.theme : 'auto',
@@ -384,6 +403,7 @@ function makeRepo(conn) {
           round_rupees: row.round_rupees ? 1 : 0,
           show_pnl_in_header: row.show_pnl_in_header == null ? 1 : (row.show_pnl_in_header ? 1 : 0),
           daily_ai_cap_inr: cap,
+          ai_mode,
         });
       },
     },

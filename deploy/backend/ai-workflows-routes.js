@@ -92,7 +92,7 @@ function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES }) {
     if (!symbol || !signal) return res.status(400).json({ ok: false, reason: 'bad_request', detail: 'symbol + signal required' });
 
     try {
-      const mode = b.mode || 'balanced';
+      const mode = b.mode || db.ai.userMode(req.user.id);
       const cacheKey = _hashPrompt([req.user.id, 'critique', mode, symbol, signal, b.value, b.message]);
       const cached = _cacheGet(cacheKey);
       if (cached) return res.json({ ok: true, cached: true, ...cached.response, provider: cached.provider, model: cached.model, cost_inr: 0 });
@@ -134,7 +134,7 @@ function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES }) {
     if (!strategy) return res.status(404).json({ ok: false, reason: 'strategy_not_found', detail: `Unknown strategy: ${strategy_id}` });
 
     try {
-      const mode = b.mode || 'balanced';
+      const mode = b.mode || db.ai.userMode(req.user.id);
       const cacheKey = _hashPrompt(['explain', mode, strategy_id, JSON.stringify(strategy.params || [])]);
       const cached = _cacheGet(cacheKey);
       if (cached) return res.json({ ok: true, cached: true, ...cached.response, provider: cached.provider, model: cached.model, cost_inr: 0 });
@@ -165,6 +165,109 @@ function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES }) {
     } catch (e) {
       try { db.ai.logCall({ user_id: req.user.id, workflow: 'strategy_explain', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e && e.message || 'explain_failed').slice(0,200) }); } catch (_) {}
       res.status(500).json({ ok: false, reason: 'explain_failed', detail: e.message });
+    }
+  });
+
+  // --- A2: monthly review (on-demand; cron scheduling later) ---
+  router.post('/monthly-review', async (req, res) => {
+    const b = req.body || {};
+    try {
+      const mode = b.mode || db.ai.userMode(req.user.id);
+
+      // Gather inputs: last 30 days of P&L + paper trades + factor exposure if available.
+      const pnlRows = db.pnl.recent(req.user.id, 30) || [];
+      let topMoves = { winners: [], losers: [] };
+      try {
+        const paperOrders = db.paper.listOrders(req.user.id) || [];
+        const last30 = paperOrders.filter(o => {
+          if (!o.created_at) return true;
+          const t = new Date(o.created_at).getTime();
+          return t >= Date.now() - 30 * 86400_000;
+        });
+        // Group P&L per symbol (paper trades only) — net contribution
+        const bySym = new Map();
+        for (const o of last30) {
+          if (!o.fill_price || !o.qty) continue;
+          const sign = (o.side === 'BUY') ? -1 : 1;
+          const inr = sign * Number(o.fill_price) * Number(o.qty);
+          bySym.set(o.symbol, (bySym.get(o.symbol) || 0) + inr);
+        }
+        const ranked = Array.from(bySym.entries()).map(([symbol, pnl]) => ({ symbol, pnl: +pnl.toFixed(2) }));
+        ranked.sort((a, b) => b.pnl - a.pnl);
+        topMoves = {
+          winners: ranked.filter(r => r.pnl > 0).slice(0, 5),
+          losers: ranked.filter(r => r.pnl < 0).slice(-5).reverse(),
+        };
+      } catch (_) {}
+
+      // AI spend summary
+      const spend30d = (() => {
+        try {
+          const rows = db.ai.byPeriod(req.user.id, '-30 days');
+          return rows.reduce((acc, r) => acc + Number(r.cost || 0), 0);
+        } catch (_) { return 0; }
+      })();
+
+      // Cache key — keyed by current month so two calls in the same month return identical work
+      const yyyymm = new Date().toISOString().slice(0, 7);
+      const cacheKey = _hashPrompt([req.user.id, 'monthly-review', yyyymm, mode]);
+      const cached = _cacheGet(cacheKey);
+      if (cached) return res.json({ ok: true, cached: true, ...cached.response, provider: cached.provider, model: cached.model, cost_inr: 0 });
+
+      const routed = await aiRouter.route({ db, vault, userId: req.user.id, workflow: 'monthly_review', mode });
+      if (!routed.ok) return res.status(routed.reason === 'no_ai_key' ? 412 : 404).json(routed);
+
+      const capCheck = _capCheck(db, req.user.id, 'monthly_review', routed.provider, routed.model, routed.est_cost_inr);
+      if (capCheck.blocked) return res.status(429).json({ ok: false, reason: 'spend_cap_exceeded', ...capCheck });
+
+      const prompt = {
+        system: `You are an Indian retail-trading coach reviewing one month of paper-trading activity. Output STRICTLY this JSON:
+{
+  "headline": "one-sentence verdict on the month",
+  "what_went_well": ["bullet 1", "bullet 2"],
+  "what_went_wrong": ["bullet 1", "bullet 2"],
+  "patterns_observed": "2-3 sentences on what the data suggests about user's style (overtrading, narrow watchlist, late entries, etc.)",
+  "suggested_focus": ["specific change 1 for next month", "specific change 2"],
+  "ai_spend_assessment": "1 sentence on whether AI spend (Rs) bought useful guidance"
+}
+No code, no specific entry/exit prices, no Rs targets.`,
+        user: `Paper trading P&L (last 30 days):
+${JSON.stringify(pnlRows.slice(0, 30), null, 2)}
+
+Top winners:
+${JSON.stringify(topMoves.winners, null, 2)}
+
+Top losers:
+${JSON.stringify(topMoves.losers, null, 2)}
+
+AI spend (last 30 days): Rs ${spend30d.toFixed(2)}
+
+Return JSON review only.`,
+      };
+
+      const llmResult = await callLLM({ provider: routed.provider, apiKey: routed.apiKey, model: routed.model, prompt });
+      const advice = (llmResult && llmResult.advice) ?? llmResult;
+      const usage = (llmResult && llmResult.usage) || { prompt_tokens: 0, completion_tokens: 0 };
+      const cost_inr = estimateCost({ provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens });
+
+      try { db.ai.logCall({ user_id: req.user.id, workflow: 'monthly_review', provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null }); } catch (e) { console.warn('[ai-workflows] monthly_review log:', e.message); }
+
+      const norm = {
+        headline: String(advice && advice.headline || '').slice(0, 300),
+        what_went_well: Array.isArray(advice && advice.what_went_well) ? advice.what_went_well.slice(0, 5).map(x => String(x).slice(0, 300)) : [],
+        what_went_wrong: Array.isArray(advice && advice.what_went_wrong) ? advice.what_went_wrong.slice(0, 5).map(x => String(x).slice(0, 300)) : [],
+        patterns_observed: String(advice && advice.patterns_observed || '').slice(0, 800),
+        suggested_focus: Array.isArray(advice && advice.suggested_focus) ? advice.suggested_focus.slice(0, 5).map(x => String(x).slice(0, 300)) : [],
+        ai_spend_assessment: String(advice && advice.ai_spend_assessment || '').slice(0, 300),
+        // Echo inputs for transparency
+        inputs: { pnl_days: pnlRows.length, winners: topMoves.winners.length, losers: topMoves.losers.length, ai_spend_inr: +spend30d.toFixed(2) },
+        period: yyyymm,
+      };
+      _cachePut(cacheKey, { ts: Date.now(), response: norm, cost_inr, provider: routed.provider, model: routed.model });
+      res.json({ ok: true, cached: false, ...norm, provider: routed.provider, model: routed.model, cost_inr, usage });
+    } catch (e) {
+      try { db.ai.logCall({ user_id: req.user.id, workflow: 'monthly_review', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e && e.message || 'monthly_review_failed').slice(0,200) }); } catch (_) {}
+      res.status(500).json({ ok: false, reason: 'monthly_review_failed', detail: e.message });
     }
   });
 

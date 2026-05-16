@@ -202,6 +202,21 @@ function createAiKeysRouter({ db, vault, requireAuth, brokerResolver }) {
       }
       const cap_inr = db.ai.dailyCapInr(req.user.id);
       const spent_today = +db.ai.dailySpend(req.user.id).toFixed(4);
+      // T99-F3: per-workflow breakdown for the cost dashboard
+      const byWorkflow = (() => {
+        const out = {};
+        try {
+          const rows = db.ai.byWorkflow(req.user.id, '-30 days');
+          for (const r of rows) {
+            const wf = r.workflow || 'unknown';
+            if (!out[wf]) out[wf] = { workflow: wf, calls: 0, cost_inr: 0, providers: {} };
+            out[wf].calls += r.calls;
+            out[wf].cost_inr += Number(r.cost || 0);
+            out[wf].providers[r.provider] = (out[wf].providers[r.provider] || 0) + r.calls;
+          }
+        } catch (_) {}
+        return Object.values(out).map(v => ({ ...v, cost_inr: +v.cost_inr.toFixed(4) })).sort((a,b) => b.cost_inr - a.cost_inr);
+      })();
       res.json({
         ok: true,
         period: '30d',
@@ -210,6 +225,7 @@ function createAiKeysRouter({ db, vault, requireAuth, brokerResolver }) {
         cap_remaining_inr: +Math.max(0, cap_inr - spent_today).toFixed(4),
         cap_used_pct: cap_inr > 0 ? +((spent_today / cap_inr) * 100).toFixed(1) : 0,
         byPeriod,
+        byWorkflow,
         // Tier 86 back-compat: callers expecting `usage` keyed by provider w/ calls_30d + est_cost_inr
         usage: Object.fromEntries(Object.entries(byPeriod.month).map(([p, v]) => [p, { calls_30d: v.calls, est_cost_inr: v.cost_inr }])),
       });
@@ -226,7 +242,8 @@ function createAiKeysRouter({ db, vault, requireAuth, brokerResolver }) {
   router.get('/router-preview', (req, res) => {
     try {
       const aiRouter = require('./ai-router');
-      const mode = req.query.mode || 'balanced';
+      // T99-H9: caller can override via ?mode=quality; else use saved preference
+      const mode = req.query.mode || db.ai.userMode(req.user.id);
       const preview = aiRouter.preview({ db, userId: req.user.id, mode });
       // Augment with rough cost estimate per workflow for the UI
       const { estimateCostBudget } = require('./ai-advisor');
@@ -312,7 +329,8 @@ function createAdvisorAnalyzeRouter({ db, vault, requireAuth, brokerResolver }) 
     try {
       const body = req.body || {};
       const requested = body.provider ? String(body.provider).toLowerCase() : null;
-      const mode = body.mode || 'balanced';
+      // T99-H9: caller's body.mode overrides; else use the saved preference
+      const mode = body.mode || db.ai.userMode(req.user.id);
 
       // T99-H0: route through auto-router. Picks {provider, model} based on
       // workflow ('analyze') and which BYOK keys the user has.

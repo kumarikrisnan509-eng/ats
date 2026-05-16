@@ -40,8 +40,12 @@ const AiKeysScreen = () => {
   const [keys, setKeys] = React.useState(null);            // server state
   const [supportedProviders, setSupported] = React.useState(['anthropic', 'openai', 'gemini']);
   const [usage, setUsage] = React.useState({});
-  const [usageMeta, setUsageMeta] = React.useState({ cap_inr: 50, spent_today_inr: 0, cap_remaining_inr: 50, cap_used_pct: 0, byPeriod: {} });
+  const [usageMeta, setUsageMeta] = React.useState({ cap_inr: 50, spent_today_inr: 0, cap_remaining_inr: 50, cap_used_pct: 0, byPeriod: {}, byWorkflow: [] });
   const [capDraft, setCapDraft] = React.useState('');     // T99-C1 spend-cap editor
+  const [aiMode, setAiMode] = React.useState('balanced'); // T99-H9 quality | balanced | economy
+  const [routerPreview, setRouterPreview] = React.useState({ workflows: [], availableProviders: [], mode: 'balanced' });
+  const [reviewBusy, setReviewBusy] = React.useState(false);
+  const [reviewResult, setReviewResult] = React.useState(null);
   const [drafts, setDrafts] = React.useState({});          // {anthropic: {key:'', model:''}, ...}
   const [busy, setBusy] = React.useState({});              // {anthropic: 'save'|'test'|'remove'|null}
   const [results, setResults] = React.useState({});        // {anthropic: {ok, msg}, ...}
@@ -77,14 +81,54 @@ const AiKeysScreen = () => {
           cap_remaining_inr: u.cap_remaining_inr != null ? u.cap_remaining_inr : 50,
           cap_used_pct: u.cap_used_pct || 0,
           byPeriod: u.byPeriod || {},
+          byWorkflow: u.byWorkflow || [],
         });
         if (!capDraft) setCapDraft(String(u.cap_inr != null ? u.cap_inr : 50));
       }
+      // T99-H9: fetch saved AI mode
+      try {
+        const pr = await fetch('/api/me/preferences', { credentials: 'include' }).then(r => r.json()).catch(() => null);
+        if (pr && pr.ok && pr.preferences) {
+          setAiMode(pr.preferences.ai_mode || 'balanced');
+        }
+      } catch (_) {}
+      // T99-H2: fetch router preview (what model gets picked for each workflow)
+      try {
+        const rp = await fetch('/api/me/ai-keys/router-preview', { credentials: 'include' }).then(r => r.json()).catch(() => null);
+        if (rp && rp.ok) setRouterPreview({ workflows: rp.workflows || [], availableProviders: rp.availableProviders || [], mode: rp.mode || 'balanced' });
+      } catch (_) {}
     } catch (e) { console.warn('[ai-keys] refresh failed:', e.message); }
   }, []);
   React.useEffect(() => { refresh(); }, [refresh]);
 
   const flash = (msg, ok = true) => { setToast({ msg, ok }); setTimeout(() => setToast(null), 3500); };
+
+  // T99-H9: save AI mode (quality | balanced | economy)
+  const saveMode = async (m) => {
+    setAiMode(m);
+    try {
+      const cur = await fetch('/api/me/preferences', { credentials: 'include' }).then(r => r.json()).catch(() => null);
+      const body = { ...(cur && cur.preferences ? cur.preferences : {}), ai_mode: m };
+      const r = await fetch('/api/me/preferences', { method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
+      if (r.ok) { flash(`AI mode: ${m}`); refresh(); }
+      else flash(r.reason || 'mode_save_failed', false);
+    } catch (e) { flash('mode_save_failed: ' + e.message, false); }
+  };
+
+  // T99-A2: run on-demand monthly review now
+  const runMonthlyReview = async () => {
+    setReviewBusy(true);
+    setReviewResult(null);
+    try {
+      const r = await fetch('/api/me/ai-workflows/monthly-review', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' }, body: '{}',
+      }).then(r => r.json());
+      if (r.ok) { setReviewResult(r); flash(`Monthly review ready (${r.cached ? 'cached' : 'fresh'})`); refresh(); }
+      else flash(r.detail || r.reason || 'review_failed', false);
+    } catch (e) { flash('review_failed: ' + e.message, false); }
+    finally { setReviewBusy(false); }
+  };
 
   // T99-C1: save daily spend cap. PUT /api/me/preferences merges with existing prefs.
   const saveCap = async () => {
@@ -262,7 +306,165 @@ const AiKeysScreen = () => {
         </div>
       </div>
 
-      <div className="grid grid-3" style={{ gap: 16, marginBottom: 16 }}>
+      {/* T99-H9: AI mode segmented control */}
+      <div style={{
+        padding: 12, marginBottom: 12, borderRadius: 8, border: '1px solid var(--border)',
+        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+      }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5 }}>AI mode</div>
+          <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2 }}>
+            {aiMode === 'quality'  && 'Always pick the best model. Highest cost, highest signal quality.'}
+            {aiMode === 'balanced' && 'Quality-first defaults. Critique + reviews use Sonnet; explainers use Haiku.'}
+            {aiMode === 'economy'  && 'Cheapest viable model per workflow. Fastest, lowest cost, signal quality may dip.'}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 0, borderRadius: 6, overflow: 'hidden', border: '1px solid var(--border)' }}>
+          {['economy', 'balanced', 'quality'].map(m => (
+            <button
+              key={m}
+              onClick={() => saveMode(m)}
+              style={{
+                padding: '7px 14px', fontSize: 12, fontWeight: 500,
+                border: 'none', cursor: 'pointer',
+                background: aiMode === m ? 'var(--accent, #3b82f6)' : 'var(--surface, transparent)',
+                color: aiMode === m ? 'white' : 'var(--text)',
+                textTransform: 'capitalize',
+              }}
+            >{m}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* T99-H2: router transparency — what ATS would call right now per workflow */}
+      {routerPreview.workflows.length > 0 && (
+        <details style={{
+          padding: 12, marginBottom: 12, borderRadius: 8, border: '1px solid var(--border)',
+        }}>
+          <summary style={{ cursor: 'pointer', fontWeight: 500, fontSize: 13 }}>
+            What ATS picks for each workflow ({routerPreview.workflows.filter(w => w.ai).length} AI · mode: {routerPreview.mode})
+          </summary>
+          <div style={{ marginTop: 10, overflowX: 'auto' }}>
+            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ textAlign: 'left', color: 'var(--text-3)', borderBottom: '1px solid var(--border)' }}>
+                  <th style={{ padding: '6px 8px' }}>Workflow</th>
+                  <th style={{ padding: '6px 8px' }}>Provider</th>
+                  <th style={{ padding: '6px 8px' }}>Model</th>
+                  <th style={{ padding: '6px 8px' }}>Family</th>
+                  <th style={{ padding: '6px 8px', textAlign: 'right' }}>Est. ₹/call</th>
+                </tr>
+              </thead>
+              <tbody>
+                {routerPreview.workflows.map((w, i) => (
+                  <tr key={w.workflow + i} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td style={{ padding: '6px 8px', fontFamily: 'var(--mono)' }}>{w.workflow}</td>
+                    {w.ai ? (
+                      <>
+                        <td style={{ padding: '6px 8px' }}>{w.provider}</td>
+                        <td style={{ padding: '6px 8px', fontFamily: 'var(--mono)', fontSize: 11 }}>{w.model}</td>
+                        <td style={{ padding: '6px 8px', color: 'var(--text-3)' }}>{w.family}</td>
+                        <td style={{ padding: '6px 8px', textAlign: 'right', fontFamily: 'var(--mono)' }}>₹{Number(w.est_cost_inr || 0).toFixed(4)}</td>
+                      </>
+                    ) : (
+                      <td colSpan={4} style={{ padding: '6px 8px', fontStyle: 'italic', color: 'var(--text-3)' }}>
+                        {w.reason === 'no_ai_call' ? 'no AI call (local computation)' : (w.reason || 'unavailable — add a provider key')}
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
+
+      {/* T99-F3 + A2: workflow cost breakdown + run-now button */}
+      <div style={{ padding: 12, marginBottom: 16, borderRadius: 8, border: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <div style={{ fontWeight: 500, fontSize: 13 }}>
+            30-day cost by workflow {usageMeta.byWorkflow && usageMeta.byWorkflow.length > 0 ? `(${usageMeta.byWorkflow.length} active)` : '(no AI calls yet)'}
+          </div>
+          <button
+            onClick={runMonthlyReview}
+            disabled={reviewBusy || !(keys && keys.length)}
+            style={{
+              padding: '6px 12px', fontSize: 12, borderRadius: 6,
+              border: '1px solid var(--accent, #3b82f6)',
+              background: 'var(--accent, #3b82f6)', color: 'white',
+              cursor: 'pointer', opacity: (reviewBusy || !(keys && keys.length)) ? 0.5 : 1,
+            }}
+          >{reviewBusy ? 'Running…' : 'Run monthly review'}</button>
+        </div>
+        {usageMeta.byWorkflow && usageMeta.byWorkflow.length > 0 ? (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ textAlign: 'left', color: 'var(--text-3)', borderBottom: '1px solid var(--border)' }}>
+                  <th style={{ padding: '4px 8px' }}>Workflow</th>
+                  <th style={{ padding: '4px 8px', textAlign: 'right' }}>Calls</th>
+                  <th style={{ padding: '4px 8px', textAlign: 'right' }}>Cost (₹)</th>
+                  <th style={{ padding: '4px 8px' }}>Providers</th>
+                </tr>
+              </thead>
+              <tbody>
+                {usageMeta.byWorkflow.map((w, i) => (
+                  <tr key={w.workflow + i} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td style={{ padding: '4px 8px', fontFamily: 'var(--mono)' }}>{w.workflow}</td>
+                    <td style={{ padding: '4px 8px', textAlign: 'right' }}>{w.calls}</td>
+                    <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'var(--mono)' }}>₹{Number(w.cost_inr || 0).toFixed(4)}</td>
+                    <td style={{ padding: '4px 8px', fontSize: 11, color: 'var(--text-3)' }}>
+                      {Object.entries(w.providers || {}).map(([p, c]) => `${p}: ${c}`).join(', ')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: 'var(--text-3)', padding: '8px 0' }}>
+            No AI calls yet. Run a critique or analysis to populate this view.
+          </div>
+        )}
+        {reviewResult && reviewResult.ok && (
+          <div style={{
+            marginTop: 12, padding: 10, borderRadius: 6, border: '1px solid var(--border)',
+            background: 'var(--surface-2, rgba(0,0,0,0.02))',
+          }}>
+            <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
+              Monthly review · {reviewResult.period} · {reviewResult.provider}/{reviewResult.model}
+            </div>
+            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>{reviewResult.headline}</div>
+            {reviewResult.what_went_well && reviewResult.what_went_well.length > 0 && (
+              <div style={{ marginBottom: 6, fontSize: 12 }}>
+                <strong style={{ color: 'var(--up)' }}>What went well:</strong>
+                <ul style={{ marginTop: 4, paddingLeft: 18 }}>{reviewResult.what_went_well.map((x, i) => <li key={i}>{x}</li>)}</ul>
+              </div>
+            )}
+            {reviewResult.what_went_wrong && reviewResult.what_went_wrong.length > 0 && (
+              <div style={{ marginBottom: 6, fontSize: 12 }}>
+                <strong style={{ color: 'var(--danger)' }}>What went wrong:</strong>
+                <ul style={{ marginTop: 4, paddingLeft: 18 }}>{reviewResult.what_went_wrong.map((x, i) => <li key={i}>{x}</li>)}</ul>
+              </div>
+            )}
+            {reviewResult.patterns_observed && (
+              <div style={{ marginBottom: 6, fontSize: 12 }}><strong>Pattern:</strong> {reviewResult.patterns_observed}</div>
+            )}
+            {reviewResult.suggested_focus && reviewResult.suggested_focus.length > 0 && (
+              <div style={{ marginBottom: 6, fontSize: 12 }}>
+                <strong>Suggested focus next month:</strong>
+                <ul style={{ marginTop: 4, paddingLeft: 18 }}>{reviewResult.suggested_focus.map((x, i) => <li key={i}>{x}</li>)}</ul>
+              </div>
+            )}
+            {reviewResult.ai_spend_assessment && (
+              <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 8 }}>{reviewResult.ai_spend_assessment}</div>
+            )}
+            {window.SebiDisclaimer && <window.SebiDisclaimer compact={true}/>}
+          </div>
+        )}
+      </div>
+
+            <div className="grid grid-3" style={{ gap: 16, marginBottom: 16 }}>
         {supportedProviders.map(provider => {
           const meta = _PROVIDER_META[provider] || { label: provider, logo: provider[0]?.toUpperCase(), logoColor: '#888', modelOptions: [], defaultModel: '' };
           const existing = findKey(provider);
