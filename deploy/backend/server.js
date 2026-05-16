@@ -407,11 +407,83 @@ app.get('/api/health-deep', async (_req, res) => {
       checks.surveillance = false;
     }
   } catch (e) { checks.surveillance = false; }
+
+  // T-I1: surface last DR test status (warns when >30 days old)
+  try {
+    if (db && db._conn) {
+      const row = db._conn.prepare("SELECT ts, payload FROM dr_test_history ORDER BY id DESC LIMIT 1").get();
+      if (row) {
+        const ageMs = Date.now() - new Date(row.ts).getTime();
+        const ageDays = Math.round(ageMs / 86400000);
+        let lastOk = false;
+        try { const p = JSON.parse(row.payload || '{}'); lastOk = p.ok === true; } catch (_) {}
+        checks.drLastTestAgo = ageDays + 'd';
+        checks.drLastTestOk = lastOk;
+        checks.drStale = ageDays > 30;
+      } else {
+        checks.drLastTestAgo = 'never';
+        checks.drLastTestOk = false;
+        checks.drStale = true;
+      }
+    }
+  } catch (e) { /* table not yet migrated -- ignore */ }
+
   checks.uptimeSec = Math.round(process.uptime());
   checks.memMB = Math.round(process.memoryUsage().rss / 1024 / 1024);
-  // Surveillance is "soft" — treat boolean false as OK for top-level ok flag (NSE archive can be down briefly).
+  // Surveillance + DR are "soft" — they don't block the top-level ok flag.
   const hardChecks = ['db', 'vault', 'brokerResolver'];
   res.json({ ok: hardChecks.every(k => checks[k] !== false), checks });
+});
+
+// T-I1: DR test history table (recorded by deploy/scripts/dr-restore-test.sh --notify)
+try {
+  if (db && db._conn) {
+    db._conn.exec(`CREATE TABLE IF NOT EXISTS dr_test_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts TEXT NOT NULL DEFAULT (datetime('now')),
+      ok INTEGER NOT NULL DEFAULT 0,
+      rto_sec INTEGER,
+      payload TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_dr_test_ts ON dr_test_history(ts DESC);`);
+    db._conn.exec(`CREATE TRIGGER IF NOT EXISTS trim_dr_test_history AFTER INSERT ON dr_test_history BEGIN DELETE FROM dr_test_history WHERE id < (SELECT MAX(id)-100 FROM dr_test_history); END;`);
+  }
+} catch (e) { console.warn('[server] dr_test_history init failed:', e.message); }
+
+// POST /api/admin/dr-status — record a DR test result.
+app.post('/api/admin/dr-status', express.json({ limit: '16kb' }), (req, res) => {
+  try {
+    const fs = require('fs');
+    const expected = (() => { try { return fs.readFileSync(process.env.DR_TOKEN_PATH || '/etc/ats/.dr-token', 'utf8').trim(); } catch (_) { return null; } })();
+    const provided = (req.headers['x-ats-dr-token'] || '').toString().trim();
+    if (!expected || expected === 'unset' || provided !== expected) {
+      return res.status(401).json({ ok: false, reason: 'dr_auth_failed' });
+    }
+    const body = req.body || {};
+    const ok = body.ok === true || body.ok === 'true' ? 1 : 0;
+    const rto_sec = Number(body.rto_total_sec) || null;
+    db._conn.prepare(`INSERT INTO dr_test_history (ok, rto_sec, payload) VALUES (?, ?, ?)`)
+      .run(ok, rto_sec, JSON.stringify(body));
+    res.json({ ok: true, recorded: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: 'dr_record_failed', detail: e.message });
+  }
+});
+
+// GET /api/admin/dr-status — last 10 test summaries
+app.get('/api/admin/dr-status', (req, res) => {
+  try {
+    const fs = require('fs');
+    const expected = (() => { try { return fs.readFileSync(process.env.DR_TOKEN_PATH || '/etc/ats/.dr-token', 'utf8').trim(); } catch (_) { return null; } })();
+    const provided = (req.headers['x-ats-dr-token'] || '').toString().trim();
+    if (!expected || expected === 'unset' || provided !== expected) {
+      return res.status(401).json({ ok: false, reason: 'dr_auth_failed' });
+    }
+    const rows = db._conn.prepare(`SELECT id, ts, ok, rto_sec, payload FROM dr_test_history ORDER BY id DESC LIMIT 10`).all();
+    res.json({ ok: true, recent: rows.map(r => ({ ...r, payload: (() => { try { return JSON.parse(r.payload); } catch (_) { return null; } })() })) });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: 'dr_query_failed', detail: e.message });
+  }
 });
 
 app.disable('x-powered-by');

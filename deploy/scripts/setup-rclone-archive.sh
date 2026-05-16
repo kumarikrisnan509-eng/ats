@@ -47,20 +47,38 @@ EOF
 echo "==> Creating archive wrapper: $WRAPPER"
 cat > "$WRAPPER" <<EOF
 #!/usr/bin/env bash
-# Ship rotated audit logs (audit.log-YYYY-MM-DD.gz) to Google Drive.
-# Only files older than 5 minutes are uploaded (avoid mid-rotation race).
-# rclone copy is idempotent — already-uploaded files are skipped.
+# Tier I1: extended in 2026-05 to cover SQLite + sealed tokens (was audit-only).
+# Ships: rotated audit logs + SQLite snapshot + per-user sealed tokens to GDrive.
+# Older-than-5-minute filter on audit avoids mid-rotation race. rclone copy is
+# idempotent so already-uploaded files are skipped.
 set -euo pipefail
 
 REMOTE="${REMOTE_NAME}:${REMOTE_DIR}"
+SQLITE_SRC="${SQLITE_SRC:-/data/ats/ats.db}"
+TOKENS_SRC="${TOKENS_SRC:-/var/lib/ats/tokens}"
+SQLITE_STAGE="/var/tmp/ats-db-snapshot.db"
 
-# Only rotated + compressed files. The live audit.log itself is excluded.
-/usr/bin/rclone copy "$LOCAL_LOGDIR" "\$REMOTE" \\
+# === 1. Rotated audit logs ===
+/usr/bin/rclone copy "$LOCAL_LOGDIR" "\$REMOTE/audit" \\
   --include "audit.log-*.gz" \\
   --min-age 5m \\
   --log-file "$RCLONE_LOG" \\
   --log-level INFO \\
   --stats-one-line --stats 1m
+
+# === 2. SQLite snapshot (consistent read via .backup) ===
+if [ -f "\$SQLITE_SRC" ] && command -v sqlite3 >/dev/null 2>&1; then
+  sqlite3 "\$SQLITE_SRC" ".backup '\$SQLITE_STAGE'"
+  /usr/bin/rclone copyto "\$SQLITE_STAGE" "\$REMOTE/db/ats.db" \\
+    --log-file "$RCLONE_LOG" --log-level INFO || true
+  rm -f "\$SQLITE_STAGE"
+fi
+
+# === 3. Sealed per-user tokens ===
+if [ -d "\$TOKENS_SRC" ]; then
+  /usr/bin/rclone copy "\$TOKENS_SRC" "\$REMOTE/tokens" \\
+    --log-file "$RCLONE_LOG" --log-level INFO || true
+fi
 EOF
 chmod +x "$WRAPPER"
 
