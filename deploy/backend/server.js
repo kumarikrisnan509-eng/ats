@@ -332,26 +332,32 @@ app.post('/api/admin/market/refresh-holidays', async (req, res) => {
 });
 
 // ---------- Tier 70: observability (request-id, latency, error capture) ----------
+// FIX: db is undefined at module-load time (it's assigned inside async init()).
+// Use a lazy-init helper so the route grabs the db once it exists.
 let _obs = null;
-try {
-  if (db) {
+function getObs() {
+  if (_obs) return _obs;
+  if (!db) return null;
+  try {
     const { createObservability } = require('./observability');
     _obs = createObservability({ db });
-    app.use(_obs.middleware);
+    return _obs;
+  } catch (e) {
+    console.error('[server] observability init failed:', e && e.message);
+    return null;
   }
-} catch (e) {
-  console.error('[server] observability init failed:', e && e.message);
 }
 
 // Tier 70: admin-only observability snapshots (latency + recent errors)
 app.get('/api/admin/observability', (req, res) => {
-  if (!_obs) return res.status(503).json({ ok: false, reason: 'observability_unavailable' });
+  const obs = getObs();
+  if (!obs) return res.status(503).json({ ok: false, reason: 'observability_unavailable' });
   // Admin gate: require authenticated + is_admin
   if (!req.user || !req.user.is_admin) return res.status(403).json({ ok: false, reason: 'admin_only' });
   res.json({
     ok: true,
-    latency: _obs.snapshot(),
-    recentErrors: _obs.recentErrors(50),
+    latency: obs.snapshot(),
+    recentErrors: obs.recentErrors(50),
   });
 });
 
