@@ -326,7 +326,7 @@ const BrokersScreen = () => {
       const r = await fetch('/api/me/broker-oauth-url', { credentials: 'include' });
       const j = await r.json();
       if (!r.ok || !j.ok) { setTestResult({ ok: false, msg: j.detail || j.reason || `HTTP ${r.status}` }); setBusy(null); return; }
-      const popup = window.open(j.url, 'kite-reauth', 'width=520,height=720,popup=1');
+      const popup = window.open(j.url, `kite-reauth-${Date.now()}`, 'width=520,height=720,popup=1,noopener=no');
       if (!popup) { setTestResult({ ok: false, msg: 'Popup blocked. Allow popups for this site and retry.' }); setBusy(null); return; }
       const onMsg = (ev) => {
         if (ev.data && ev.data.type === 'ats-broker-connected') {
@@ -524,7 +524,50 @@ const BrokersScreen = () => {
                   label="Last test"
                   value={myRow.last_test_at ? (`${myRow.last_test_ok ? 'passed' : 'failed'} · ${_fmtRelative(myRow.last_test_at)}`) : 'never'} />
                 <ChecklistRow ok={true} label="Orders (30d)" value={(b.orders||0).toLocaleString()} />
+                <ChecklistRow
+                  ok={myRow.auto_reauth_enabled && myRow.cron_recent && myRow.cron_recent.length > 0 && myRow.cron_recent[0].ok}
+                  warn={myRow.auto_reauth_enabled && myRow.cron_recent && myRow.cron_recent.length > 0 && !myRow.cron_recent[0].ok}
+                  neutral={!myRow.auto_reauth_enabled || !myRow.cron_recent || myRow.cron_recent.length === 0}
+                  label="Daily auto-reauth"
+                  value={
+                    !myRow.auto_reauth_enabled ? 'disabled — toggle to enable'
+                    : (!myRow.cron_recent || myRow.cron_recent.length === 0) ? 'enabled · runs daily 5:45 IST · never run yet'
+                    : myRow.cron_recent[0].ok ? `last run ok · ${_fmtRelative(myRow.cron_recent[0].ts)}`
+                    : `last run failed · ${myRow.cron_recent[0].reason || 'unknown'}`
+                  } />
               </div>
+
+              {/* Tier 80: toggle row for enabling/disabling cron */}
+              {myRow.auto_login_capable && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', marginBottom: 12, fontSize: 12, color: 'var(--text-2)', borderTop: '1px dashed var(--border)' }}>
+                  <span>Daily auto-reauth at 5:45 IST</span>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={!!myRow.auto_reauth_enabled}
+                      onChange={async (e) => {
+                        const enabled = e.target.checked;
+                        try {
+                          const res = await fetch(`/api/me/broker/${myRow.id}/auto-reauth-toggle`, {
+                            method: 'PUT', credentials: 'include',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ enabled })
+                          });
+                          const j = await res.json().catch(() => ({}));
+                          if (!res.ok || !j.ok) {
+                            setTestResult({ ok: false, msg: j.reason || 'toggle failed' });
+                          } else {
+                            refreshMyBrokers();
+                          }
+                        } catch (err) {
+                          setTestResult({ ok: false, msg: err.message });
+                        }
+                      }}
+                    />
+                    <span>{myRow.auto_reauth_enabled ? 'enabled' : 'disabled'}</span>
+                  </label>
+                </div>
+              )}
 
               {/* Buttons — Auto button only when capable; Manual always; Test/Edit/Disconnect always */}
               <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
