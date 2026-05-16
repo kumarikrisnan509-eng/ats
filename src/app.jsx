@@ -95,6 +95,15 @@ function App() {
   }, []);
 
   const [route, setRoute] = useState(() => location.hash.replace("#", "") || "dashboard");
+  // T87: bump tick when late-loading screen scripts register themselves so screens map re-evaluates
+  const [_screenTick, _setScreenTick] = useState(0);
+  useEffect(() => {
+    const h = () => _setScreenTick(t => t + 1);
+    window.addEventListener('screens-changed', h);
+    // Re-poll once 500ms after mount to catch any scripts that loaded after first render
+    const t = setTimeout(h, 500);
+    return () => { window.removeEventListener('screens-changed', h); clearTimeout(t); };
+  }, []);
   const [theme, setTheme] = useState(() => document.documentElement.getAttribute("data-theme") || "light");
 
   useEffect(() => {
