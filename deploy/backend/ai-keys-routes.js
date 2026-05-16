@@ -160,8 +160,9 @@ function createAiKeysRouter({ db, vault, requireAuth, brokerResolver }) {
       // T99-A3: log to ai_calls with real token usage + cost
       const usage = (result && result.usage) || { prompt_tokens: 0, completion_tokens: 0 };
       const cost_inr = estimateCost({ provider, model: resolvedModel, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens });
-      try { db.ai.logCall({ user_id: req.user.id, workflow: 'test', provider, model: resolvedModel, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null }); } catch (e) { console.warn('[ai-keys] ai_calls log failed:', e.message); }
-      res.json({ ok: true, provider, model: resolvedModel, elapsed_ms, cost_inr, usage, sample: typeof result === 'string' ? result.slice(0, 80) : null });
+      let call_id = null;
+      try { call_id = db.ai.logCall({ user_id: req.user.id, workflow: 'test', provider, model: resolvedModel, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null }); } catch (e) { console.warn('[ai-keys] ai_calls log failed:', e.message); }
+      res.json({ ok: true, provider, model: resolvedModel, elapsed_ms, cost_inr, usage, call_id, sample: typeof result === 'string' ? result.slice(0, 80) : null });
     } catch (e) {
       const msg = e && e.message ? e.message : 'test_failed';
       // T92: explicit 404 / not_found mapping so users see a clean error
@@ -404,7 +405,8 @@ function createAdvisorAnalyzeRouter({ db, vault, requireAuth, brokerResolver }) 
       const usage = (llmResult && llmResult.usage) || { prompt_tokens: 0, completion_tokens: 0 };
       const advice = normalizeAdvice(raw);
       const cost_inr = estimateCost({ provider: chosen.provider, model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens });
-      try { db.ai.logCall({ user_id: req.user.id, workflow: 'analyze', provider: chosen.provider, model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null }); } catch (e) { console.warn('[ai-keys] analyze log failed:', e.message); }
+      let call_id = null;
+      try { call_id = db.ai.logCall({ user_id: req.user.id, workflow: 'analyze', provider: chosen.provider, model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null }); } catch (e) { console.warn('[ai-keys] analyze log failed:', e.message); }
 
       res.json({
         ok: true,
@@ -413,6 +415,7 @@ function createAdvisorAnalyzeRouter({ db, vault, requireAuth, brokerResolver }) 
         advice,
         cost_inr,
         usage,
+        call_id,
         // Echo inputs for transparency (no secrets)
         inputs: {
           hasRiskMetrics: !!(riskMetrics && riskMetrics.enoughData),

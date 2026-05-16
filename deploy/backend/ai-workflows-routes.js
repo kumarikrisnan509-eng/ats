@@ -95,7 +95,7 @@ function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES }) {
       const mode = b.mode || db.ai.userMode(req.user.id);
       const cacheKey = _hashPrompt([req.user.id, 'critique', mode, symbol, signal, b.value, b.message]);
       const cached = _cacheGet(cacheKey);
-      if (cached) return res.json({ ok: true, cached: true, ...cached.response, provider: cached.provider, model: cached.model, cost_inr: 0 });
+      if (cached) return res.json({ ok: true, cached: true, ...cached.response, provider: cached.provider, model: cached.model, cost_inr: 0, call_id: cached.call_id || null });
 
       const routed = await aiRouter.route({ db, vault, userId: req.user.id, workflow: 'intraday_critic', mode });
       if (!routed.ok) return res.status(routed.reason === 'no_ai_key' ? 412 : 404).json(routed);
@@ -109,7 +109,7 @@ function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES }) {
       const usage = (llmResult && llmResult.usage) || { prompt_tokens: 0, completion_tokens: 0 };
       const cost_inr = estimateCost({ provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens });
 
-      try { db.ai.logCall({ user_id: req.user.id, workflow: 'intraday_critic', provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null }); } catch (e) { console.warn('[ai-workflows] critique log:', e.message); }
+      let call_id = null; try { call_id = db.ai.logCall({ user_id: req.user.id, workflow: 'intraday_critic', provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null }); } catch (e) { console.warn('[ai-workflows] critique log:', e.message); }
 
       const norm = {
         verdict: ['agree','caution','reject'].includes(String(advice && advice.verdict).toLowerCase()) ? String(advice.verdict).toLowerCase() : 'caution',
@@ -118,8 +118,8 @@ function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES }) {
         key_risks: Array.isArray(advice && advice.key_risks) ? advice.key_risks.slice(0, 3).map(x => String(x).slice(0, 200)) : [],
         next_step: String(advice && advice.next_step || '').slice(0, 300),
       };
-      _cachePut(cacheKey, { ts: Date.now(), response: norm, cost_inr, provider: routed.provider, model: routed.model });
-      res.json({ ok: true, cached: false, ...norm, provider: routed.provider, model: routed.model, cost_inr, usage });
+      _cachePut(cacheKey, { ts: Date.now(), response: norm, cost_inr, provider: routed.provider, model: routed.model, call_id });
+      res.json({ ok: true, cached: false, ...norm, provider: routed.provider, model: routed.model, cost_inr, usage, call_id });
     } catch (e) {
       try { db.ai.logCall({ user_id: req.user.id, workflow: 'intraday_critic', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e && e.message || 'critique_failed').slice(0,200) }); } catch (_) {}
       res.status(500).json({ ok: false, reason: 'critique_failed', detail: e.message });
@@ -137,7 +137,7 @@ function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES }) {
       const mode = b.mode || db.ai.userMode(req.user.id);
       const cacheKey = _hashPrompt(['explain', mode, strategy_id, JSON.stringify(strategy.params || [])]);
       const cached = _cacheGet(cacheKey);
-      if (cached) return res.json({ ok: true, cached: true, ...cached.response, provider: cached.provider, model: cached.model, cost_inr: 0 });
+      if (cached) return res.json({ ok: true, cached: true, ...cached.response, provider: cached.provider, model: cached.model, cost_inr: 0, call_id: cached.call_id || null });
 
       const routed = await aiRouter.route({ db, vault, userId: req.user.id, workflow: 'strategy_explain', mode });
       if (!routed.ok) return res.status(routed.reason === 'no_ai_key' ? 412 : 404).json(routed);
@@ -151,7 +151,7 @@ function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES }) {
       const usage = (llmResult && llmResult.usage) || { prompt_tokens: 0, completion_tokens: 0 };
       const cost_inr = estimateCost({ provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens });
 
-      try { db.ai.logCall({ user_id: req.user.id, workflow: 'strategy_explain', provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null }); } catch (e) { console.warn('[ai-workflows] explain log:', e.message); }
+      let call_id = null; try { call_id = db.ai.logCall({ user_id: req.user.id, workflow: 'strategy_explain', provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null }); } catch (e) { console.warn('[ai-workflows] explain log:', e.message); }
 
       const norm = {
         what_it_does: String(advice && advice.what_it_does || '').slice(0, 400),
@@ -160,8 +160,8 @@ function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES }) {
         when_it_fails: String(advice && advice.when_it_fails || '').slice(0, 400),
         example: String(advice && advice.example || '').slice(0, 600),
       };
-      _cachePut(cacheKey, { ts: Date.now(), response: norm, cost_inr, provider: routed.provider, model: routed.model });
-      res.json({ ok: true, cached: false, ...norm, provider: routed.provider, model: routed.model, cost_inr, usage });
+      _cachePut(cacheKey, { ts: Date.now(), response: norm, cost_inr, provider: routed.provider, model: routed.model, call_id });
+      res.json({ ok: true, cached: false, ...norm, provider: routed.provider, model: routed.model, cost_inr, usage, call_id });
     } catch (e) {
       try { db.ai.logCall({ user_id: req.user.id, workflow: 'strategy_explain', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e && e.message || 'explain_failed').slice(0,200) }); } catch (_) {}
       res.status(500).json({ ok: false, reason: 'explain_failed', detail: e.message });
@@ -212,7 +212,7 @@ function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES }) {
       const yyyymm = new Date().toISOString().slice(0, 7);
       const cacheKey = _hashPrompt([req.user.id, 'monthly-review', yyyymm, mode]);
       const cached = _cacheGet(cacheKey);
-      if (cached) return res.json({ ok: true, cached: true, ...cached.response, provider: cached.provider, model: cached.model, cost_inr: 0 });
+      if (cached) return res.json({ ok: true, cached: true, ...cached.response, provider: cached.provider, model: cached.model, cost_inr: 0, call_id: cached.call_id || null });
 
       const routed = await aiRouter.route({ db, vault, userId: req.user.id, workflow: 'monthly_review', mode });
       if (!routed.ok) return res.status(routed.reason === 'no_ai_key' ? 412 : 404).json(routed);
@@ -250,7 +250,7 @@ Return JSON review only.`,
       const usage = (llmResult && llmResult.usage) || { prompt_tokens: 0, completion_tokens: 0 };
       const cost_inr = estimateCost({ provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens });
 
-      try { db.ai.logCall({ user_id: req.user.id, workflow: 'monthly_review', provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null }); } catch (e) { console.warn('[ai-workflows] monthly_review log:', e.message); }
+      let call_id = null; try { call_id = db.ai.logCall({ user_id: req.user.id, workflow: 'monthly_review', provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null }); } catch (e) { console.warn('[ai-workflows] monthly_review log:', e.message); }
 
       const norm = {
         headline: String(advice && advice.headline || '').slice(0, 300),
@@ -263,11 +263,40 @@ Return JSON review only.`,
         inputs: { pnl_days: pnlRows.length, winners: topMoves.winners.length, losers: topMoves.losers.length, ai_spend_inr: +spend30d.toFixed(2) },
         period: yyyymm,
       };
-      _cachePut(cacheKey, { ts: Date.now(), response: norm, cost_inr, provider: routed.provider, model: routed.model });
-      res.json({ ok: true, cached: false, ...norm, provider: routed.provider, model: routed.model, cost_inr, usage });
+      _cachePut(cacheKey, { ts: Date.now(), response: norm, cost_inr, provider: routed.provider, model: routed.model, call_id });
+      res.json({ ok: true, cached: false, ...norm, provider: routed.provider, model: routed.model, cost_inr, usage, call_id });
     } catch (e) {
       try { db.ai.logCall({ user_id: req.user.id, workflow: 'monthly_review', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e && e.message || 'monthly_review_failed').slice(0,200) }); } catch (_) {}
       res.status(500).json({ ok: false, reason: 'monthly_review_failed', detail: e.message });
+    }
+  });
+
+  // --- T-I5: per-call feedback (thumbs up/down) ---
+  router.put('/feedback/:call_id', (req, res) => {
+    const callId = parseInt(req.params.call_id, 10);
+    const b = req.body || {};
+    const feedback = b.feedback === 'up' || b.feedback === 'down' ? b.feedback : null;
+    if (!callId || !feedback) return res.status(400).json({ ok: false, reason: 'bad_request', detail: 'call_id + feedback=up|down required' });
+    try {
+      const row = db.ai.getCall(req.user.id, callId);
+      if (!row) return res.status(404).json({ ok: false, reason: 'call_not_found' });
+      db.ai.setFeedback(req.user.id, callId, feedback);
+      res.json({ ok: true, call_id: callId, feedback });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: 'feedback_failed', detail: e.message });
+    }
+  });
+
+  // --- T-I5: recent thumbs-down for review ---
+  router.get('/feedback/recent-down', (req, res) => {
+    try {
+      const rows = db.ai.recentDown(req.user.id, parseInt(req.query.limit || '20', 10));
+      const counts = db.ai.feedbackCounts(req.user.id, '-30 days');
+      const sum = { up: 0, down: 0 };
+      for (const c of counts) { if (c.verdict === 'up') sum.up = c.n; else if (c.verdict === 'down') sum.down = c.n; }
+      res.json({ ok: true, recent_down: rows, counts_30d: sum });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: 'feedback_recent_failed', detail: e.message });
     }
   });
 

@@ -459,6 +459,12 @@ const AiKeysScreen = () => {
             {reviewResult.ai_spend_assessment && (
               <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 8 }}>{reviewResult.ai_spend_assessment}</div>
             )}
+            {/* T-I5: feedback widget */}
+            {reviewResult.call_id && window.AiFeedback && (
+              <div style={{ marginTop: 8 }}>
+                <window.AiFeedback callId={reviewResult.call_id} workflow="monthly_review" compact={true}/>
+              </div>
+            )}
             {window.SebiDisclaimer && <window.SebiDisclaimer compact={true}/>}
           </div>
         )}

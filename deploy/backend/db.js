@@ -114,6 +114,12 @@ function open(opts = {}) {
     CREATE INDEX IF NOT EXISTS idx_aicalls_user_ts ON ai_calls(user_id, ts DESC);
   `);
   conn.exec(`CREATE TRIGGER IF NOT EXISTS trim_ai_calls AFTER INSERT ON ai_calls BEGIN DELETE FROM ai_calls WHERE id IN (SELECT id FROM ai_calls WHERE user_id = NEW.user_id ORDER BY id DESC LIMIT -1 OFFSET 5000); END;`);
+  // T-I5: add user_feedback column (thumbs up/down per call)
+  try { conn.exec("ALTER TABLE ai_calls ADD COLUMN user_feedback TEXT"); }
+  catch (e) { /* already migrated */ }
+  try { conn.exec("ALTER TABLE ai_calls ADD COLUMN feedback_ts TEXT"); }
+  catch (e) { /* already migrated */ }
+
 
   // T99-C1: daily AI spend cap (INR/day). Default 50; clamped 0-5000 in prefs.upsert.
   try { conn.exec("ALTER TABLE user_preferences ADD COLUMN daily_ai_cap_inr REAL DEFAULT 50"); }
@@ -171,6 +177,10 @@ function makeRepo(conn) {
     aiCallsDailySpend: conn.prepare("SELECT COALESCE(SUM(cost_inr), 0) AS spent FROM ai_calls WHERE user_id = ? AND status = 'ok' AND date(ts) = date('now')"),
     aiCallsByPeriod: conn.prepare("SELECT provider, COUNT(*) AS calls, COALESCE(SUM(cost_inr),0) AS cost, COALESCE(SUM(prompt_tokens),0) AS prompt_tokens, COALESCE(SUM(completion_tokens),0) AS completion_tokens FROM ai_calls WHERE user_id = ? AND ts > datetime('now', ?) AND status = 'ok' GROUP BY provider"),
     aiDailyCap: conn.prepare("SELECT COALESCE(daily_ai_cap_inr, 50) AS cap FROM user_preferences WHERE user_id = ?"),
+    aiSetFeedback: conn.prepare("UPDATE ai_calls SET user_feedback = @feedback, feedback_ts = datetime('now') WHERE id = @id AND user_id = @user_id"),
+    aiGetCall: conn.prepare("SELECT id, ts, workflow, provider, model, cost_inr, status, user_feedback, feedback_ts FROM ai_calls WHERE id = ? AND user_id = ?"),
+    aiRecentDown: conn.prepare("SELECT id, ts, workflow, provider, model, cost_inr, user_feedback, feedback_ts FROM ai_calls WHERE user_id = ? AND user_feedback = 'down' ORDER BY feedback_ts DESC LIMIT ?"),
+    aiFeedbackCounts: conn.prepare("SELECT user_feedback AS verdict, COUNT(*) AS n FROM ai_calls WHERE user_id = ? AND user_feedback IS NOT NULL AND ts > datetime('now', ?) GROUP BY user_feedback"),
   };
 
   // Tier 53: extra repos (alerts, paper, autorun, pnl)
@@ -271,17 +281,20 @@ function makeRepo(conn) {
 
     // T99-A3 / C1: AI call log + daily-cap helpers
     ai: {
-      logCall: (row) => stmts.aiCallInsert.run({
-        user_id: row.user_id,
-        workflow: row.workflow || null,
-        provider: row.provider,
-        model: row.model || null,
-        prompt_tokens: row.prompt_tokens || 0,
-        completion_tokens: row.completion_tokens || 0,
-        cost_inr: row.cost_inr || 0,
-        status: row.status || 'ok',
-        error: row.error || null,
-      }),
+      logCall: (row) => {
+        const result = stmts.aiCallInsert.run({
+          user_id: row.user_id,
+          workflow: row.workflow || null,
+          provider: row.provider,
+          model: row.model || null,
+          prompt_tokens: row.prompt_tokens || 0,
+          completion_tokens: row.completion_tokens || 0,
+          cost_inr: row.cost_inr || 0,
+          status: row.status || 'ok',
+          error: row.error || null,
+        });
+        return result.lastInsertRowid;
+      },
       dailySpend: (uid) => Number(stmts.aiCallsDailySpend.get(uid).spent || 0),
       // window: '-1 day' | '-7 days' | '-30 days'
       byPeriod: (uid, window) => stmts.aiCallsByPeriod.all(uid, window),
@@ -302,6 +315,14 @@ function makeRepo(conn) {
         const stmt = conn.prepare("SELECT workflow, provider, COUNT(*) AS calls, COALESCE(SUM(cost_inr),0) AS cost FROM ai_calls WHERE user_id = ? AND ts > datetime('now', ?) AND status = 'ok' GROUP BY workflow, provider ORDER BY cost DESC");
         return stmt.all(uid, window);
       },
+      // T-I5: feedback helpers
+      setFeedback: (uid, callId, feedback) => stmts.aiSetFeedback.run({
+        user_id: uid, id: callId,
+        feedback: ['up','down',null].includes(feedback) ? feedback : null,
+      }),
+      getCall: (uid, callId) => stmts.aiGetCall.get(callId, uid),
+      recentDown: (uid, limit) => stmts.aiRecentDown.all(uid, Math.min(50, Math.max(1, limit || 10))),
+      feedbackCounts: (uid, window) => stmts.aiFeedbackCounts.all(uid, window || '-30 days'),
     },
 
     users: {
