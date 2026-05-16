@@ -14,10 +14,35 @@
 const SUPPORTED_PROVIDERS = ['anthropic', 'openai', 'gemini'];
 
 const DEFAULT_MODEL_BY_PROVIDER = {
-  anthropic: 'claude-sonnet-4-5',
-  openai:    'gpt-4o-mini',
-  gemini:    'gemini-2.0-flash',
+  anthropic: 'claude-sonnet-4-6',
+  openai:    'gpt-5.5',
+  gemini:    'gemini-3.1-pro',
 };
+
+// T92: Map deprecated/aged-off model aliases to the current default for that provider.
+// When a saved model_pref hits this map, we swap to the current default at call-time so
+// users don't have to manually re-pick. Keep this list small and only add proven-deprecated aliases.
+const DEPRECATED_MODEL_ALIASES = {
+  // Anthropic
+  'claude-sonnet-4-5': 'claude-sonnet-4-6',
+  'claude-opus-4-1':   'claude-opus-4-6',
+  'claude-3-5-sonnet-20241022': 'claude-sonnet-4-6',
+  // OpenAI
+  'gpt-4o-mini':       'gpt-5.5',
+  'gpt-4o':            'gpt-5.5',
+  'gpt-4.1':           'gpt-5.5',
+  // Gemini
+  'gemini-2.0-flash':  'gemini-3.1-pro',
+  'gemini-2.5-pro':    'gemini-3.1-pro',
+  'gemini-2.5-flash':  'gemini-3.1-flash-lite',
+};
+
+function resolveModel(provider, requested) {
+  if (!requested) return DEFAULT_MODEL_BY_PROVIDER[provider];
+  // Auto-upgrade deprecated aliases
+  if (DEPRECATED_MODEL_ALIASES[requested]) return DEPRECATED_MODEL_ALIASES[requested];
+  return requested;
+}
 
 /**
  * Build the user-facing system prompt + structured output schema.
@@ -120,7 +145,7 @@ async function callLLM({ provider, apiKey, model, prompt, fetchImpl }) {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: model || DEFAULT_MODEL_BY_PROVIDER.anthropic,
+        model: resolveModel('anthropic', model),
         max_tokens: 1500,
         system: prompt.system,
         messages: [{ role: 'user', content: prompt.user }],
@@ -143,7 +168,7 @@ async function callLLM({ provider, apiKey, model, prompt, fetchImpl }) {
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: model || DEFAULT_MODEL_BY_PROVIDER.openai,
+        model: resolveModel('openai', model),
         messages: [
           { role: 'system', content: prompt.system },
           { role: 'user',   content: prompt.user },
@@ -162,7 +187,7 @@ async function callLLM({ provider, apiKey, model, prompt, fetchImpl }) {
   }
 
   if (provider === 'gemini') {
-    const m = model || DEFAULT_MODEL_BY_PROVIDER.gemini;
+    const m = resolveModel('gemini', model);
     const resp = await fetchFn(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -234,7 +259,9 @@ function normalizeAdvice(advice) {
 module.exports = {
   SUPPORTED_PROVIDERS,
   DEFAULT_MODEL_BY_PROVIDER,
-buildPrompt,
+  DEPRECATED_MODEL_ALIASES,
+  resolveModel,
+  buildPrompt,
   callLLM,
   normalizeAdvice,
   _internal: { _parseJsonResponse },
