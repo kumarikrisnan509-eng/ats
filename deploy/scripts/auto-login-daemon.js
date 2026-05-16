@@ -88,8 +88,24 @@ async function driveKiteLogin({ apiKey, brokerUserId, password, totpSeed }) {
   const ctx = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await ctx.newPage();
 
-  // Capture network requests so we can grab request_token from any redirect URL.
+  // Capture request_token from any redirect URL — and CRITICALLY,
+  // abort the navigation when Kite redirects to our own /broker-callback
+  // so the OAuth-callback handler doesn't consume the token before we exchange it.
   let captured = null;
+  await page.route('**/*', async (route) => {
+    const url = route.request().url();
+    const m = url.match(/[?&]request_token=([^&]+)/);
+    if (m && !captured) {
+      captured = decodeURIComponent(m[1]);
+      // If the URL is on our own host, ABORT it so the request_token isn't consumed.
+      if (url.includes('/broker-callback') || url.includes('rajasekarselvam.com')) {
+        try { await route.abort(); } catch (_) {}
+        return;
+      }
+    }
+    try { await route.continue(); } catch (_) {}
+  });
+  // Fallback request/response listeners (kept for visibility but no consumption risk).
   page.on('request', (req) => {
     const url = req.url();
     const m = url.match(/[?&]request_token=([^&]+)/);
