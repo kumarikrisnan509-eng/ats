@@ -28,8 +28,10 @@ const { Watchlist }    = require('./watchlist');
 const { Scanner, classifyRegime } = require('./scanner');
 const { NseSurveillance } = require('./nse-surveillance');     // T99-E2 ASM/GSM/T2T gate
 const { EarningsCalendar } = require('./earnings-calendar');   // E4 NSE event-calendar feed
+const { FiiDii } = require('./fii-dii');                       // E7 NSE FII/DII activity feed
 let _surveillance = null;     // T99-E2 NseSurveillance instance (lazy refresh)
 let _earningsCal = null;       // E4 EarningsCalendar instance (lazy refresh)
+let _fiidii = null;             // E7 FiiDii instance (lazy refresh)
 const { runBacktest, computeSignal } = require('./backtest');
 const { PaperTrading } = require('./paper');
 const { PnlAttribution } = require('./pnl-attribution');
@@ -139,6 +141,10 @@ async function init() {
   // E4 earnings calendar
   _earningsCal = new EarningsCalendar({});
   _earningsCal.refresh().catch(e => console.warn('[server] earnings-cal warm-up failed:', e.message));
+
+  // E7 FII/DII feed
+  _fiidii = new FiiDii({});
+  _fiidii.refresh().catch(e => console.warn('[server] fii-dii warm-up failed:', e.message));
 
   scanner = new Scanner({
     broker,
@@ -512,6 +518,15 @@ app.get('/api/health-deep', async (_req, res) => {
       checks.earningsCalAgeMin = st.ageMs != null ? Math.round(st.ageMs / 60000) : null;
     } else { checks.earningsCal = false; }
   } catch (e) { checks.earningsCal = false; }
+  // E7 FII/DII staleness
+  try {
+    if (_fiidii) {
+      const st = _fiidii.status();
+      checks.fiidii = st.ready;
+      checks.fiidiiDate = st.lastDate;
+      checks.fiidiiAgeMin = st.ageMs != null ? Math.round(st.ageMs / 60000) : null;
+    } else { checks.fiidii = false; }
+  } catch (e) { checks.fiidii = false; }
 
   // T-I1: surface last DR test status (warns when >30 days old)
   try {
@@ -1633,6 +1648,18 @@ app.get('/api/me/earnings/symbol/:sym', async (req, res) => {
     res.json({ ok: true, symbol: req.params.sym.toUpperCase(), days, count: events.length, events });
   } catch (e) {
     res.status(500).json({ ok: false, reason: 'earnings_symbol_failed', detail: e.message });
+  }
+});
+
+// ============ E7: FII/DII daily activity ============
+app.get('/api/me/fiidii/today', async (req, res) => {
+  if (!req.user || !req.user.id) return res.status(401).json({ ok: false, reason: 'auth_required' });
+  if (!_fiidii) return res.status(503).json({ ok: false, reason: 'fiidii_not_ready' });
+  try {
+    const snap = await _fiidii.snapshot();
+    res.json({ ok: true, ...snap });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: 'fiidii_failed', detail: e.message });
   }
 });
 

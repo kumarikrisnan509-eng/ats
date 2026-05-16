@@ -13,6 +13,74 @@ const safePct = (num, den, dec = 2, fallback = 0) => {
 
 // Today's run — single compact row showing live system heartbeat
 // Replaces the old Pipeline health strip which duplicated the Pipeline flow diagram below
+// E7: dashboard tile showing today's FII + DII net activity + 5d FII trend.
+function FiiDiiTile() {
+  const [data, setData] = React.useState(null);
+  const [err, setErr] = React.useState(null);
+  React.useEffect(() => {
+    let live = true;
+    const load = async () => {
+      try {
+        const r = await fetch('/api/me/fiidii/today', { credentials: 'include' }).then(r => r.json());
+        if (!live) return;
+        if (r.ok) setData(r); else setErr(r.reason || r.detail || 'load failed');
+      } catch (e) { if (live) setErr(e.message); }
+    };
+    load();
+    const id = setInterval(load, 5 * 60 * 1000);   // refresh every 5 min
+    return () => { live = false; clearInterval(id); };
+  }, []);
+
+  if (err && !data) return null;   // hide quietly until backend is ready (e.g. unauth)
+  if (!data || !data.today) return null;
+  const fii = data.today.fii;
+  const dii = data.today.dii;
+  const fiiNet = fii ? fii.net_cr : 0;
+  const diiNet = dii ? dii.net_cr : 0;
+  const total = fiiNet + diiNet;
+  const fmtCr = (v) => (v >= 0 ? '+' : '') + '₹' + (Math.abs(v) >= 1000 ? (v / 1000).toFixed(2) + 'k Cr' : v.toFixed(0) + ' Cr');
+  const trend = (data.history || []).slice(0, 5).reverse();
+  const trendMax = Math.max(1, ...trend.map(d => Math.abs(d.fii_net_cr || 0)));
+
+  return (
+    <div style={{
+      padding: 14, marginBottom: 16, borderRadius: 10, border: '1px solid var(--border)',
+      display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1.5fr', gap: 16, alignItems: 'center',
+    }}>
+      <div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5 }}>FII / FPI net (cash)</div>
+        <div style={{ fontSize: 22, fontWeight: 600, color: fiiNet >= 0 ? 'var(--up)' : 'var(--down)', fontFamily: 'var(--mono)' }}>{fmtCr(fiiNet)}</div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{data.today.date_iso}</div>
+      </div>
+      <div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5 }}>DII net (cash)</div>
+        <div style={{ fontSize: 22, fontWeight: 600, color: diiNet >= 0 ? 'var(--up)' : 'var(--down)', fontFamily: 'var(--mono)' }}>{fmtCr(diiNet)}</div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)' }}>institutional</div>
+      </div>
+      <div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Net total</div>
+        <div style={{ fontSize: 22, fontWeight: 600, color: total >= 0 ? 'var(--up)' : 'var(--down)', fontFamily: 'var(--mono)' }}>{fmtCr(total)}</div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{total >= 0 ? 'net buy day' : 'net sell day'}</div>
+      </div>
+      <div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>FII trend (last {trend.length}d)</div>
+        <div style={{ display: 'flex', gap: 4, alignItems: 'flex-end', height: 38 }}>
+          {trend.length === 0 && <div style={{ fontSize: 11, color: 'var(--text-3)' }}>building history…</div>}
+          {trend.map((d, i) => {
+            const v = d.fii_net_cr || 0;
+            const h = Math.max(2, Math.round(Math.abs(v) / trendMax * 36));
+            return (
+              <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-end' }} title={`${d.date_iso}: ${fmtCr(v)}`}>
+                <div style={{ height: h, background: v >= 0 ? 'var(--up)' : 'var(--down)', borderRadius: 2, opacity: 0.85 }}/>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const TodaysRun = () => {
   const [, bump] = React.useReducer(x => x + 1, 0);
   React.useEffect(() => {
@@ -726,6 +794,9 @@ const DashboardScreen = () => {
           );
         })()}
       </div>
+
+      {/* E7: FII/DII tile */}
+      <FiiDiiTile/>
 
       {/* Pipeline flow diagram — how trades move through the system */}
       <PipelineFlow/>
