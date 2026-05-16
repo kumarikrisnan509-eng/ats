@@ -37,6 +37,49 @@ const _isBase32 = (s) => /^[A-Z2-7]{16,}={0,7}$/i.test((s||'').replace(/\s/g, ''
 // ============================================================================
 // 3-step Edit/Connect wizard
 // ============================================================================
+// ============================================================
+// T82: typed-confirmation modal for Disconnect
+// ============================================================
+const DisconnectConfirmModal = ({ onCancel, onConfirm }) => {
+  const [typed, setTyped] = React.useState('');
+  const isValid = typed === 'DISCONNECT';
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'grid', placeItems: 'center', zIndex: 1000 }}>
+      <Card style={{ width: 'min(440px, 92vw)' }}>
+        <div className="between" style={{ marginBottom: 12 }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Disconnect broker?</h3>
+          <button className="btn btn--sm btn--ghost" onClick={onCancel} aria-label="close">×</button>
+        </div>
+        <p style={{ fontSize: 13, color: 'var(--text-2)', margin: '0 0 16px' }}>
+          This permanently removes your sealed API credentials, TOTP seed, and password from our database.
+          Live trading and auto-reauth will stop until you reconnect.
+        </p>
+        <label style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
+          Type <code style={{ background: 'var(--bg-soft)', padding: '2px 6px', borderRadius: 4 }}>DISCONNECT</code> to confirm:
+        </label>
+        <input
+          className="input"
+          value={typed}
+          onChange={e => setTyped(e.target.value)}
+          autoFocus
+          placeholder="DISCONNECT"
+          style={{ marginBottom: 16 }}
+        />
+        <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+          <button className="btn btn--sm" onClick={onCancel}>Cancel</button>
+          <button
+            className="btn btn--sm"
+            disabled={!isValid}
+            onClick={() => isValid && onConfirm()}
+            style={{ background: isValid ? 'var(--danger)' : 'var(--bg-soft)', color: isValid ? 'white' : 'var(--text-3)', opacity: isValid ? 1 : 0.5 }}
+          >Disconnect</button>
+        </div>
+      </Card>
+    </div>
+  );
+};
+Object.assign(window, { DisconnectConfirmModal });
+
 const BrokerWizardModal = ({ open, mode, brokerName, existing, onClose, onSaved }) => {
   if (!open) return null;
   const [step, setStep] = React.useState(1);
@@ -275,6 +318,13 @@ Object.assign(window, { BrokerConnectModal: BrokerWizardModal });
 
 const BrokersScreen = () => {
   const [zerodhaState, setZerodhaState] = React.useState({ connected: null, since: '--', cap: [], orders: 0, fees: 0, userId: '--', userName: '--' });
+  // T82: live per-user counts for "Routing by mode" table
+  const [routingCounts, setRoutingCounts] = React.useState({ intraday: 0, swing: 0, options: 0, futures: 0, total: 0, source: 'loading' });
+  React.useEffect(() => {
+    fetch('/api/v1/me/orders/by-mode', { credentials: 'include' })
+      .then(r => r.json()).then(j => { if (j.ok) setRoutingCounts({ ...j.byMode, total: j.total, source: j.source }); })
+      .catch(() => {});
+  }, []);
   const [myBrokers, setMyBrokers] = React.useState([]);
   const [modalState, setModalState] = React.useState({ open: false, mode: 'connect', brokerName: 'Zerodha', existing: null });
   const [testResult, setTestResult] = React.useState(null);
@@ -346,11 +396,12 @@ const BrokersScreen = () => {
     } catch (e) { setTestResult({ ok: false, msg: e.message || 'OAuth start failed' }); setBusy(null); }
   };
 
-  const disconnect = async (id) => {
-    const typed = prompt('Type DISCONNECT to permanently remove these credentials:');
-    if (typed !== 'DISCONNECT') return;
+  const [disconnectId, setDisconnectId] = React.useState(null);
+  const disconnect = (id) => setDisconnectId(id);
+  const confirmDisconnect = async (id) => {
     const res = await fetch(`/api/v1/me/brokers/${id}`, { method: 'DELETE', credentials: 'include' });
     if (res.ok) { refreshMyBrokers(); setTestResult(null); }
+    setDisconnectId(null);
   };
 
   React.useEffect(() => {
@@ -429,21 +480,7 @@ const BrokersScreen = () => {
         </div>
       </div>
 
-      <Card className="card--soft" style={{ marginBottom: 16 }}>
-        <div className="row" style={{ gap: 20, justifyContent: "space-between" }}>
-          {["Strategies", "Broker Adapter API", "Broker SDK", "Exchange"].map((s, i, a) => (
-            <React.Fragment key={i}>
-              <div style={{ textAlign: "center", flex: 1 }}>
-                <div style={{ fontFamily: "var(--display)", fontSize: 18, letterSpacing: "-0.01em" }}>{s}</div>
-                <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
-                  {["Python modules, stateless", "uniform interface · same call shape", "Zerodha · Upstox · Dhan · …", "NSE · BSE · MCX · CDS"][i]}
-                </div>
-              </div>
-              {i < a.length - 1 && <div style={{ color: "var(--text-4)", fontFamily: "var(--mono)" }}>→</div>}
-            </React.Fragment>
-          ))}
-        </div>
-      </Card>
+
 
       {/* Test/Reauth result banner */}
       {testResult && (
@@ -466,17 +503,21 @@ const BrokersScreen = () => {
           const myRow = isZerodha ? myZerodha : null;
           const showConnected = !!myRow;
           if (!showConnected) {
+            const supported = ['Zerodha', 'Dhan', 'AngelOne', 'Upstox'];
+            const match = supported.find(s => b.n.toLowerCase().includes(s.toLowerCase()));
+            const isImplemented = !!match;
             return (
-              <div className="slot" key={i}>
-                <div style={{ width: 40, height: 40, borderRadius: 10, background: "color-mix(in oklab, " + b.logoColor + " 18%, transparent)", color: b.logoColor, display: "grid", placeItems: "center", fontWeight: 700 }}>{b.logoLetter}</div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{b.n}</div>
-                <div style={{ fontSize: 11 }}>{b.note}</div>
-                <button className="btn btn--sm" style={{ marginTop: 6 }} onClick={() => {
-                  const supported = ['Zerodha', 'Dhan', 'AngelOne', 'Upstox'];
-                  const match = supported.find(s => b.n.toLowerCase().includes(s.toLowerCase()));
-                  if (!match) { alert(`${b.n} adapter not implemented yet.`); return; }
-                  setModalState({ open: true, mode: 'connect', brokerName: match, existing: null });
-                }}><I.plus size={12}/> Connect</button>
+              <div className="slot" key={i} style={{ minHeight: 'auto', padding: '20px 16px', justifyContent: 'center', gap: 8 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: "color-mix(in oklab, " + b.logoColor + " 18%, transparent)", color: b.logoColor, display: "grid", placeItems: "center", fontWeight: 700, fontSize: 13 }}>{b.logoLetter}</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{b.n}</div>
+                <div style={{ fontSize: 11, opacity: 0.8 }}>{b.note}</div>
+                <button
+                  className="btn btn--sm"
+                  style={{ marginTop: 4, opacity: isImplemented ? 1 : 0.5, cursor: isImplemented ? 'pointer' : 'not-allowed' }}
+                  disabled={!isImplemented}
+                  title={isImplemented ? `Connect ${b.n}` : 'Adapter coming soon'}
+                  onClick={() => isImplemented && setModalState({ open: true, mode: 'connect', brokerName: match, existing: null })}
+                ><I.plus size={12}/> {isImplemented ? 'Connect' : 'Coming soon'}</button>
               </div>
             );
           }
@@ -491,11 +532,22 @@ const BrokersScreen = () => {
                     <div className="muted" style={{ fontSize: 11, fontFamily: "var(--mono)", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.api} · {myRow.broker_user_id} {myRow.is_default && '· default'}</div>
                   </div>
                 </div>
-                {pill && (
-                  <div style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
-                    <Pill kind={pill.kind} dot={pill.dot}>{pill.text}</Pill>
-                  </div>
-                )}
+                <div className="row" style={{ flexShrink: 0, gap: 6 }}>
+                  {pill && (
+                    <div style={{ whiteSpace: 'nowrap' }}>
+                      <Pill kind={pill.kind} dot={pill.dot}>{pill.text}</Pill>
+                    </div>
+                  )}
+                  {/* T82: Disconnect as small icon-only danger button */}
+                  <button
+                    className="btn btn--sm btn--ghost"
+                    disabled={busy !== null}
+                    onClick={() => disconnect(myRow.id)}
+                    title="Disconnect this broker"
+                    aria-label="Disconnect"
+                    style={{ width: 28, height: 28, padding: 0, color: 'var(--danger)', display: 'grid', placeItems: 'center' }}
+                  ><I.trash size={14} /></button>
+                </div>
               </div>
 
               <div className="chip-row" style={{ marginBottom: 12 }}>
@@ -523,60 +575,67 @@ const BrokersScreen = () => {
                   warn={myRow.last_test_ok === false}
                   label="Last test"
                   value={myRow.last_test_at ? (`${myRow.last_test_ok ? 'passed' : 'failed'} · ${_fmtRelative(myRow.last_test_at)}`) : 'never'} />
+                {/* T82: last-tick indicator -- shows freshness of live data feed */}
+                {zerodhaState.lastTickAt > 0 && (
+                  <ChecklistRow ok={true} label="Last tick" value={_fmtRelative(new Date(zerodhaState.lastTickAt).toISOString())} />
+                )}
                 <ChecklistRow ok={true} label="Orders (30d)" value={(b.orders||0).toLocaleString()} />
-                <ChecklistRow
-                  ok={myRow.auto_reauth_enabled && myRow.cron_recent && myRow.cron_recent.length > 0 && myRow.cron_recent[0].ok}
-                  warn={myRow.auto_reauth_enabled && myRow.cron_recent && myRow.cron_recent.length > 0 && !myRow.cron_recent[0].ok}
-                  neutral={!myRow.auto_reauth_enabled || !myRow.cron_recent || myRow.cron_recent.length === 0}
-                  label="Daily auto-reauth"
-                  value={
-                    !myRow.auto_reauth_enabled ? 'disabled — toggle to enable'
-                    : (!myRow.cron_recent || myRow.cron_recent.length === 0) ? 'enabled · runs daily 5:45 IST · never run yet'
-                    : myRow.cron_recent[0].ok ? `last run ok · ${_fmtRelative(myRow.cron_recent[0].ts)}`
-                    : `last run failed · ${myRow.cron_recent[0].reason || 'unknown'}`
-                  } />
+                {/* T82: Daily auto-reauth row WITH inline toggle (replaces the duplicate row below) */}
+                {myRow.auto_login_capable ? (
+                  <div className="between" style={{ fontSize: 12, padding: '3px 0' }}>
+                    <span>
+                      <span style={{ display: 'inline-block', width: 14, color:
+                        (myRow.auto_reauth_enabled && myRow.cron_recent && myRow.cron_recent.length > 0 && myRow.cron_recent[0].ok) ? 'var(--up)'
+                        : (myRow.auto_reauth_enabled && myRow.cron_recent && myRow.cron_recent.length > 0 && !myRow.cron_recent[0].ok) ? 'var(--danger)'
+                        : 'var(--text-3)', fontWeight: 700 }}>
+                        {(myRow.auto_reauth_enabled && myRow.cron_recent && myRow.cron_recent.length > 0 && myRow.cron_recent[0].ok) ? '✓'
+                         : (myRow.auto_reauth_enabled && myRow.cron_recent && myRow.cron_recent.length > 0 && !myRow.cron_recent[0].ok) ? '✕'
+                         : '—'}
+                      </span>
+                      <span className="muted">Daily auto-reauth</span>
+                    </span>
+                    <span className="row" style={{ gap: 8, alignItems: 'center' }}>
+                      <span className="mono" style={{ fontSize: 11, color: 'var(--text-2)' }}>
+                        {!myRow.auto_reauth_enabled ? 'disabled'
+                          : (!myRow.cron_recent || myRow.cron_recent.length === 0) ? '5:45 IST · awaiting first run'
+                          : myRow.cron_recent[0].ok ? `5:45 IST · ${_fmtRelative(myRow.cron_recent[0].ts)}`
+                          : `failed · ${(myRow.cron_recent[0].reason || 'unknown').slice(0, 24)}`}
+                      </span>
+                      <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', position: 'relative' }} title={myRow.auto_reauth_enabled ? 'Click to disable' : 'Click to enable'}>
+                        <input
+                          type="checkbox"
+                          checked={!!myRow.auto_reauth_enabled}
+                          onChange={async (e) => {
+                            const enabled = e.target.checked;
+                            try {
+                              const res = await fetch(`/api/v1/me/brokers/${myRow.id}/auto-reauth`, {
+                                method: 'PATCH', credentials: 'include',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ enabled })
+                              });
+                              const j = await res.json().catch(() => ({}));
+                              if (!res.ok || !j.ok) setTestResult({ ok: false, msg: j.reason || 'toggle failed' });
+                              else refreshMyBrokers();
+                            } catch (err) { setTestResult({ ok: false, msg: err.message }); }
+                          }}
+                          style={{ margin: 0 }}
+                        />
+                      </label>
+                    </span>
+                  </div>
+                ) : (
+                  <ChecklistRow neutral={true} label="Daily auto-reauth" value="add TOTP + password in Edit" />
+                )}
               </div>
 
-              {/* Tier 80: toggle row for enabling/disabling cron */}
-              {myRow.auto_login_capable && (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', marginBottom: 12, fontSize: 12, color: 'var(--text-2)', borderTop: '1px dashed var(--border)' }}>
-                  <span>Daily auto-reauth at 5:45 IST</span>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={!!myRow.auto_reauth_enabled}
-                      onChange={async (e) => {
-                        const enabled = e.target.checked;
-                        try {
-                          const res = await fetch(`/api/v1/me/brokers/${myRow.id}/auto-reauth`, {
-                            method: 'PATCH', credentials: 'include',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ enabled })
-                          });
-                          const j = await res.json().catch(() => ({}));
-                          if (!res.ok || !j.ok) {
-                            setTestResult({ ok: false, msg: j.reason || 'toggle failed' });
-                          } else {
-                            refreshMyBrokers();
-                          }
-                        } catch (err) {
-                          setTestResult({ ok: false, msg: err.message });
-                        }
-                      }}
-                    />
-                    <span>{myRow.auto_reauth_enabled ? 'enabled' : 'disabled'}</span>
-                  </label>
-                </div>
-              )}
-
-              {/* Buttons — Auto button only when capable; Manual always; Test/Edit/Disconnect always */}
+              {/* Buttons — only 4 now (Disconnect moved to header icon) */}
               <div className="row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'stretch' }}>
                 {myRow.auto_login_capable && (
                   <button className="btn btn--sm btn--primary" disabled={busy !== null} onClick={autoReauth} style={{ flex: 1, minWidth: 110, justifyContent: 'center', whiteSpace: 'nowrap' }}>
                     {busy === 'auto' ? '⋯ logging in' : '⚡ Auto reauth'}
                   </button>
                 )}
-                <button className="btn btn--sm" disabled={busy !== null} onClick={manualReauth} style={{ flex: 1, minWidth: 100, justifyContent: 'center', whiteSpace: 'nowrap' }}>
+                <button className="btn btn--sm" disabled={busy !== null} onClick={manualReauth} style={{ flex: 1, minWidth: 110, justifyContent: 'center', whiteSpace: 'nowrap' }}>
                   {busy === 'manual' ? '⋯ popup' : 'Manual reauth'}
                 </button>
                 <button className="btn btn--sm" disabled={busy !== null} onClick={testConnection} style={{ flex: 1, minWidth: 70, justifyContent: 'center', whiteSpace: 'nowrap' }}>
@@ -584,9 +643,6 @@ const BrokersScreen = () => {
                 </button>
                 <button className="btn btn--sm" disabled={busy !== null} onClick={() => setModalState({ open: true, mode: 'edit', brokerName: 'Zerodha', existing: myRow })} style={{ flex: 1, minWidth: 70, justifyContent: 'center', whiteSpace: 'nowrap' }}>
                   Edit
-                </button>
-                <button className="btn btn--sm" disabled={busy !== null} onClick={() => disconnect(myRow.id)} style={{ flex: 1, minWidth: 100, justifyContent: 'center', color: 'var(--danger)', whiteSpace: 'nowrap' }}>
-                  Disconnect
                 </button>
               </div>
 
@@ -600,13 +656,21 @@ const BrokersScreen = () => {
         })}
       </div>
 
+      {/* T82: typed-confirmation modal for Disconnect (replaces JS prompt) */}
+      {disconnectId !== null && (
+        <DisconnectConfirmModal
+          onCancel={() => setDisconnectId(null)}
+          onConfirm={() => confirmDisconnect(disconnectId)}
+        />
+      )}
+
       <BrokerWizardModal
         open={modalState.open} mode={modalState.mode} brokerName={modalState.brokerName} existing={modalState.existing}
         onClose={() => setModalState({ ...modalState, open: false })}
         onSaved={refreshMyBrokers}
       />
 
-      <Card title="Adapter coverage" sub="Which broker implements which capability" flush>
+      <Card title="Adapter coverage" sub="Which broker implements which capability · ✓ = implemented, — = not yet" flush>
         <table className="table">
           <thead><tr><th>Method</th><th style={{ textAlign: "center" }}>Zerodha</th><th style={{ textAlign: "center" }}>Upstox</th><th style={{ textAlign: "center" }}>ICICI</th><th style={{ textAlign: "center" }}>Dhan</th><th style={{ textAlign: "center" }}>IBKR</th></tr></thead>
           <tbody>
@@ -632,10 +696,10 @@ const BrokersScreen = () => {
             </thead>
             <tbody>
               {[
-                { id: "intraday", primary: "Zerodha", product: "MIS",      fallback: "Upstox (stub)", trigger: "Zerodha API > 500ms or auth expired", orders: 2140 },
-                { id: "swing",    primary: "Zerodha", product: "CNC",      fallback: "—",              trigger: "Manual re-route only",                orders:  184 },
-                { id: "options",  primary: "Zerodha", product: "NRML/MIS", fallback: "Dhan (slot)",    trigger: "Illiquid wing · depth < lot×5",       orders:  382 },
-                { id: "futures",  primary: "Zerodha", product: "NRML",     fallback: "—",              trigger: "Manual re-route only",                orders:  134 },
+                { id: "intraday", primary: "Zerodha", product: "MIS",      fallback: "Upstox (stub)", trigger: "Zerodha API > 500ms or auth expired", orders: routingCounts.intraday || 0 },
+                { id: "swing",    primary: "Zerodha", product: "CNC",      fallback: "—",              trigger: "Manual re-route only",                orders: routingCounts.swing || 0 },
+                { id: "options",  primary: "Zerodha", product: "NRML/MIS", fallback: "Dhan (slot)",    trigger: "Illiquid wing · depth < lot×5",       orders: routingCounts.options || 0 },
+                { id: "futures",  primary: "Zerodha", product: "NRML",     fallback: "—",              trigger: "Manual re-route only",                orders: routingCounts.futures || 0 },
               ].map(row => {
                 const meta = window.MODE_META[row.id];
                 return (
@@ -654,6 +718,9 @@ const BrokersScreen = () => {
           <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", background: "var(--bg-soft)", fontSize: 11, color: "var(--text-3)" }}>
             <I.info size={12} style={{ verticalAlign: -1, marginRight: 6 }}/>
             Routing is enforced at the adapter layer — strategies call <code>placeOrder()</code> without knowing which broker handles it.
+            {' '}{routingCounts.source === 'empty' ? <em>(no orders placed yet · counts will populate once you start trading)</em>
+                : routingCounts.source === 'loading' ? <em>(loading...)</em>
+                : <em>(live counts · source: {routingCounts.source})</em>}
           </div>
         </Card>
       </div>
