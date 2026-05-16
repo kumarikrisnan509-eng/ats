@@ -67,6 +67,35 @@ function open(opts = {}) {
   // Auto-trim cron_reauth_history to last 500 entries (cheap, runs on insert).
   conn.exec("CREATE TRIGGER IF NOT EXISTS trim_cron_reauth_history AFTER INSERT ON cron_reauth_history BEGIN DELETE FROM cron_reauth_history WHERE id < (SELECT MAX(id)-500 FROM cron_reauth_history); END;");
 
+  // Tier 84: per-user display preferences (theme, density, currency, etc.)
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS user_preferences (
+      user_id            INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      theme              TEXT DEFAULT 'auto',     -- 'light' | 'dark' | 'auto'
+      density            TEXT DEFAULT 'comfortable', -- 'comfortable' | 'compact'
+      currency_format    TEXT DEFAULT 'abbrev',   -- 'abbrev' (₹4.8L) | 'full' (₹4,82,340)
+      round_rupees       INTEGER DEFAULT 0,
+      show_pnl_in_header INTEGER DEFAULT 1,
+      updated_at         TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  // Tier 84: per-user notification settings (sealed tokens)
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS user_notifications (
+      user_id              INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      email_enabled        INTEGER DEFAULT 1,
+      email_digest_time    TEXT DEFAULT '16:00',
+      telegram_enabled     INTEGER DEFAULT 0,
+      telegram_bot_token   TEXT,          -- sealed
+      telegram_chat_id     TEXT,
+      webhook_enabled      INTEGER DEFAULT 0,
+      webhook_url          TEXT,
+      webhook_secret       TEXT,          -- sealed
+      updated_at           TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
   // Record schema version 1 if not already
   const v = conn.prepare('SELECT COUNT(*) AS n FROM _schema_version').get().n;
   if (v === 0) conn.prepare('INSERT INTO _schema_version (version) VALUES (1)').run();
@@ -161,6 +190,21 @@ function makeRepo(conn) {
     brokerListEligible: conn.prepare("SELECT id, user_id, broker, broker_user_id, api_key, refresh_token, totp_seed, feed_token, access_token, issued_at, expires_at FROM broker_accounts WHERE COALESCE(auto_reauth_enabled, 1) = 1 AND totp_seed IS NOT NULL AND feed_token IS NOT NULL AND api_key IS NOT NULL AND refresh_token IS NOT NULL"),
     cronHistInsert: conn.prepare("INSERT INTO cron_reauth_history (user_id, broker, ok, reason, elapsed_ms) VALUES (?, ?, ?, ?, ?)"),
     cronHistByUser: conn.prepare("SELECT ts, ok, reason, elapsed_ms FROM cron_reauth_history WHERE user_id = ? ORDER BY id DESC LIMIT ?"),
+
+    // Tier 84: preferences
+    prefsGet: conn.prepare('SELECT * FROM user_preferences WHERE user_id = ?'),
+    prefsUpsert: conn.prepare(`INSERT INTO user_preferences (user_id, theme, density, currency_format, round_rupees, show_pnl_in_header, updated_at)
+      VALUES (@user_id, @theme, @density, @currency_format, @round_rupees, @show_pnl_in_header, datetime('now'))
+      ON CONFLICT(user_id) DO UPDATE SET theme=@theme, density=@density, currency_format=@currency_format, round_rupees=@round_rupees, show_pnl_in_header=@show_pnl_in_header, updated_at=datetime('now')`),
+    // Tier 84: notifications
+    notifGet: conn.prepare('SELECT * FROM user_notifications WHERE user_id = ?'),
+    notifUpsert: conn.prepare(`INSERT INTO user_notifications (user_id, email_enabled, email_digest_time, telegram_enabled, telegram_bot_token, telegram_chat_id, webhook_enabled, webhook_url, webhook_secret, updated_at)
+      VALUES (@user_id, @email_enabled, @email_digest_time, @telegram_enabled, @telegram_bot_token, @telegram_chat_id, @webhook_enabled, @webhook_url, @webhook_secret, datetime('now'))
+      ON CONFLICT(user_id) DO UPDATE SET email_enabled=@email_enabled, email_digest_time=@email_digest_time, telegram_enabled=@telegram_enabled, telegram_bot_token=COALESCE(@telegram_bot_token, telegram_bot_token), telegram_chat_id=@telegram_chat_id, webhook_enabled=@webhook_enabled, webhook_url=@webhook_url, webhook_secret=COALESCE(@webhook_secret, webhook_secret), updated_at=datetime('now')`),
+    // Tier 84: account
+    userUpdateName: conn.prepare('UPDATE users SET name = ? WHERE id = ?'),
+    userUpdateEmail: conn.prepare('UPDATE users SET email = ?, is_verified = 0 WHERE id = ?'),
+    userDelete: conn.prepare('DELETE FROM users WHERE id = ?'),
   };
 
   return {
@@ -207,6 +251,10 @@ function makeRepo(conn) {
       lock: (id, until) => stmts.userLock.run(until, id),
       count: () => stmts.userCount.get().n,
       promoteFirstToAdmin: () => stmts.userPromoteFirstToAdmin.run(),
+      // Tier 84
+      updateName: (id, name) => x.userUpdateName.run(name, id),
+      updateEmail: (id, email) => x.userUpdateEmail.run(email, id),
+      delete: (id) => x.userDelete.run(id),
     },
     sessions: {
       create: (id, userId, expiresAt, ip, ua) => stmts.sessionInsert.run(id, userId, expiresAt, ip, ua),
@@ -261,6 +309,33 @@ function makeRepo(conn) {
       addHistory: (userId, broker, ok, reason, elapsedMs) =>
         x.cronHistInsert.run(userId, broker, ok ? 1 : 0, reason ? String(reason).slice(0, 200) : null, elapsedMs || null),
       recentByUser: (userId, limit) => x.cronHistByUser.all(userId, Math.min(50, Math.max(1, limit || 5))),
+    },
+    // Tier 84: per-user preferences
+    prefs: {
+      get: (userId) => x.prefsGet.get(userId) || { user_id: userId, theme: 'auto', density: 'comfortable', currency_format: 'abbrev', round_rupees: 0, show_pnl_in_header: 1 },
+      upsert: (row) => x.prefsUpsert.run({
+        user_id: row.user_id,
+        theme: ['light','dark','auto'].includes(row.theme) ? row.theme : 'auto',
+        density: ['comfortable','compact'].includes(row.density) ? row.density : 'comfortable',
+        currency_format: ['abbrev','full'].includes(row.currency_format) ? row.currency_format : 'abbrev',
+        round_rupees: row.round_rupees ? 1 : 0,
+        show_pnl_in_header: row.show_pnl_in_header == null ? 1 : (row.show_pnl_in_header ? 1 : 0),
+      }),
+    },
+    // Tier 84: per-user notification settings
+    notif: {
+      get: (userId) => x.notifGet.get(userId) || { user_id: userId, email_enabled: 1, email_digest_time: '16:00', telegram_enabled: 0, telegram_bot_token: null, telegram_chat_id: null, webhook_enabled: 0, webhook_url: null, webhook_secret: null },
+      upsert: (row) => x.notifUpsert.run({
+        user_id: row.user_id,
+        email_enabled: row.email_enabled ? 1 : 0,
+        email_digest_time: row.email_digest_time || '16:00',
+        telegram_enabled: row.telegram_enabled ? 1 : 0,
+        telegram_bot_token: row.telegram_bot_token || null,
+        telegram_chat_id: row.telegram_chat_id || null,
+        webhook_enabled: row.webhook_enabled ? 1 : 0,
+        webhook_url: row.webhook_url || null,
+        webhook_secret: row.webhook_secret || null,
+      }),
     },
   };
 }
