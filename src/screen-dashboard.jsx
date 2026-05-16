@@ -730,10 +730,10 @@ const DashboardScreen = () => {
           <AreaChart data={equitySeries} height={260} color="var(--accent)" formatter={v => "₹" + (v * 40000).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
             labels={["09:15", "10:30", "11:45", "13:00", "14:15", "15:30"]}/>
           <div className="row" style={{ marginTop: 14, gap: 18 }}>
-            <div><div className="muted" style={{ fontSize: 11 }}>Open</div><div className="mono">₹47,88,920</div></div>
-            <div><div className="muted" style={{ fontSize: 11 }}>High</div><div className="mono up">₹48,41,760</div></div>
-            <div><div className="muted" style={{ fontSize: 11 }}>Low</div><div className="mono down">₹47,62,400</div></div>
-            <div><div className="muted" style={{ fontSize: 11 }}>Current</div><div className="mono">₹48,27,340</div></div>
+            <div><div className="muted" style={{ fontSize: 11 }}>Open</div><div className="mono">{liveSummary && liveSummary.brokerConnected ? inrCompact(liveSummary.portfolioValue - (liveSummary.todayPnl||0)) : "--"}</div></div>
+            <div><div className="muted" style={{ fontSize: 11 }}>High</div><div className="mono up">--</div></div>
+            <div><div className="muted" style={{ fontSize: 11 }}>Low</div><div className="mono down">--</div></div>
+            <div><div className="muted" style={{ fontSize: 11 }}>Current</div><div className="mono">{liveSummary && liveSummary.brokerConnected ? inrCompact(liveSummary.portfolioValue) : "--"}</div></div>
           </div>
         </Card>
 
@@ -750,7 +750,7 @@ const DashboardScreen = () => {
               ]}>
               <div>
                 <div className="muted" style={{ fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase" }}>Total</div>
-                <div style={{ fontFamily: "var(--mono)", fontSize: 18, fontWeight: 600 }}>₹48.3L</div>
+                <div style={{ fontFamily: "var(--mono)", fontSize: 18, fontWeight: 600 }}>{liveSummary && liveSummary.portfolioValue > 0 ? inrCompact(liveSummary.portfolioValue) : "--"}</div>
               </div>
             </Donut>
             <div style={{ flex: 1 }}>
