@@ -49,6 +49,24 @@ function open(opts = {}) {
     try { conn.exec(sql); } catch (e) { /* duplicate column = already migrated */ }
   }
 
+  // Tier 80: daily auto-reauth cron — add opt-out flag + history table
+  try { conn.exec("ALTER TABLE broker_accounts ADD COLUMN auto_reauth_enabled INTEGER DEFAULT 1"); }
+  catch (e) { /* already migrated */ }
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS cron_reauth_history (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts          TEXT NOT NULL DEFAULT (datetime('now')),
+      user_id     INTEGER NOT NULL,
+      broker      TEXT NOT NULL,
+      ok          INTEGER NOT NULL,
+      reason      TEXT,
+      elapsed_ms  INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_cron_reauth_user_ts ON cron_reauth_history(user_id, ts DESC);
+  `);
+  // Auto-trim cron_reauth_history to last 500 entries (cheap, runs on insert).
+  conn.exec("CREATE TRIGGER IF NOT EXISTS trim_cron_reauth_history AFTER INSERT ON cron_reauth_history BEGIN DELETE FROM cron_reauth_history WHERE id < (SELECT MAX(id)-500 FROM cron_reauth_history); END;");
+
   // Record schema version 1 if not already
   const v = conn.prepare('SELECT COUNT(*) AS n FROM _schema_version').get().n;
   if (v === 0) conn.prepare('INSERT INTO _schema_version (version) VALUES (1)').run();
@@ -117,7 +135,7 @@ function makeRepo(conn) {
     pnlRecent:    conn.prepare('SELECT * FROM pnl_daily WHERE user_id = ? ORDER BY date DESC LIMIT ?'),
 
     // Tier 57: broker_accounts CRUD
-    brokerListByUser: conn.prepare('SELECT id, user_id, broker, broker_user_id, issued_at, expires_at, is_default, created_at, last_test_at, last_test_ok, last_test_error, (api_key IS NOT NULL) AS has_api_key, (access_token IS NOT NULL) AS has_access_token, (totp_seed IS NOT NULL) AS has_totp, (feed_token IS NOT NULL) AS has_password FROM broker_accounts WHERE user_id = ? ORDER BY is_default DESC, created_at DESC'),
+    brokerListByUser: conn.prepare('SELECT id, user_id, broker, broker_user_id, issued_at, expires_at, is_default, created_at, last_test_at, last_test_ok, last_test_error, COALESCE(auto_reauth_enabled, 1) AS auto_reauth_enabled, (api_key IS NOT NULL) AS has_api_key, (access_token IS NOT NULL) AS has_access_token, (totp_seed IS NOT NULL) AS has_totp, (feed_token IS NOT NULL) AS has_password FROM broker_accounts WHERE user_id = ? ORDER BY is_default DESC, created_at DESC'),
     brokerGetFull:    conn.prepare('SELECT * FROM broker_accounts WHERE id = ? AND user_id = ?'),
     brokerGetByBrokerForUser: conn.prepare('SELECT * FROM broker_accounts WHERE user_id = ? AND broker = ? ORDER BY is_default DESC, created_at DESC LIMIT 1'),
     brokerUpsert:     conn.prepare(`
@@ -139,6 +157,10 @@ function makeRepo(conn) {
     brokerClearDefault: conn.prepare('UPDATE broker_accounts SET is_default = 0 WHERE user_id = ?'),
     brokerSetDefault:   conn.prepare('UPDATE broker_accounts SET is_default = 1 WHERE id = ? AND user_id = ?'),
     brokerRecordTest:   conn.prepare("UPDATE broker_accounts SET last_test_at = datetime('now'), last_test_ok = ?, last_test_error = ? WHERE id = ? AND user_id = ?"),
+    brokerSetAutoReauth: conn.prepare("UPDATE broker_accounts SET auto_reauth_enabled = ? WHERE id = ? AND user_id = ?"),
+    brokerListEligible: conn.prepare("SELECT id, user_id, broker, broker_user_id, api_key, refresh_token, totp_seed, feed_token, access_token, issued_at, expires_at FROM broker_accounts WHERE COALESCE(auto_reauth_enabled, 1) = 1 AND totp_seed IS NOT NULL AND feed_token IS NOT NULL AND api_key IS NOT NULL AND refresh_token IS NOT NULL"),
+    cronHistInsert: conn.prepare("INSERT INTO cron_reauth_history (user_id, broker, ok, reason, elapsed_ms) VALUES (?, ?, ?, ?, ?)"),
+    cronHistByUser: conn.prepare("SELECT ts, ok, reason, elapsed_ms FROM cron_reauth_history WHERE user_id = ? ORDER BY id DESC LIMIT ?"),
   };
 
   return {
@@ -230,6 +252,15 @@ function makeRepo(conn) {
       /** Tier 79: record test outcome (called by /broker-test and /broker-auto-reauth). */
       recordTest: (userId, id, ok, errMsg) =>
         x.brokerRecordTest.run(ok ? 1 : 0, errMsg ? String(errMsg).slice(0, 300) : null, id, userId),
+      /** Tier 80: toggle daily auto-reauth on/off for this broker row. */
+      setAutoReauth: (userId, id, enabled) => x.brokerSetAutoReauth.run(enabled ? 1 : 0, id, userId),
+      /** Tier 80: rows eligible for the daily cron (has all 4 sealed credentials + opt-in). */
+      listEligible: () => x.brokerListEligible.all(),
+    },
+    cron: {
+      addHistory: (userId, broker, ok, reason, elapsedMs) =>
+        x.cronHistInsert.run(userId, broker, ok ? 1 : 0, reason ? String(reason).slice(0, 200) : null, elapsedMs || null),
+      recentByUser: (userId, limit) => x.cronHistByUser.all(userId, Math.min(50, Math.max(1, limit || 5))),
     },
   };
 }
