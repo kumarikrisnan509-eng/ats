@@ -168,7 +168,7 @@ const AiKeysScreen = () => {
 
               <label style={{ display: 'block', marginBottom: 10 }}>
                 <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
-                  API key{isConfigured && <span style={{ marginLeft: 6, color: 'var(--up)' }}>· saved {_relTime(existing.created_at)}</span>}
+                  API key{isConfigured && <span style={{ marginLeft: 6, color: 'var(--up)' }}>· saved {_akRelTime(existing.created_at)}</span>}
                 </div>
                 <input className="input" type="password" autoComplete="off" value={draft.key || ''}
                   onChange={e => setDraft(provider, { key: e.target.value })}
@@ -233,7 +233,7 @@ const AiKeysScreen = () => {
   );
 };
 
-const _relTime = (s) => {
+const _akRelTime = (s) => {
   if (!s) return '';
   const dt = (Date.now() - new Date(s).getTime()) / 1000;
   if (dt < 60) return 'just now';
