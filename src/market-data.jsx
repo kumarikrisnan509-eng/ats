@@ -45,9 +45,27 @@ const NSE_HOLIDAYS_2026 = [
   { date: "2026-11-25", name: "Guru Nanak Jayanti" },
   { date: "2026-12-25", name: "Christmas" },
 ];
-const isHolidayToday = () => NSE_HOLIDAYS_2026.find(h => h.date === TODAY_ISO);
+// Tier 71: holidays now come from /api/market/holidays (cached from Kite). The static
+// array stays as a cold-start fallback only.
+let _holidaysCache = NSE_HOLIDAYS_2026;
+let _holidaysLoaded = false;
+async function _loadHolidays() {
+  if (_holidaysLoaded) return;
+  try {
+    const r = await fetch('/api/market/holidays');
+    if (r.ok) {
+      const j = await r.json();
+      if (j && j.ok && Array.isArray(j.holidays) && j.holidays.length) {
+        _holidaysCache = j.holidays;
+      }
+    }
+  } catch (_) {}
+  _holidaysLoaded = true;
+}
+if (typeof window !== 'undefined') _loadHolidays();
+const isHolidayToday = () => _holidaysCache.find(h => h.date === TODAY_ISO);
 const nextHoliday = () => {
-  const fut = NSE_HOLIDAYS_2026.filter(h => h.date >= TODAY_ISO);
+  const fut = _holidaysCache.filter(h => h.date >= TODAY_ISO);
   return fut[0] || null;
 };
 

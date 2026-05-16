@@ -300,6 +300,29 @@ function readSessionCookie(req) {
 const app = express();
 app.use(express.json({ limit: '64kb' }));
 
+// ---------- Tier 71: market metadata cache (holidays from Kite) ----------
+let _marketMeta = null;
+try {
+  if (db && broker) {
+    const { createMarketMeta } = require('./market-meta');
+    _marketMeta = createMarketMeta({ db, broker });
+    _marketMeta.scheduleDailyRefresh();
+  }
+} catch (e) { console.error('[server] market-meta init failed:', e && e.message); }
+
+app.get('/api/market/holidays', (_req, res) => {
+  if (!_marketMeta) return res.status(503).json({ ok: false, reason: 'market_meta_unavailable' });
+  const r = _marketMeta.getHolidays();
+  res.json({ ok: true, ...r });
+});
+
+app.post('/api/admin/market/refresh-holidays', async (req, res) => {
+  if (!req.user || !req.user.is_admin) return res.status(403).json({ ok: false, reason: 'admin_only' });
+  if (!_marketMeta) return res.status(503).json({ ok: false, reason: 'market_meta_unavailable' });
+  const r = await _marketMeta.refreshFromBroker();
+  res.json(r);
+});
+
 // ---------- Tier 70: observability (request-id, latency, error capture) ----------
 let _obs = null;
 try {

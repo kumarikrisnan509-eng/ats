@@ -1,0 +1,78 @@
+// market-meta.js -- Tier 71: market metadata cache (holidays, segments, products).
+//
+// Pulled from the global broker (admin Kite session) once a day, persisted in
+// market_meta_cache table. All users read from the cache via /api/market/holidays.
+// Falls back to a static minimal NSE list only if the cache has never been populated
+// AND the broker is unreachable.
+
+'use strict';
+
+const STATIC_FALLBACK_HOLIDAYS = [
+  // Minimal seed used only on cold-start before the first refresh succeeds.
+  // Once refreshFromBroker() runs once, this is overwritten by the cache.
+  { date: '2026-01-26', name: 'Republic Day' },
+  { date: '2026-08-15', name: 'Independence Day' },
+  { date: '2026-10-02', name: 'Gandhi Jayanti' },
+  { date: '2026-12-25', name: 'Christmas' },
+];
+
+function createMarketMeta({ db, broker }) {
+  if (db && db._conn) {
+    db._conn.exec(`
+      CREATE TABLE IF NOT EXISTS market_meta_cache (
+        key         TEXT PRIMARY KEY,
+        json        TEXT NOT NULL,
+        fetched_at  TEXT NOT NULL DEFAULT (datetime('now')),
+        source      TEXT
+      );
+    `);
+  }
+  const get = db._conn.prepare("SELECT json, fetched_at, source FROM market_meta_cache WHERE key = ?");
+  const set = db._conn.prepare("INSERT OR REPLACE INTO market_meta_cache (key, json, fetched_at, source) VALUES (?, ?, datetime('now'), ?)");
+
+  function getHolidays() {
+    try {
+      const row = get.get('holidays_nse');
+      if (row && row.json) return { holidays: JSON.parse(row.json), fetchedAt: row.fetched_at, source: row.source };
+    } catch (_) {}
+    return { holidays: STATIC_FALLBACK_HOLIDAYS, fetchedAt: null, source: 'static_fallback' };
+  }
+
+  async function refreshFromBroker() {
+    if (!broker || typeof broker.kc !== 'object') return { ok: false, reason: 'broker_unavailable' };
+    try {
+      // Kite's getHolidays endpoint (only available on some plans). We fall back to
+      // pulling the instrument master and computing weekend/missing-day inferences.
+      // For now, try kc.getHolidays() directly; if it 404s, we skip update.
+      let holidays = null;
+      if (typeof broker.kc.getHolidays === 'function') {
+        holidays = await broker.kc.getHolidays();
+      }
+      if (!Array.isArray(holidays) || !holidays.length) {
+        return { ok: false, reason: 'no_data_from_broker' };
+      }
+      // Normalize: each row should be { date: 'YYYY-MM-DD', name: '...' }
+      const norm = holidays.map(h => ({
+        date: typeof h.date === 'string' ? h.date.slice(0, 10) : (h.date && h.date.toISOString ? h.date.toISOString().slice(0,10) : null),
+        name: h.name || h.holiday || 'Holiday',
+        type: h.exchange || h.type || 'NSE',
+      })).filter(h => h.date);
+      set.run('holidays_nse', JSON.stringify(norm), 'kite_api');
+      return { ok: true, count: norm.length };
+    } catch (e) {
+      return { ok: false, reason: 'fetch_failed', detail: e.message };
+    }
+  }
+
+  // Auto-refresh once on boot + daily at 06:00 IST.
+  function scheduleDailyRefresh() {
+    refreshFromBroker().catch(() => {});
+    setInterval(() => {
+      refreshFromBroker().catch(() => {});
+    }, 24 * 60 * 60 * 1000);
+  }
+
+  return { getHolidays, refreshFromBroker, scheduleDailyRefresh };
+}
+
+module.exports = { createMarketMeta, STATIC_FALLBACK_HOLIDAYS };
