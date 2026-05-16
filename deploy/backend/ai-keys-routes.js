@@ -87,6 +87,63 @@ function createAdvisorAnalyzeRouter({ db, vault, requireAuth, brokerResolver }) 
 
   // POST /api/me/ai-advisor/analyze -- run analysis using stored key
   // Body: { provider?: 'anthropic'|'openai'|'gemini', marketContext?: string }
+  // Tier 86: POST /api/me/ai-keys/test {provider, apiKey?} -- send a minimal request to verify the key works
+  router.post('/test', async (req, res) => {
+    try {
+      const provider = req.body && req.body.provider;
+      if (!provider || !SUPPORTED_PROVIDERS.includes(provider)) {
+        return res.status(400).json({ ok: false, reason: 'unsupported_provider', supportedProviders: SUPPORTED_PROVIDERS });
+      }
+      let apiKey = req.body && req.body.apiKey;
+      // If no key in request, use the saved one
+      if (!apiKey || apiKey === '(unchanged)') {
+        const row = getStmt.get(req.user.id, provider);
+        if (!row) return res.status(404).json({ ok: false, reason: 'no_key_saved' });
+        apiKey = await vault.open(row.sealed_key);
+      }
+      const t0 = Date.now();
+      // Minimal validation call per provider (cheap "hi" prompt, JSON mode where supported)
+      const result = await callLLM({
+        provider,
+        apiKey,
+        model: (req.body && req.body.model) || DEFAULT_MODEL_BY_PROVIDER[provider],
+        prompt: 'Respond with JSON {"ok":true} only. This is a connectivity test.',
+        fetchImpl: globalThis.fetch,
+      });
+      const elapsed_ms = Date.now() - t0;
+      res.json({ ok: true, provider, elapsed_ms, sample: typeof result === 'string' ? result.slice(0, 80) : null });
+    } catch (e) {
+      const msg = e && e.message ? e.message : 'test_failed';
+      const reason = /401|unauthor|invalid/i.test(msg) ? 'invalid_api_key'
+                  : /429|rate/i.test(msg) ? 'rate_limited'
+                  : /timeout/i.test(msg) ? 'timeout' : 'send_failed';
+      res.status(400).json({ ok: false, provider: req.body && req.body.provider, reason, detail: msg });
+    }
+  });
+
+  // Tier 86: GET /api/me/ai-keys/usage -- aggregate per-provider call counts from audit
+  router.get('/usage', (req, res) => {
+    try {
+      // Aggregate from errors_log or audit if available. Conservative implementation:
+      // count entries from a hypothetical ai_advisor_calls table if it exists, else return zeros.
+      const out = {};
+      for (const p of SUPPORTED_PROVIDERS) out[p] = { calls_30d: 0, est_cost_inr: 0 };
+      try {
+        // If we ever add an ai_calls table, query it here. For now return placeholder.
+        const tableExists = db._conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='ai_calls'").get();
+        if (tableExists) {
+          const rows = db._conn.prepare("SELECT provider, COUNT(*) AS calls, COALESCE(SUM(cost_inr),0) AS cost FROM ai_calls WHERE user_id = ? AND ts > datetime('now','-30 days') GROUP BY provider").all(req.user.id);
+          for (const r of rows) {
+            if (out[r.provider]) { out[r.provider].calls_30d = r.calls; out[r.provider].est_cost_inr = r.cost; }
+          }
+        }
+      } catch (_) {}
+      res.json({ ok: true, usage: out, period: '30d' });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: 'usage_failed', detail: e.message });
+    }
+  });
+
   router.post('/analyze', async (req, res) => {
     try {
       const body = req.body || {};
