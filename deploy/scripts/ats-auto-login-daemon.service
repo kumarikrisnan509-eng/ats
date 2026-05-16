@@ -8,6 +8,7 @@ User=ats
 Group=docker
 WorkingDirectory=/opt/ats-auto-login
 EnvironmentFile=/etc/ats/auto-login.env
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/ats-auto-login/browsers
 ExecStart=/usr/bin/node /opt/ats-auto-login/auto-login-daemon.js
 Restart=on-failure
 RestartSec=5
