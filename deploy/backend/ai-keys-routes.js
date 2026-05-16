@@ -132,11 +132,13 @@ function createAiKeysRouter({ db, vault, requireAuth, brokerResolver }) {
     } catch (e) {
       const msg = e && e.message ? e.message : 'test_failed';
       // T92: explicit 404 / not_found mapping so users see a clean error
+      // T95: check 404/not_found BEFORE rate (since 'generate' contains substring 'rate');
+      // also use word boundaries on rate-limit to avoid false positives in URLs
       const reason = /401|unauthor|invalid_api_key/i.test(msg) ? 'invalid_api_key'
-                  : /429|rate/i.test(msg) ? 'rate_limited'
-                  : /timeout/i.test(msg) ? 'timeout'
                   : /404|not_found/i.test(msg) ? 'model_not_available'
                   : /403|permission|forbidden/i.test(msg) ? 'no_access_to_model'
+                  : /\b429\b|rate[ _-]?limit/i.test(msg) ? 'rate_limited'
+                  : /timeout/i.test(msg) ? 'timeout'
                   : 'send_failed';
       res.status(400).json({ ok: false, provider: req.body && req.body.provider, reason, detail: msg });
     }
