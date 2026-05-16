@@ -94,7 +94,10 @@ const AiKeysScreen = () => {
     try {
       const body = { provider };
       if (useDraftKey && drafts[provider]?.key) body.apiKey = drafts[provider].key;
-      if (drafts[provider]?.model) body.model = drafts[provider].model;
+      // T92: always send the currently-displayed model so test matches what user sees
+      const existing = keys.find(k => k.provider === provider);
+      const currentModel = drafts[provider]?.model || existing?.model_pref || _PROVIDER_META[provider]?.defaultModel;
+      if (currentModel) body.model = currentModel;
       const res = await fetch('/api/me/ai-keys/test', {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
