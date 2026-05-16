@@ -1,4 +1,109 @@
 /* eslint-disable */
+
+// Phase 2 / E6: Live Scanner row with on-demand /critique-rich call.
+function SignalRow({ sig, isFirst }) {
+  const [busy, setBusy] = React.useState(false);
+  const [open, setOpen] = React.useState(false);
+  const [crit, setCrit] = React.useState(null);
+  const [error, setError] = React.useState(null);
+
+  const sigColor = (sig.signal && (sig.signal.indexOf('OVERSOLD') >= 0 || sig.signal.indexOf('CROSS_UP') >= 0))
+    ? 'var(--up)'
+    : (sig.signal && (sig.signal.indexOf('OVERBOUGHT') >= 0 || sig.signal.indexOf('CROSS_DOWN') >= 0))
+    ? 'var(--down)' : 'var(--text-2)';
+
+  const run = async () => {
+    if (crit) { setOpen(o => !o); return; }
+    setBusy(true); setError(null);
+    try {
+      const r = await fetch('/api/me/ai-workflows/critique-rich', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: sig.symbol, signal: sig.signal, value: sig.value, message: sig.message }),
+      }).then(r => r.json());
+      if (r.ok) { setCrit(r); setOpen(true); }
+      else setError(r.detail || r.reason || 'failed');
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+
+  const verdictColor = crit && crit.verdict === 'agree' ? 'var(--up)' :
+                       crit && crit.verdict === 'reject' ? 'var(--down)' :
+                       crit && crit.verdict === 'caution' ? 'var(--warn, #d97706)' : 'var(--text-3)';
+
+  return (
+    <div style={{ borderTop: isFirst ? 'none' : '1px solid var(--border)' }}>
+      <div style={{ display: 'flex', gap: 12, padding: '6px 0', alignItems: 'center' }}>
+        <span className="mono" style={{ minWidth: 120, fontWeight: 600 }}>{sig.symbol}</span>
+        <span className="mono" style={{ minWidth: 180, color: sigColor }}>{sig.signal}</span>
+        <span className="mono" style={{ minWidth: 80 }}>{typeof sig.value === 'number' ? sig.value.toFixed(2) : (sig.value || '-')}</span>
+        <span style={{ flex: 1, fontSize: 11, color: 'var(--text-2)' }}>{sig.message || ''}</span>
+        <span className="mono" style={{ fontSize: 11, color: 'var(--text-3)' }}>{sig.ts ? new Date(sig.ts).toLocaleTimeString('en-IN') : ''}</span>
+        <button
+          onClick={run}
+          disabled={busy}
+          style={{
+            padding: '3px 10px', fontSize: 11, borderRadius: 6,
+            border: '1px solid ' + (crit ? verdictColor : 'var(--border)'),
+            background: crit ? verdictColor : 'var(--surface, transparent)',
+            color: crit ? 'white' : 'var(--text-2)',
+            cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1,
+            textTransform: 'uppercase', fontWeight: 600, letterSpacing: 0.4,
+          }}
+          title={crit ? (open ? 'Hide critique' : 'Show critique') : 'Ask AI to critique this signal'}
+        >{busy ? '...' : (crit ? crit.verdict : 'critique')}</button>
+      </div>
+
+      {error && (
+        <div style={{ fontSize: 11, color: 'var(--danger, #c53030)', padding: '4px 0' }}>
+          critique error: {error}
+        </div>
+      )}
+
+      {open && crit && (
+        <div style={{
+          padding: 10, marginBottom: 8, borderRadius: 8,
+          border: '1px solid var(--border)',
+          background: 'var(--surface-2, rgba(0,0,0,0.02))',
+          fontSize: 12,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <span style={{ padding: '2px 8px', borderRadius: 4, background: verdictColor, color: 'white', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' }}>{crit.verdict}</span>
+            <span style={{ color: 'var(--text-3)' }}>confidence {crit.confidence}/100 · {crit.provider}/{crit.model} · {crit.cached ? 'cached' : '₹' + Number(crit.cost_inr || 0).toFixed(4)}</span>
+          </div>
+          <div style={{ marginBottom: 6 }}><strong>{crit.summary}</strong></div>
+          {crit.context && (
+            <div style={{ marginBottom: 6, fontSize: 11, color: 'var(--text-3)', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {crit.context.regime && <span>regime: <span style={{ color: 'var(--text-2)' }}>{crit.context.regime.regime}</span></span>}
+              {crit.context.rsi_now != null && <span>· RSI: <span className="mono">{crit.context.rsi_now}</span></span>}
+              {crit.context.pct_move_5d != null && <span>· 5d: <span className="mono">{crit.context.pct_move_5d}%</span></span>}
+              {crit.context.bench_pct_move != null && <span>· NIFTY 5d: <span className="mono">{crit.context.bench_pct_move}%</span></span>}
+              {crit.context.surveillance && <span style={{ color: 'var(--danger)' }}>· SURVEILLANCE: {crit.context.surveillance.list}</span>}
+            </div>
+          )}
+          {crit.key_risks && crit.key_risks.length > 0 && (
+            <div style={{ marginBottom: 4 }}>
+              <strong>Key risks:</strong>
+              <ul style={{ margin: '2px 0 0 18px', padding: 0 }}>
+                {crit.key_risks.map((r, i) => <li key={i}>{r}</li>)}
+              </ul>
+            </div>
+          )}
+          {crit.next_step && (
+            <div style={{ marginBottom: 6 }}><strong>Next step:</strong> {crit.next_step}</div>
+          )}
+          {crit.call_id && window.AiFeedback && (
+            <div style={{ marginTop: 6 }}>
+              <window.AiFeedback callId={crit.call_id} workflow="intraday_critic" compact={true}/>
+            </div>
+          )}
+          {window.SebiDisclaimer && <window.SebiDisclaimer compact={true}/>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* AI Signals pipeline: Signal → Paper → Live → Profit → Long-term */
 
 const ModeGateBanner = () => {
@@ -156,13 +261,7 @@ const SignalsScreen = () => {
           </div>
           <div style={{ marginTop: 10, fontSize: 12 }}>
             {realSignals.slice(0, 10).map((s, i) => (
-              <div key={i} style={{ display: "flex", gap: 12, padding: "6px 0", borderTop: i > 0 ? "1px solid var(--border)" : "none" }}>
-                <span className="mono" style={{ minWidth: 120, fontWeight: 600 }}>{s.symbol}</span>
-                <span className="mono" style={{ minWidth: 180, color: (s.signal && (s.signal.indexOf('OVERSOLD') >= 0 || s.signal.indexOf('CROSS_UP') >= 0)) ? 'var(--up)' : (s.signal && (s.signal.indexOf('OVERBOUGHT') >= 0 || s.signal.indexOf('CROSS_DOWN') >= 0)) ? 'var(--down)' : 'var(--text-2)' }}>{s.signal}</span>
-                <span className="mono" style={{ minWidth: 80 }}>{typeof s.value === 'number' ? s.value.toFixed(2) : (s.value || '-')}</span>
-                <span style={{ flex: 1, fontSize: 11, color: "var(--text-2)" }}>{s.message || ''}</span>
-                <span className="mono" style={{ fontSize: 11, color: "var(--text-3)" }}>{s.ts ? new Date(s.ts).toLocaleTimeString('en-IN') : ''}</span>
-              </div>
+              <SignalRow key={i} sig={s} isFirst={i === 0}/>
             ))}
           </div>
         </div>
