@@ -1468,7 +1468,7 @@ app.post('/api/reconcile/import-csv', (req, res) => {
 });
 
 // ---------- Going-live preflight ----------
-app.get('/api/preflight', async (_req, res) => {
+app.get('/api/preflight', async (req, res) => {
   try {
     const result = await runPreflight({
       broker, paper, pnl,
@@ -1480,7 +1480,7 @@ app.get('/api/preflight', async (_req, res) => {
         const list = paper.list();
         const paperPending = list.filter(o => o.status === 'PENDING').length;
         let brokerPending = 0;
-        try { const o = await broker.getOrders(); brokerPending = (o || []).filter(x => String(x.status||'').toUpperCase() === 'OPEN').length; } catch {}
+        try { const _p = await pickBroker(req); if (_p.broker) { const o = await _p.broker.getOrders(); brokerPending = (o || []).filter(x => String(x.status||'').toUpperCase() === 'OPEN').length; } } catch {}
         return { summary: { cashDrift: 0, brokerPendingCnt: brokerPending, paperPendingCnt: paperPending } };
       },
     });
@@ -3224,7 +3224,7 @@ app.post('/api/orders/place', async (req, res) => {
       for (const p of pos) exposure += Math.abs((p.qty || 0) * (p.ltp || p.avgPrice || 0));
     }
     if (typeof broker.getHoldings === 'function') {
-      const hs = await broker.getHoldings().catch(() => []);
+      const _pp = await pickBroker(req); const hs = _pp.broker ? await _pp.broker.getHoldings().catch(() => []) : [];
       for (const h of hs) exposure += Math.abs((h.quantity || 0) * (h.last_price || h.ltp || 0));
     }
     if (exposure > MAX_AGGREGATE_EXPOSURE) {
