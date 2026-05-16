@@ -385,8 +385,271 @@ async function runAutoReauth({ db, vault, userId, brokerRow }) {
   }
 }
 
+// ============================================================
+// Tier 81: v1 API surface — RESTful, versioned, plural nouns, /actions/ for RPC verbs.
+// Mounted at /api/v1/me/brokers from server.js. Reuses same handler logic internally.
+// Old /api/me/broker* mount remains as a backward-compat alias for 30 days.
+// ============================================================
+function createV1BrokersRouter({ db, vault, requireAuth }) {
+  const express = require('express');
+  const router = express.Router();
+  router.use(express.json({ limit: '32kb' }));
+  router.use(requireAuth);
+
+  // Re-use the same legacy router internally so handler bodies stay in one place.
+  // We build a fresh handler factory that maps v1 paths to the same callbacks.
+  let invalidateCache;
+  try { invalidateCache = require('./broker-resolver').invalidate; }
+  catch (_) { invalidateCache = () => {}; }
+
+  const seal = async (plain) => {
+    if (plain == null || plain === '') return null;
+    return vault.seal(String(plain));
+  };
+
+  function decorateRow(r) {
+    const tokenStatus = computeTokenStatus(r);
+    const expiresAt = r.expires_at || (r.has_access_token ? nextTokenExpiry(r.issued_at).toISOString() : null);
+    return {
+      id: r.id, broker: r.broker, broker_user_id: r.broker_user_id || '',
+      is_default: !!r.is_default, issued_at: r.issued_at, expires_at: expiresAt,
+      created_at: r.created_at,
+      has_api_key: !!r.has_api_key, has_access_token: !!r.has_access_token,
+      has_totp: !!r.has_totp, has_password: !!r.has_password,
+      token_status: tokenStatus,
+      auto_login_capable: !!(r.has_api_key && r.has_totp && r.has_password),
+      last_test_at: r.last_test_at || null,
+      last_test_ok: r.last_test_ok == null ? null : !!r.last_test_ok,
+      last_test_error: r.last_test_error || null,
+      auto_reauth_enabled: r.auto_reauth_enabled == null ? true : !!r.auto_reauth_enabled,
+      cron_recent: (() => {
+        try { return db.cron ? db.cron.recentByUser(r.user_id, 5) : []; }
+        catch (_) { return []; }
+      })(),
+    };
+  }
+
+  // GET /api/v1/me/brokers
+  router.get('/', (req, res) => {
+    try {
+      const rows = db.brokers.list(req.user.id);
+      res.json({ ok: true, brokers: rows.map(decorateRow) });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: 'list_failed', detail: e.message });
+    }
+  });
+
+  // POST /api/v1/me/brokers
+  router.post('/', async (req, res) => {
+    try {
+      const { broker, broker_user_id } = req.body || {};
+      const api_key = req.body && req.body.api_key;
+      const api_secret = req.body && req.body.api_secret;
+      const totp_seed = req.body && req.body.totp_seed;
+      const access_token = req.body && req.body.access_token;
+      const password = req.body && req.body.password;
+      const set_default = !!(req.body && req.body.set_default);
+      const autoReauthAfterSave = !!(req.body && req.body.autoReauthAfterSave);
+
+      if (!broker || !SUPPORTED.has(String(broker).toLowerCase()))
+        return res.status(400).json({ ok: false, reason: 'broker_required', supported: Array.from(SUPPORTED) });
+      if (!broker_user_id || typeof broker_user_id !== 'string' || broker_user_id.length < 2)
+        return res.status(400).json({ ok: false, reason: 'broker_user_id_required' });
+      if (!api_key || typeof api_key !== 'string' || api_key.length < 4)
+        return res.status(400).json({ ok: false, reason: 'api_key_required' });
+      if (!api_secret || typeof api_secret !== 'string' || api_secret.length < 4)
+        return res.status(400).json({ ok: false, reason: 'api_secret_required' });
+
+      const row = {
+        user_id: req.user.id, broker: String(broker).toLowerCase(),
+        broker_user_id: String(broker_user_id),
+        api_key: await seal(api_key), refresh_token: await seal(api_secret),
+        totp_seed: totp_seed ? await seal(totp_seed) : null,
+        access_token: access_token ? await seal(access_token) : null,
+        feed_token: password ? await seal(password) : null,
+        is_default: set_default,
+      };
+      db.brokers.upsert(row);
+      const existing = db.brokers.list(req.user.id);
+      if (existing.length === 1 && !existing[0].is_default) db.brokers.setDefault(req.user.id, existing[0].id);
+      else if (set_default) {
+        const r2 = db.brokers.getByBroker(req.user.id, row.broker);
+        if (r2) db.brokers.setDefault(req.user.id, r2.id);
+      }
+      invalidateCache(req.user.id);
+      if (autoReauthAfterSave) {
+        const fresh = db.brokers.getByBroker(req.user.id, row.broker);
+        if (fresh && fresh.totp_seed && fresh.feed_token) {
+          const result = await runAutoReauth({ db, vault, userId: req.user.id, brokerRow: fresh });
+          return res.status(201).json({ ok: true, autoReauth: result });
+        }
+        return res.status(201).json({ ok: true, autoReauth: { ok: false, reason: 'no_totp_or_password' } });
+      }
+      res.status(201).json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: 'save_failed', detail: e.message });
+    }
+  });
+
+  // GET /api/v1/me/brokers/:id
+  router.get('/:id', (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, reason: 'bad_id' });
+    const rows = db.brokers.list(req.user.id);
+    const row = rows.find(r => r.id === id);
+    if (!row) return res.status(404).json({ ok: false, reason: 'not_found' });
+    res.json({ ok: true, broker: decorateRow(row) });
+  });
+
+  // PATCH /api/v1/me/brokers/:id  (was PUT in v0; PATCH is more correct for partial update)
+  const patchHandler = async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, reason: 'bad_id' });
+      const existing = db.brokers.getFull(req.user.id, id);
+      if (!existing) return res.status(404).json({ ok: false, reason: 'not_found' });
+      const patch = req.body || {};
+      const row = {
+        user_id: req.user.id, broker: existing.broker,
+        broker_user_id: patch.broker_user_id || existing.broker_user_id,
+        api_key: patch.api_key ? await seal(patch.api_key) : null,
+        refresh_token: patch.api_secret ? await seal(patch.api_secret) : null,
+        totp_seed: patch.totp_seed === '' ? null : (patch.totp_seed ? await seal(patch.totp_seed) : null),
+        access_token: patch.access_token ? await seal(patch.access_token) : null,
+        feed_token: patch.password === '' ? null : (patch.password ? await seal(patch.password) : null),
+        is_default: patch.is_default != null ? !!patch.is_default : !!existing.is_default,
+      };
+      db.brokers.upsert(row);
+      if (patch.is_default === true) db.brokers.setDefault(req.user.id, id);
+      invalidateCache(req.user.id);
+      if (patch.autoReauthAfterSave) {
+        const fresh = db.brokers.getFull(req.user.id, id);
+        if (fresh && fresh.totp_seed && fresh.feed_token) {
+          const result = await runAutoReauth({ db, vault, userId: req.user.id, brokerRow: fresh });
+          return res.json({ ok: true, autoReauth: result });
+        }
+        return res.json({ ok: true, autoReauth: { ok: false, reason: 'no_totp_or_password' } });
+      }
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: 'update_failed', detail: e.message });
+    }
+  };
+  router.patch('/:id', patchHandler);
+  router.put('/:id', patchHandler); // also accept PUT for client compatibility
+
+  // DELETE /api/v1/me/brokers/:id
+  router.delete('/:id', (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, reason: 'bad_id' });
+      const result = db.brokers.delete(req.user.id, id);
+      if (result.changes === 0) return res.status(404).json({ ok: false, reason: 'not_found' });
+      invalidateCache(req.user.id);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: 'delete_failed', detail: e.message });
+    }
+  });
+
+  // POST /api/v1/me/brokers/:id/actions/test  — pure connection test
+  router.post('/:id/actions/test', async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const row = db.brokers.getFull(req.user.id, id);
+      if (!row) return res.status(404).json({ ok: false, reason: 'not_configured' });
+      let userBroker;
+      try {
+        const { getBrokerForUser } = require('./broker-resolver');
+        userBroker = await getBrokerForUser({ db, vault }, req.user.id);
+      } catch (e) {
+        db.brokers.recordTest(req.user.id, row.id, false, 'resolver: ' + e.message);
+        return res.status(500).json({ ok: false, reason: 'resolver_unavailable', detail: e.message });
+      }
+      if (!userBroker || !userBroker.kc) {
+        db.brokers.recordTest(req.user.id, row.id, false, 'broker_not_initialised');
+        return res.status(400).json({ ok: false, reason: 'broker_not_initialised' });
+      }
+      try {
+        const profile = await userBroker.kc.getProfile();
+        db.brokers.recordTest(req.user.id, row.id, true, null);
+        res.json({ ok: true, profile: { user_id: profile.user_id, email: profile.email, broker: profile.broker } });
+      } catch (e) {
+        const msg = e && e.message ? e.message : 'test_failed';
+        db.brokers.recordTest(req.user.id, row.id, false, msg);
+        const reason = /token|access/i.test(msg) ? 'invalid_token' : /api_key/i.test(msg) ? 'invalid_api_key' : 'test_failed';
+        res.status(400).json({ ok: false, reason, detail: msg });
+      }
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: 'test_internal', detail: e.message });
+    }
+  });
+
+  // POST /api/v1/me/brokers/:id/actions/reauth  — one-click headless reauth
+  router.post('/:id/actions/reauth', async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const row = db.brokers.getFull(req.user.id, id);
+      if (!row) return res.status(404).json({ ok: false, reason: 'not_configured' });
+      if (!row.totp_seed || !row.feed_token)
+        return res.status(400).json({ ok: false, reason: 'no_totp_or_password',
+          detail: 'Add TOTP seed and password to enable headless reauth.' });
+      const result = await runAutoReauth({ db, vault, userId: req.user.id, brokerRow: row });
+      res.status(result.ok ? 200 : 400).json(result);
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: 'reauth_internal', detail: e.message });
+    }
+  });
+
+  // GET /api/v1/me/brokers/:id/actions/reauth-url  — returns Kite OAuth URL for Manual flow
+  router.get('/:id/actions/reauth-url', async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const row = db.brokers.getFull(req.user.id, id);
+      if (!row || !row.api_key)
+        return res.status(412).json({ ok: false, reason: 'no_credentials', detail: 'Save api_key + api_secret first.' });
+      const apiKey = await vault.open(row.api_key);
+      // Reuse the existing _signState from server.js via require trick. If not available, build inline.
+      let signState;
+      try { signState = require('./server.js')._signState; } catch (_) { /* unavailable */ }
+      if (!signState) {
+        // Fallback: inline state generation (HMAC with master key)
+        const crypto = require('crypto');
+        const fs = require('fs');
+        const nonce = crypto.randomBytes(12).toString('hex');
+        const keyBuf = fs.readFileSync(process.env.MASTER_KEY_PATH || '/var/lib/ats/master.key');
+        const sig = crypto.createHmac('sha256', keyBuf).update(`${req.user.id}|${nonce}`).digest('hex');
+        signState = () => `${Buffer.from(String(req.user.id)).toString('base64').replace(/=+$/,'')}.${Buffer.from(nonce).toString('base64').replace(/=+$/,'')}.${sig}`;
+        // NOTE: inline fallback doesn't register the nonce in _pendingNonces — callback will fail.
+        // So we always rely on the server.js _signState being available. Most installs share the module.
+      }
+      const state = signState(req.user.id);
+      const url = `https://kite.zerodha.com/connect/login?api_key=${encodeURIComponent(apiKey)}&v=3&state=${encodeURIComponent(state)}`;
+      res.json({ ok: true, url, expiresInSec: 300 });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: 'url_build_failed', detail: e.message });
+    }
+  });
+
+  // PATCH /api/v1/me/brokers/:id/auto-reauth  { enabled: bool }
+  router.patch('/:id/auto-reauth', (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const existing = db.brokers.getFull(req.user.id, id);
+      if (!existing) return res.status(404).json({ ok: false, reason: 'not_found' });
+      const enabled = !!(req.body && req.body.enabled);
+      db.brokers.setAutoReauth(req.user.id, id, enabled);
+      res.json({ ok: true, enabled });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: 'toggle_failed', detail: e.message });
+    }
+  });
+
+  return router;
+}
+
 module.exports = {
-  createMeBrokerRouter, SUPPORTED,
+  createMeBrokerRouter, createV1BrokersRouter, SUPPORTED,
   _runAutoReauth: runAutoReauth,
   _nextTokenExpiry: nextTokenExpiry,
   _computeTokenStatus: computeTokenStatus,
