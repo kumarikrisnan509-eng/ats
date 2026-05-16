@@ -30,8 +30,8 @@ const _PROVIDER_META = {
     keyPrefix: 'AIza',
     consoleUrl: 'https://aistudio.google.com/apikey',
     consoleLabel: 'aistudio.google.com',
-    defaultModel: 'gemini-3.1-flash-lite',
-    modelOptions: ['gemini-3.1-flash-lite', 'gemini-3.1-pro', 'gemini-3-pro'],
+    defaultModel: 'gemini-3.1-pro-preview',
+    modelOptions: ['gemini-3.1-pro-preview', 'gemini-3-pro-preview', 'gemini-3.1-flash-lite'],
     desc: 'Fast + cheap for consensus checks + vision (chart screenshots).',
   },
 };
