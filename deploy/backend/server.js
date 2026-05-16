@@ -2373,6 +2373,21 @@ app.get('/api/me/pnl', withAuth((req, res) => {
   res.json({ ok:true, rows: db.pnl.recent(req.user.id, n) });
 }));
 
+// Tier 69a: per-user portfolio risk metrics derived from pnl_daily snapshots.
+// VaR (historical + parametric), max drawdown, Sharpe, Sortino, Calmar.
+app.get('/api/me/risk-metrics', withAuth((req, res) => {
+  try {
+    const days = Math.min(1095, Math.max(2, Number(req.query.days) || 252));
+    const rows = db.pnl.recent(req.user.id, days);
+    const dailyEquity = (rows || []).map(r => ({ date: r.date, equity: Number(r.equity || 0) })).reverse();
+    const { computeRiskMetrics } = require('./risk-engine');
+    const out = computeRiskMetrics(dailyEquity, { rfAnnual: 0.065 });
+    res.json({ ok: true, ...out });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: 'risk_compute_failed', detail: e.message });
+  }
+}));
+
 // ---------- Tier 60: per-user dashboard summary aggregator ----------
 app.get('/api/me/dashboard-summary', withAuth(async (req, res) => {
   try {
