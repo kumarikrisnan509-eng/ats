@@ -162,6 +162,7 @@ const NAV_GROUPS = [
     label: "System",
     items: [
       { id: "settings",   label: "Settings",       icon: I.settings },
+      { id: "ai-keys",    label: "AI providers",   icon: I.sparkle },
       // overflow
       { id: "risk",       label: "Risk",           icon: I.shield,      overflow: true },
       { id: "compliance", label: "Compliance",     icon: I.shieldCheck, overflow: true },
