@@ -121,7 +121,10 @@ function createAiKeysRouter({ db, vault, requireAuth, brokerResolver }) {
         provider,
         apiKey,
         model: resolvedModel,
-        prompt: 'Respond with JSON {"ok":true} only. This is a connectivity test.',
+        prompt: {
+          system: 'You are a connectivity check. Reply with exactly the JSON: {"ok":true}',
+          user: 'ping',
+        },
         fetchImpl: globalThis.fetch,
       });
       const elapsed_ms = Date.now() - t0;
