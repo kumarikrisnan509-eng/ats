@@ -1,0 +1,18 @@
+[Unit]
+Description=ATS host-side Kite headless auto-login daemon
+After=network.target
+
+[Service]
+Type=simple
+User=ats
+Group=docker
+WorkingDirectory=/opt/ats-auto-login
+EnvironmentFile=/etc/ats/auto-login.env
+ExecStart=/usr/bin/node /opt/ats-auto-login/auto-login-daemon.js
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/var/log/ats/auto-login-daemon.log
+StandardError=append:/var/log/ats/auto-login-daemon.log
+
+[Install]
+WantedBy=multi-user.target
