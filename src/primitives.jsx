@@ -238,23 +238,12 @@ const DEMO_KEY = "ats.demoMode";
 const isDemoMode = () => {
   try { return localStorage.getItem(DEMO_KEY) === "1"; } catch { return false; }
 };
-const setDemoMode = (on) => {
-  try { localStorage.setItem(DEMO_KEY, on ? "1" : "0"); } catch {}
-  try { window.dispatchEvent(new CustomEvent("demo-mode-changed", { detail: !!on })); } catch {}
-};
-const useDemoMode = () => {
-  const [demo, setDemo] = React.useState(isDemoMode());
-  React.useEffect(() => {
-    const h = () => setDemo(isDemoMode());
-    window.addEventListener("demo-mode-changed", h);
-    window.addEventListener("storage", h);
-    return () => {
-      window.removeEventListener("demo-mode-changed", h);
-      window.removeEventListener("storage", h);
-    };
-  }, []);
-  return [demo, (v) => setDemoMode(v)];
-};
+// T83: demo mode killed. setDemoMode and useDemoMode return stable no-ops
+// so any screen that still calls them gets [false, noop] -- always live data.
+// Old localStorage key cleared on load so any leftover flag is reset.
+try { localStorage.removeItem(DEMO_KEY); } catch (_) {}
+const setDemoMode = (_on) => { /* no-op */ };
+const useDemoMode = () => [false, () => {}];
 
 const Progress = ({ value, max = 100, kind = "" }) => (
   <div className="progress">
