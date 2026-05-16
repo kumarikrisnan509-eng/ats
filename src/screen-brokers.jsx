@@ -546,7 +546,7 @@ const BrokersScreen = () => {
                     title="Disconnect this broker"
                     aria-label="Disconnect"
                     style={{ width: 28, height: 28, padding: 0, color: 'var(--danger)', display: 'grid', placeItems: 'center' }}
-                  ><I.trash size={14} /></button>
+                  ><span style={{ fontSize: 16, lineHeight: 1, marginTop: -1 }}>×</span></button>
                 </div>
               </div>
 
