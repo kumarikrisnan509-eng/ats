@@ -11,7 +11,7 @@ const _PROVIDER_META = {
     consoleUrl: 'https://console.anthropic.com/settings/keys',
     consoleLabel: 'console.anthropic.com',
     defaultModel: 'claude-sonnet-4-6',
-    modelOptions: ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5'],
+    modelOptions: ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5'],
     desc: 'Best for complex reasoning + intraday critic + strategy explain.',
   },
   openai: {
