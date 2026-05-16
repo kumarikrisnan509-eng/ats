@@ -331,6 +331,26 @@ app.post('/api/admin/market/refresh-holidays', async (req, res) => {
   res.json(r);
 });
 
+// ---------- Tier 80: daily auto-reauth cron (per-user headless Kite login) ----------
+let _cronReauth = null;
+try {
+  if (db && vault) {
+    const { createCronReauth } = require('./cron-reauth');
+    _cronReauth = createCronReauth({ db, vault, audit, postTelegram });
+    _cronReauth.start();
+  }
+} catch (e) {
+  console.error('[server] cron-reauth init failed:', e && e.message);
+}
+
+// Tier 80: admin-only manual trigger (for testing the cron without waiting until 05:45 IST)
+app.post('/api/admin/cron-reauth/run', async (req, res) => {
+  if (!req.user || !req.user.is_admin) return res.status(403).json({ ok: false, reason: 'admin_only' });
+  if (!_cronReauth) return res.status(503).json({ ok: false, reason: 'cron_unavailable' });
+  const r = await _cronReauth.runNow();
+  res.json(r);
+});
+
 // ---------- Tier 70: observability (request-id, latency, error capture) ----------
 // FIX: db is undefined at module-load time (it's assigned inside async init()).
 // Use a lazy-init helper so the route grabs the db once it exists.
