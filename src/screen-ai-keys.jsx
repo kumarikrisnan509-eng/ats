@@ -43,6 +43,7 @@ const AiKeysScreen = () => {
   const [drafts, setDrafts] = React.useState({});          // {anthropic: {key:'', model:''}, ...}
   const [busy, setBusy] = React.useState({});              // {anthropic: 'save'|'test'|'remove'|null}
   const [results, setResults] = React.useState({});        // {anthropic: {ok, msg}, ...}
+  const [dynamicModels, setDynamicModels] = React.useState({});  // T97: { anthropic: [id,...], openai: [...], gemini: [...] }
   const [toast, setToast] = React.useState(null);
 
   const refresh = React.useCallback(async () => {
@@ -54,6 +55,17 @@ const AiKeysScreen = () => {
       if (k.ok) {
         setKeys(k.keys || []);
         if (k.supportedProviders) setSupported(k.supportedProviders);
+        // T97: fetch each provider's actual list-models (the real models the saved key can access)
+        for (const krow of (k.keys || [])) {
+          fetch(`/api/me/ai-keys/models/${krow.provider}`, { credentials: 'include' })
+            .then(r => r.json())
+            .then(mj => {
+              if (mj.ok && Array.isArray(mj.models) && mj.models.length) {
+                setDynamicModels(d => ({ ...d, [krow.provider]: mj.models.map(m => m.id) }));
+              }
+            })
+            .catch(() => { /* fall back to hardcoded list */ });
+        }
       }
       if (u.ok) setUsage(u.usage || {});
     } catch (e) { console.warn('[ai-keys] refresh failed:', e.message); }
@@ -165,7 +177,7 @@ const AiKeysScreen = () => {
                 <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>Model</div>
                 <select className="input" value={draft.model || existing?.model_pref || meta.defaultModel}
                   onChange={e => setDraft(provider, { model: e.target.value })}>
-                  {meta.modelOptions.map(m => <option key={m} value={m}>{m}{m === meta.defaultModel ? ' · default' : ''}</option>)}
+                  {(dynamicModels[provider] || meta.modelOptions).map(m => <option key={m} value={m}>{m}{m === meta.defaultModel ? ' · default' : ''}</option>)}
                 </select>
               </label>
 
