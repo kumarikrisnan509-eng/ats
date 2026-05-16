@@ -79,7 +79,7 @@ function _capCheck(db, userId, workflow, provider, model, est_cost_inr) {
   return { blocked: false };
 }
 
-function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES }) {
+function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES, brokerResolver, surveillance }) {
   const express = require('express');
   const router = express.Router();
   router.use(express.json({ limit: '32kb' }));
@@ -268,6 +268,159 @@ Return JSON review only.`,
     } catch (e) {
       try { db.ai.logCall({ user_id: req.user.id, workflow: 'monthly_review', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e && e.message || 'monthly_review_failed').slice(0,200) }); } catch (_) {}
       res.status(500).json({ ok: false, reason: 'monthly_review_failed', detail: e.message });
+    }
+  });
+
+  // --- Phase 2 / E6: enriched critique that fetches market context server-side ---
+  // POST /api/me/ai-workflows/critique-rich
+  // Body: { symbol, signal, value?, message?, mode? }
+  // Gathers regime + recent 5d close/volume + RSI + surveillance status,
+  // then calls the SAME workflow (intraday_critic) with a fuller prompt.
+  router.post('/critique-rich', async (req, res) => {
+    const b = req.body || {};
+    const symbol = (b.symbol || '').toString().toUpperCase().trim();
+    const signal = (b.signal || '').toString();
+    if (!symbol || !signal) return res.status(400).json({ ok: false, reason: 'bad_request', detail: 'symbol + signal required' });
+
+    try {
+      const mode = b.mode || db.ai.userMode(req.user.id);
+
+      // 1. Resolve broker for THIS user (per-user OAuth)
+      let candles = null;
+      let bench = null;
+      let regime = null;
+      try {
+        if (brokerResolver) {
+          const r = await brokerResolver.resolveForRequest({ db, vault, globalBroker: null, fallbackToGlobal: false }, req);
+          if (r && r.broker) {
+            const today = new Date();
+            const from = new Date(today.getTime() - 90 * 86400 * 1000).toISOString().slice(0, 10);
+            const to   = today.toISOString().slice(0, 10);
+            candles = await r.broker.getHistorical({ symbol, interval: 'day', from, to }).catch(() => null);
+            // Benchmark: NIFTY 50 same window — small extra call, big context value
+            bench = await r.broker.getHistorical({ symbol: 'NIFTY 50', interval: 'day', from, to }).catch(() => null);
+          }
+        }
+      } catch (e) { console.warn('[critique-rich] broker fetch failed:', e.message); }
+
+      // 2. Regime from candles (uses existing classifyRegime in scanner.js)
+      try {
+        const { classifyRegime, rsi } = require('./scanner');
+        if (Array.isArray(candles) && candles.length >= 50) {
+          regime = classifyRegime(candles);
+        }
+      } catch (e) { console.warn('[critique-rich] regime classify failed:', e.message); }
+
+      // 3. Surveillance verdict (re-uses Day 1 gate)
+      let surveillanceVerdict = null;
+      try {
+        if (surveillance) surveillanceVerdict = surveillance.classifySync(symbol);
+      } catch (_) {}
+
+      // 4. Recent trend summary (last 5 daily closes + volumes)
+      const recent = (() => {
+        if (!Array.isArray(candles) || candles.length < 5) return null;
+        const last5 = candles.slice(-5);
+        const pctMove = +(((last5[4].close - last5[0].close) / last5[0].close) * 100).toFixed(2);
+        const avgVol = Math.round(last5.reduce((s, c) => s + (c.volume || 0), 0) / 5);
+        return {
+          last_5_closes: last5.map(c => +Number(c.close).toFixed(2)),
+          last_5_vols:   last5.map(c => Number(c.volume || 0)),
+          pct_move_5d:   pctMove,
+          avg_vol_5d:    avgVol,
+        };
+      })();
+
+      // 5. Benchmark same-window move
+      const benchMove = (() => {
+        if (!Array.isArray(bench) || bench.length < 2) return null;
+        const first = bench[0].close, last = bench[bench.length - 1].close;
+        const days = bench.length;
+        return { days, pct_move: +(((last - first) / first) * 100).toFixed(2), last_close: +Number(last).toFixed(2) };
+      })();
+
+      // 6. RSI now
+      let rsi_now = null;
+      try {
+        const { rsi } = require('./scanner');
+        if (Array.isArray(candles) && candles.length >= 20) {
+          const closes = candles.map(c => c.close);
+          const series = rsi(closes, 14);
+          const v = series[series.length - 1];
+          if (Number.isFinite(v)) rsi_now = +v.toFixed(2);
+        }
+      } catch (_) {}
+
+      // 7. Cache key includes today's date so a re-click later same day with same context is free,
+      //    but tomorrow's context (different candles) bypasses
+      const today = new Date().toISOString().slice(0, 10);
+      const cacheKey = _hashPrompt([req.user.id, 'critique-rich', mode, symbol, signal, b.value, today]);
+      const cached = _cacheGet(cacheKey);
+      if (cached) return res.json({ ok: true, cached: true, ...cached.response, provider: cached.provider, model: cached.model, cost_inr: 0, call_id: cached.call_id || null });
+
+      // 8. Route + cap
+      const routed = await aiRouter.route({ db, vault, userId: req.user.id, workflow: 'intraday_critic', mode });
+      if (!routed.ok) return res.status(routed.reason === 'no_ai_key' ? 412 : 404).json(routed);
+
+      const capCheck = _capCheck(db, req.user.id, 'intraday_critic', routed.provider, routed.model, routed.est_cost_inr);
+      if (capCheck.blocked) return res.status(429).json({ ok: false, reason: 'spend_cap_exceeded', ...capCheck });
+
+      // 9. Enriched prompt
+      const ctx = {
+        symbol, signal,
+        value: b.value ?? null,
+        message: b.message ?? '',
+        close: recent ? recent.last_5_closes[recent.last_5_closes.length - 1] : (b.close ?? null),
+        timeframe: 'daily',
+      };
+      const prompt = buildCritiquePrompt(ctx);
+      // Append the enriched context block to user prompt (not system, so verdict format stays stable)
+      const enrichedUser = prompt.user + `
+
+----- Additional market context -----
+Market regime: ${regime ? `${regime.regime} (confidence ${regime.confidence}) — ${regime.reason}` : 'unknown'}
+Symbol RSI(14) now: ${rsi_now == null ? 'unknown' : rsi_now}
+Symbol last 5d closes: ${recent ? JSON.stringify(recent.last_5_closes) : 'unknown'}
+Symbol last 5d volumes: ${recent ? JSON.stringify(recent.last_5_vols) : 'unknown'}
+Symbol 5d move: ${recent ? recent.pct_move_5d + '%' : 'unknown'}
+NIFTY 50 ${benchMove ? benchMove.days + 'd move' : 'recent move'}: ${benchMove ? benchMove.pct_move + '%' : 'unknown'}
+Surveillance status: ${surveillanceVerdict ? `${surveillanceVerdict.list} (${surveillanceVerdict.reason})` : 'clean'}
+
+Be MORE skeptical when:
+- the symbol is in a different regime than NIFTY (e.g. symbol in high_vol while index in trending_up)
+- the symbol's 5d move is already >5% in the direction the signal suggests
+- surveillance is non-clean (this should usually flip verdict to reject)
+
+Return JSON verdict only.`;
+      const fullPrompt = { system: prompt.system, user: enrichedUser };
+
+      const llmResult = await callLLM({ provider: routed.provider, apiKey: routed.apiKey, model: routed.model, prompt: fullPrompt });
+      const advice = (llmResult && llmResult.advice) ?? llmResult;
+      const usage = (llmResult && llmResult.usage) || { prompt_tokens: 0, completion_tokens: 0 };
+      const cost_inr = estimateCost({ provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens });
+
+      let call_id = null;
+      try { call_id = db.ai.logCall({ user_id: req.user.id, workflow: 'intraday_critic', provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null }); } catch (e) { console.warn('[ai-workflows] critique-rich log:', e.message); }
+
+      const norm = {
+        verdict: ['agree','caution','reject'].includes(String(advice && advice.verdict).toLowerCase()) ? String(advice.verdict).toLowerCase() : 'caution',
+        confidence: Math.max(0, Math.min(100, parseInt(advice && advice.confidence) || 50)),
+        summary: String(advice && advice.summary || '').slice(0, 200),
+        key_risks: Array.isArray(advice && advice.key_risks) ? advice.key_risks.slice(0, 3).map(x => String(x).slice(0, 200)) : [],
+        next_step: String(advice && advice.next_step || '').slice(0, 300),
+        context: {
+          regime: regime ? { regime: regime.regime, confidence: regime.confidence, reason: regime.reason } : null,
+          rsi_now,
+          pct_move_5d: recent ? recent.pct_move_5d : null,
+          bench_pct_move: benchMove ? benchMove.pct_move : null,
+          surveillance: surveillanceVerdict,
+        },
+      };
+      _cachePut(cacheKey, { ts: Date.now(), response: norm, cost_inr, provider: routed.provider, model: routed.model, call_id });
+      res.json({ ok: true, cached: false, ...norm, provider: routed.provider, model: routed.model, cost_inr, usage, call_id });
+    } catch (e) {
+      try { db.ai.logCall({ user_id: req.user.id, workflow: 'intraday_critic', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e && e.message || 'critique_rich_failed').slice(0, 200) }); } catch (_) {}
+      res.status(500).json({ ok: false, reason: 'critique_rich_failed', detail: e.message });
     }
   });
 

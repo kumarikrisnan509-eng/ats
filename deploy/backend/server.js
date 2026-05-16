@@ -2916,6 +2916,7 @@ app.use('/api/me/ai-workflows', (req, res, next) => {
       const { createAiWorkflowsRouter } = require('./ai-workflows-routes');
       _aiWorkflowsRouter = createAiWorkflowsRouter({
         db, vault, requireAuth: auth.requireAuth, STRATEGIES,
+        brokerResolver: _brokerResolver, surveillance: _surveillance,
       });
       return _aiWorkflowsRouter(req, res, next);
     }
