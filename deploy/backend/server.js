@@ -2504,6 +2504,38 @@ app.get('/api/me/dashboard-summary', withAuth(async (req, res) => {
   }
 }));
 
+// ---------- Tier 69c: BYOK AI keys + advisor routers ----------
+let _aiKeysRouter = null;
+let _advisorRouter = null;
+app.use('/api/me/ai-keys', (req, res, next) => {
+  try {
+    if (_aiKeysRouter) return _aiKeysRouter(req, res, next);
+    if (db && auth && vault) {
+      const { createAiKeysRouter } = require('./ai-keys-routes');
+      _aiKeysRouter = createAiKeysRouter({ db, vault, requireAuth: auth.requireAuth, brokerResolver: _brokerResolver });
+      return _aiKeysRouter(req, res, next);
+    }
+    return res.status(503).json({ ok: false, reason: 'ai_storage_not_initialized' });
+  } catch (e) {
+    console.error('[server] /api/me/ai-keys mount error:', e && e.message);
+    return res.status(500).json({ ok: false, reason: 'mount_failed', detail: e.message });
+  }
+});
+app.use('/api/me/ai-advisor', (req, res, next) => {
+  try {
+    if (_advisorRouter) return _advisorRouter(req, res, next);
+    if (db && auth && vault && _brokerResolver) {
+      const { createAdvisorAnalyzeRouter } = require('./ai-keys-routes');
+      _advisorRouter = createAdvisorAnalyzeRouter({ db, vault, requireAuth: auth.requireAuth, brokerResolver: _brokerResolver });
+      return _advisorRouter(req, res, next);
+    }
+    return res.status(503).json({ ok: false, reason: 'advisor_not_initialized' });
+  } catch (e) {
+    console.error('[server] /api/me/ai-advisor mount error:', e && e.message);
+    return res.status(500).json({ ok: false, reason: 'mount_failed', detail: e.message });
+  }
+});
+
 // ---------- Tier 57: per-user broker credentials ----------
 // Lazy-mount so we wait until vault is ready (vault.open is async, but route
 // registration runs synchronously at module load). On first request, if the
