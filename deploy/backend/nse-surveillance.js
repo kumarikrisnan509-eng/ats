@@ -1,31 +1,27 @@
 /* eslint-disable */
-// nse-surveillance.js — T99-E2 surveillance gate.
+// nse-surveillance.js — T99-E2 surveillance gate (URL fix in T99 Day 2).
 //
-// Fetches NSE's daily surveillance lists (ASM / GSM / T-to-T) so the momentum
-// scanner can skip any symbol that's under restriction. SEBI + NSE put stocks
-// on these lists when there's circular-trading suspicion, price manipulation,
-// or low-float pump-and-dump risk. Trading them is allowed but the AI critic
-// + the live trader should NEVER auto-route into these names.
+// Fetches NSE's daily securities master list. Single endpoint
+//   https://archives.nseindia.com/content/equities/sec_list.csv
+// covers everything we need:
+//   - Series (col 2): BE/BZ/BL/ST/IV/SZ = restricted (T2T behavior)
+//   - Remarks (col 5): "GSM STAGE - 0/I/II/III/IV" = Graded Surveillance
 //
-// Sources (verified working in T99-research, no auth required):
-//   ASM list: https://archives.nseindia.com/content/equities/asm_stage1_2_3.csv
-//   GSM list: https://archives.nseindia.com/content/equities/gsm_list.csv
-//   T2T list: https://archives.nseindia.com/content/equities/sec_list_t2t.csv
+// ASM (Additional Surveillance Measure) lives in a separate NSE PDF -- not
+// parsed today. The scanner is still safe: T2T + GSM gates remove most of
+// the dangerous names already.
 //
-// The /api endpoint (www.nseindia.com/api/*) is Cloudflare-blocked, but the
-// archives.nseindia.com subdomain serves raw CSV with no headers needed.
-//
-// Cache TTL: 1 hour. NSE updates these lists end-of-day around 19:00 IST.
+// Cache TTL: 1 hour. NSE refreshes overnight (~19:00 IST).
 
 'use strict';
 
-const URL_ASM_STAGES = 'https://archives.nseindia.com/content/equities/asm_stage1_2_3.csv';
-const URL_GSM        = 'https://archives.nseindia.com/content/equities/gsm_list.csv';
-const URL_T2T        = 'https://archives.nseindia.com/content/equities/sec_list_t2t.csv';
-
-const CACHE_TTL_MS = 60 * 60 * 1000;       // 1 hour
+const URL_SEC_LIST = 'https://archives.nseindia.com/content/equities/sec_list.csv';
+const CACHE_TTL_MS = 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 12_000;
 const UA = 'Mozilla/5.0 (compatible; ATSBot/1.0; +https://ats.rajasekarselvam.com)';
+
+const T2T_SERIES = new Set(['BE', 'BZ', 'BL', 'ST', 'IV', 'SZ']);
+const ROMAN = { '0': 0, 'I': 1, 'II': 2, 'III': 3, 'IV': 4, 'V': 5 };
 
 class NseSurveillance {
   constructor({ fetchImpl } = {}) {
@@ -43,23 +39,18 @@ class NseSurveillance {
   async _doRefresh() {
     if (!this.fetchFn) throw new Error('no global fetch (need Node 18+)');
     const t0 = Date.now();
-    const [asmCsv, gsmCsv, t2tCsv] = await Promise.all([
-      this._fetchCsv(URL_ASM_STAGES).catch(e => { console.warn('[surveillance] ASM fetch failed:', e.message); return null; }),
-      this._fetchCsv(URL_GSM).catch(e => { console.warn('[surveillance] GSM fetch failed:', e.message); return null; }),
-      this._fetchCsv(URL_T2T).catch(e => { console.warn('[surveillance] T2T fetch failed:', e.message); return null; }),
-    ]);
-
-    const asm = this._parseStageList(asmCsv);
-    const gsm = this._parseStageList(gsmCsv);
-    const t2t = this._parseSymbolSet(t2tCsv);
-
+    const csv = await this._fetchCsv(URL_SEC_LIST).catch(e => {
+      console.warn('[surveillance] sec_list fetch failed:', e.message);
+      return null;
+    });
+    const parsed = this._parseSecList(csv);
     this._cache = {
       ts: Date.now(),
       fetchedMs: Date.now() - t0,
-      asm, gsm, t2t,
-      counts: { asm: asm.size, gsm: gsm.size, t2t: t2t.size },
+      ...parsed,
+      counts: { gsm: parsed.gsm.size, t2t: parsed.t2t.size, asm: parsed.asm.size },
     };
-    console.log(`[surveillance] refreshed in ${this._cache.fetchedMs}ms — ASM=${asm.size} GSM=${gsm.size} T2T=${t2t.size}`);
+    console.log(`[surveillance] refreshed in ${this._cache.fetchedMs}ms — GSM=${parsed.gsm.size} T2T=${parsed.t2t.size} ASM=${parsed.asm.size}`);
     return this._cache;
   }
 
@@ -70,44 +61,40 @@ class NseSurveillance {
       const r = await this.fetchFn(url, { headers: { 'User-Agent': UA, 'Accept': 'text/csv,*/*' }, signal: ctl.signal });
       if (!r.ok) throw new Error(`${url} -> ${r.status}`);
       return await r.text();
-    } finally {
-      clearTimeout(to);
-    }
+    } finally { clearTimeout(to); }
   }
 
-  _parseStageList(csv) {
-    const out = new Map();
-    if (!csv) return out;
+  _parseSecList(csv) {
+    const t2t = new Set();
+    const gsm = new Map();
+    const asm = new Map();
+    if (!csv) return { t2t, gsm, asm };
+
     const lines = csv.split(/\r?\n/).filter(Boolean);
-    const header = (lines.shift() || '').toLowerCase();
-    const cols = header.split(',');
-    const symIdx = cols.findIndex(c => /symbol/i.test(c));
-    const stageIdx = cols.findIndex(c => /(asm|gsm|stage)/i.test(c));
+    lines.shift();
     for (const line of lines) {
       const parts = this._splitCsv(line);
-      const sym = (parts[symIdx >= 0 ? symIdx : 0] || '').trim().toUpperCase();
+      const sym = (parts[0] || '').trim().toUpperCase();
       if (!sym) continue;
-      const stageRaw = (parts[stageIdx >= 0 ? stageIdx : 1] || '').trim();
-      const m = stageRaw.match(/(?:stage|st|s)?\s*(\d+)/i);
-      const stage = m ? parseInt(m[1], 10) : null;
-      out.set(sym, { stage, raw: stageRaw });
-    }
-    return out;
-  }
+      const series = (parts[1] || '').trim().toUpperCase();
+      const remarks = (parts[4] || '').trim();
 
-  _parseSymbolSet(csv) {
-    const out = new Set();
-    if (!csv) return out;
-    const lines = csv.split(/\r?\n/).filter(Boolean);
-    const header = (lines.shift() || '').toLowerCase();
-    const cols = header.split(',');
-    const symIdx = cols.findIndex(c => /symbol/i.test(c));
-    for (const line of lines) {
-      const parts = this._splitCsv(line);
-      const sym = (parts[symIdx >= 0 ? symIdx : 0] || '').trim().toUpperCase();
-      if (sym) out.add(sym);
+      if (T2T_SERIES.has(series)) t2t.add(sym);
+
+      const gsmMatch = remarks.match(/GSM\s*STAGE\s*-?\s*(IV|III|II|I|0|\d+)/i);
+      if (gsmMatch) {
+        const raw = gsmMatch[1].toUpperCase();
+        const stage = ROMAN[raw] != null ? ROMAN[raw] : parseInt(raw, 10);
+        if (!Number.isNaN(stage)) gsm.set(sym, { stage, raw: remarks });
+      }
+      const asmMatch = remarks.match(/ASM\s*STAGE\s*-?\s*(IV|III|II|I|0|\d+)/i);
+      if (asmMatch) {
+        const raw = asmMatch[1].toUpperCase();
+        const stage = ROMAN[raw] != null ? ROMAN[raw] : parseInt(raw, 10);
+        if (!Number.isNaN(stage)) asm.set(sym, { stage, raw: remarks });
+      }
     }
-    return out;
+    return { t2t, gsm, asm };
   }
 
   _splitCsv(line) {
@@ -127,7 +114,7 @@ class NseSurveillance {
     if (this._cache && (now - this._cache.ts) < CACHE_TTL_MS) return this._cache;
     try { await this.refresh(); } catch (e) {
       console.warn('[surveillance] refresh failed:', e.message);
-      if (!this._cache) this._cache = { ts: now, fetchedMs: 0, asm: new Map(), gsm: new Map(), t2t: new Set(), counts: { asm: 0, gsm: 0, t2t: 0 } };
+      if (!this._cache) this._cache = { ts: now, fetchedMs: 0, t2t: new Set(), gsm: new Map(), asm: new Map(), counts: { gsm: 0, t2t: 0, asm: 0 } };
     }
     return this._cache;
   }
@@ -147,13 +134,13 @@ class NseSurveillance {
   }
 
   _classifyAgainst(cache, sym, strict) {
+    const minGsm = strict ? 0 : 2;
     const minAsm = strict ? 1 : 3;
-    const minGsm = strict ? 1 : 2;
-    const asm = cache.asm.get(sym);
-    if (asm && asm.stage != null && asm.stage >= minAsm) return { reason: 'asm_stage_' + asm.stage, list: 'ASM', stage: asm.stage };
+    if (cache.t2t.has(sym)) return { reason: 't2t', list: 'T2T', stage: null };
     const gsm = cache.gsm.get(sym);
     if (gsm && gsm.stage != null && gsm.stage >= minGsm) return { reason: 'gsm_stage_' + gsm.stage, list: 'GSM', stage: gsm.stage };
-    if (cache.t2t.has(sym)) return { reason: 't2t', list: 'T2T', stage: null };
+    const asm = cache.asm.get(sym);
+    if (asm && asm.stage != null && asm.stage >= minAsm) return { reason: 'asm_stage_' + asm.stage, list: 'ASM', stage: asm.stage };
     return null;
   }
 

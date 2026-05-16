@@ -219,6 +219,28 @@ function createAiKeysRouter({ db, vault, requireAuth, brokerResolver }) {
   });
 
 
+  // T99-H0: GET /api/me/ai-keys/router-preview?mode=balanced
+  // Returns the auto-router's decision for every workflow given the user's
+  // currently-configured BYOK keys. Powers the transparency view in the AI
+  // providers card.
+  router.get('/router-preview', (req, res) => {
+    try {
+      const aiRouter = require('./ai-router');
+      const mode = req.query.mode || 'balanced';
+      const preview = aiRouter.preview({ db, userId: req.user.id, mode });
+      // Augment with rough cost estimate per workflow for the UI
+      const { estimateCostBudget } = require('./ai-advisor');
+      preview.workflows = preview.workflows.map(w => {
+        if (!w.ai) return w;
+        const est = estimateCostBudget({ provider: w.provider, model: w.model });
+        return { ...w, est_cost_inr: est };
+      });
+      res.json({ ok: true, ...preview });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: 'preview_failed', detail: e.message });
+    }
+  });
+
   // T97: GET /api/me/ai-keys/models/:provider -- query provider's actual list-models API
   // Returns the real list of models accessible with the user's saved key, filtered to chat-capable.
   // Falls back gracefully if the user has no key or the provider's list endpoint fails.
@@ -281,31 +303,43 @@ function createAdvisorAnalyzeRouter({ db, vault, requireAuth, brokerResolver }) 
   router.use(express.json({ limit: '32kb' }));
   router.use(requireAuth);
 
-  // POST /api/me/ai-advisor/analyze -- run analysis using stored key
-  // Body: { provider?: 'anthropic'|'openai'|'gemini', marketContext?: string }
+  // POST /api/me/ai-advisor/analyze -- run analysis using stored key.
+  // T99-H0: routing decision delegated to ai-router. The `provider` body field
+  // is now advisory only — kept for backwards compat with older frontends.
+  // Body: { provider?: 'anthropic'|'openai'|'gemini', marketContext?: string,
+  //         mode?: 'quality'|'balanced'|'economy' }
   router.post('/analyze', async (req, res) => {
     try {
       const body = req.body || {};
       const requested = body.provider ? String(body.provider).toLowerCase() : null;
+      const mode = body.mode || 'balanced';
 
-      // Pick provider: explicit or fall back to whichever key exists (anthropic preferred)
-      const keys = db._conn.prepare("SELECT provider, sealed_key, model_pref FROM ai_keys WHERE user_id = ?").all(req.user.id);
-      if (!keys.length) {
-        return res.status(412).json({ ok: false, reason: 'no_ai_key', detail: 'Add a Claude/OpenAI/Gemini API key in Settings first.' });
+      // T99-H0: route through auto-router. Picks {provider, model} based on
+      // workflow ('analyze') and which BYOK keys the user has.
+      const aiRouter = require('./ai-router');
+      const routed = await aiRouter.route({ db, vault, userId: req.user.id, workflow: 'analyze', mode });
+      if (!routed.ok) {
+        const statusCode = routed.reason === 'no_ai_key' ? 412 : 404;
+        return res.status(statusCode).json({ ok: false, reason: routed.reason, detail: routed.detail });
       }
-      const pickOrder = requested ? [requested] : ['anthropic', 'openai', 'gemini'];
-      const chosen = pickOrder.map(p => keys.find(k => k.provider === p)).find(Boolean);
-      if (!chosen) return res.status(404).json({ ok: false, reason: 'requested_provider_missing' });
-
-      const apiKey = await vault.open(chosen.sealed_key);
-      const model = chosen.model_pref || DEFAULT_MODEL_BY_PROVIDER[chosen.provider];
+      let provider = routed.provider, model = routed.model, apiKey = routed.apiKey;
+      // Honor an explicit provider override only when the user has that key.
+      if (requested && requested !== provider) {
+        const keyRow = db._conn.prepare("SELECT sealed_key, model_pref FROM ai_keys WHERE user_id = ? AND provider = ?").get(req.user.id, requested);
+        if (keyRow) {
+          provider = requested;
+          model = keyRow.model_pref || DEFAULT_MODEL_BY_PROVIDER[requested];
+          apiKey = await vault.open(keyRow.sealed_key);
+        }
+      }
+      const chosen = { provider, model };
 
       // T99-C1: pre-check daily AI spend cap
       const cap = db.ai.dailyCapInr(req.user.id);
       const alreadySpent = db.ai.dailySpend(req.user.id);
-      const budget = estimateCostBudget({ provider: chosen.provider, model, expectedInTokens: 1500, expectedOutTokens: 1500 });
+      const budget = estimateCostBudget({ provider, model, expectedInTokens: 1500, expectedOutTokens: 1500 });
       if (alreadySpent + budget > cap) {
-        try { db.ai.logCall({ user_id: req.user.id, workflow: 'analyze', provider: chosen.provider, model, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'blocked_by_cap', error: `daily cap ₹${cap} reached (spent ₹${alreadySpent.toFixed(2)})` }); } catch (_) {}
+        try { db.ai.logCall({ user_id: req.user.id, workflow: 'analyze', provider, model, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'blocked_by_cap', error: `daily cap ₹${cap} reached (spent ₹${alreadySpent.toFixed(2)})` }); } catch (_) {}
         return res.status(429).json({ ok: false, reason: 'spend_cap_exceeded', cap_inr: cap, spent_inr: +alreadySpent.toFixed(2), detail: `Daily AI spend cap of ₹${cap} reached. Raise it in Settings to continue today.` });
       }
 
