@@ -474,7 +474,6 @@ const SettingsScreen = () => {
             sub="Other settings live on their canonical pages — no duplication.">
             <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
               <a className="btn" href="#brokers"   style={{ flex: 1, minWidth: 180, justifyContent: 'space-between' }}>Broker API keys <span>→</span></a>
-              <a className="btn" href="#ai-keys" style={{ flex: 1, minWidth: 180, justifyContent: 'space-between' }}>AI providers (BYOK) <span>→</span></a>
               <a className="btn" href="#modes"     style={{ flex: 1, minWidth: 180, justifyContent: 'space-between' }}>Trading modes <span>→</span></a>
               <a className="btn" href="#compliance" style={{ flex: 1, minWidth: 180, justifyContent: 'space-between' }}>Compliance &amp; audit <span>→</span></a>
             </div>
