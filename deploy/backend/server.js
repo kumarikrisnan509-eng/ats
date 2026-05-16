@@ -299,6 +299,43 @@ function readSessionCookie(req) {
 // ---------- Express ----------
 const app = express();
 app.use(express.json({ limit: '64kb' }));
+
+// ---------- Tier 70: observability (request-id, latency, error capture) ----------
+let _obs = null;
+try {
+  if (db) {
+    const { createObservability } = require('./observability');
+    _obs = createObservability({ db });
+    app.use(_obs.middleware);
+  }
+} catch (e) {
+  console.error('[server] observability init failed:', e && e.message);
+}
+
+// Tier 70: admin-only observability snapshots (latency + recent errors)
+app.get('/api/admin/observability', (req, res) => {
+  if (!_obs) return res.status(503).json({ ok: false, reason: 'observability_unavailable' });
+  // Admin gate: require authenticated + is_admin
+  if (!req.user || !req.user.is_admin) return res.status(403).json({ ok: false, reason: 'admin_only' });
+  res.json({
+    ok: true,
+    latency: _obs.snapshot(),
+    recentErrors: _obs.recentErrors(50),
+  });
+});
+
+// Tier 70: deeper health check (db, vault, broker resolver, market hours)
+app.get('/api/health-deep', async (_req, res) => {
+  const checks = {};
+  try { checks.db = !!(db && db._conn && db._conn.prepare('SELECT 1').get()); } catch (e) { checks.db = false; checks.dbErr = e.message; }
+  try { checks.vault = !!vault; } catch (e) { checks.vault = false; }
+  try { checks.brokerResolver = !!_brokerResolver; } catch (e) { checks.brokerResolver = false; }
+  try { checks.broker = !!(broker && broker.name); } catch (e) { checks.broker = false; }
+  checks.uptimeSec = Math.round(process.uptime());
+  checks.memMB = Math.round(process.memoryUsage().rss / 1024 / 1024);
+  res.json({ ok: Object.values(checks).every(v => v !== false), checks });
+});
+
 app.disable('x-powered-by');
 app.set('trust proxy', 'loopback');
 
