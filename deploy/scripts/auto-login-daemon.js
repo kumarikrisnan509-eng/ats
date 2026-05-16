@@ -77,7 +77,14 @@ async function getBrowser() {
   if (_browser && _browser.isConnected()) return _browser;
   _browser = await chromium.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-dev-shm-usage'],
+    args: [
+      '--no-sandbox',
+      '--disable-dev-shm-usage',
+      // Tier 79 fix: redirect ats.rajasekarselvam.com -> 127.0.0.1 so the browser
+      // CANNOT physically reach our backend's /callback. The route handler still
+      // captures request_token from the URL; the actual HTTP request fails at TCP.
+      '--host-resolver-rules=MAP ats.rajasekarselvam.com 127.0.0.1, MAP www.ats.rajasekarselvam.com 127.0.0.1',
+    ],
   });
   return _browser;
 }
