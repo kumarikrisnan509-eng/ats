@@ -44,7 +44,8 @@ const TITLES = {
 };
 
 // Pre-auth hash routes — bypass the whole shell
-const AUTH_ROUTES = new Set(["login", "register", "forgot"]);
+// Tier 67: signup is the new register; verify+reset added in Tier 51/52.
+const AUTH_ROUTES = new Set(["login", "signup", "register", "forgot", "reset", "verify"]);
 
 function App() {
   // Auth state — fetched from /api/auth/me on boot (Tier 50). Until that lands,
@@ -149,16 +150,33 @@ function App() {
     if (actId === "act:logout")  window.dispatchEvent(new CustomEvent("logout"));
   };
 
-  // === Pre-auth view: Login / Register / Forgot ===
-  if (!session.authed || AUTH_ROUTES.has(route)) {
+  // === Pre-auth view ===
+  // Tier 61: anonymous visitors landing on '/' (or 'dashboard' / no-hash) get the
+  // marketing landing page. They only get the auth form if they explicitly route
+  // to /#login, /#signup, /#forgot, /#reset, /#verify.
+  if (!session.authed) {
     const handleAuth = () => {
-      const isNewAccount = route === "register";
+      const isNewAccount = (route === "signup" || route === "register");
       persist({ authed: true, onboarded: !isNewAccount });
       location.hash = isNewAccount ? "" : "dashboard";
       setRoute("dashboard");
     };
-    if (route === "register") return <RegisterScreen onAuth={handleAuth}/>;
-    if (route === "forgot")   return <ForgotScreen/>;
+    if (AUTH_ROUTES.has(route)) {
+      return <LoginScreen onAuth={handleAuth} go={go}/>;
+    }
+    // Anonymous on dashboard / any non-auth route -> landing page.
+    if (window.LandingScreen) return <window.LandingScreen/>;
+    // Fallback if landing module hasn't loaded yet
+    return <LoginScreen onAuth={handleAuth} go={go}/>;
+  }
+  // Tier 61: an authenticated user who navigates to /#login / /#signup /etc
+  // probably wanted to switch accounts -- show the auth form.
+  if (AUTH_ROUTES.has(route)) {
+    const handleAuth = () => {
+      persist({ authed: true, onboarded: true });
+      location.hash = "dashboard";
+      setRoute("dashboard");
+    };
     return <LoginScreen onAuth={handleAuth} go={go}/>;
   }
 
