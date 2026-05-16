@@ -2776,6 +2776,25 @@ app.get('/api/v1/me/orders/by-mode', withAuth(async (req, res) => {
   }
 }));
 
+// ---------- Tier 84: account / preferences / notifications / export ----------
+let _accountRouter = null;
+app.use('/api/v1/me', (req, res, next) => {
+  // Only intercept the specific Tier 84 paths so we don't shadow /api/v1/me/brokers/*
+  const t84paths = ['/account', '/preferences', '/notifications', '/export'];
+  if (!t84paths.some(p => req.path === p || req.path.startsWith(p + '/'))) return next();
+  try {
+    if (_accountRouter) return _accountRouter(req, res, next);
+    if (db && auth && vault) {
+      const { createAccountRouter } = require('./account-routes');
+      _accountRouter = createAccountRouter({ db, vault, requireAuth: auth.requireAuth, auth });
+      return _accountRouter(req, res, next);
+    }
+    return res.status(503).json({ ok: false, reason: 'account_router_not_initialized' });
+  } catch (e) {
+    return res.status(500).json({ ok: false, reason: 'account_mount_failed', detail: e.message });
+  }
+});
+
 // ---------- Tier 81: v1 API surface ----------
 // RESTful, versioned, plural nouns. Mounted alongside legacy /api/me/broker for
 // 30-day backward-compat window. Frontend should call /api/v1/me/brokers/*.
