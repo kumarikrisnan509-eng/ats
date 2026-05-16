@@ -410,7 +410,7 @@ app.get('/api/health-deep', async (_req, res) => {
 
   // T-I1: surface last DR test status (warns when >30 days old)
   try {
-    if (db && db._conn) {
+    if (_ensureDrTable() && db && db._conn) {
       const row = db._conn.prepare("SELECT ts, payload FROM dr_test_history ORDER BY id DESC LIMIT 1").get();
       if (row) {
         const ageMs = Date.now() - new Date(row.ts).getTime();
@@ -425,8 +425,10 @@ app.get('/api/health-deep', async (_req, res) => {
         checks.drLastTestOk = false;
         checks.drStale = true;
       }
+    } else {
+      checks.drLastTestAgo = 'unavailable';
     }
-  } catch (e) { /* table not yet migrated -- ignore */ }
+  } catch (e) { checks.drLastTestAgo = 'error:' + (e.message || 'unknown').slice(0, 40); }
 
   checks.uptimeSec = Math.round(process.uptime());
   checks.memMB = Math.round(process.memoryUsage().rss / 1024 / 1024);
@@ -435,9 +437,11 @@ app.get('/api/health-deep', async (_req, res) => {
   res.json({ ok: hardChecks.every(k => checks[k] !== false), checks });
 });
 
-// T-I1: DR test history table (recorded by deploy/scripts/dr-restore-test.sh --notify)
-try {
-  if (db && db._conn) {
+// T-I1: DR test history table (lazy-created on first admin call; same goes for
+// the health-deep DR section). db may not be ready at module load.
+function _ensureDrTable() {
+  if (!db || !db._conn) return false;
+  try {
     db._conn.exec(`CREATE TABLE IF NOT EXISTS dr_test_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       ts TEXT NOT NULL DEFAULT (datetime('now')),
@@ -445,10 +449,11 @@ try {
       rto_sec INTEGER,
       payload TEXT
     );
-    CREATE INDEX IF NOT EXISTS idx_dr_test_ts ON dr_test_history(ts DESC);`);
-    db._conn.exec(`CREATE TRIGGER IF NOT EXISTS trim_dr_test_history AFTER INSERT ON dr_test_history BEGIN DELETE FROM dr_test_history WHERE id < (SELECT MAX(id)-100 FROM dr_test_history); END;`);
-  }
-} catch (e) { console.warn('[server] dr_test_history init failed:', e.message); }
+    CREATE INDEX IF NOT EXISTS idx_dr_test_ts ON dr_test_history(ts DESC);
+    CREATE TRIGGER IF NOT EXISTS trim_dr_test_history AFTER INSERT ON dr_test_history BEGIN DELETE FROM dr_test_history WHERE id < (SELECT MAX(id)-100 FROM dr_test_history); END;`);
+    return true;
+  } catch (e) { console.warn('[server] dr_test_history init failed:', e.message); return false; }
+}
 
 // POST /api/admin/dr-status — record a DR test result.
 app.post('/api/admin/dr-status', express.json({ limit: '16kb' }), (req, res) => {
@@ -459,6 +464,7 @@ app.post('/api/admin/dr-status', express.json({ limit: '16kb' }), (req, res) => 
     if (!expected || expected === 'unset' || provided !== expected) {
       return res.status(401).json({ ok: false, reason: 'dr_auth_failed' });
     }
+    if (!_ensureDrTable()) return res.status(503).json({ ok: false, reason: 'db_not_ready' });
     const body = req.body || {};
     const ok = body.ok === true || body.ok === 'true' ? 1 : 0;
     const rto_sec = Number(body.rto_total_sec) || null;
