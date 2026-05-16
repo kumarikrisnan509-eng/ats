@@ -2710,6 +2710,7 @@ app.get('/api/me/dashboard-summary', withAuth(async (req, res) => {
 // ---------- Tier 69c: BYOK AI keys + advisor routers ----------
 let _aiKeysRouter = null;
 let _advisorRouter = null;
+let _aiWorkflowsRouter = null;     // T99-A1/A4 critique + explain router
 app.use('/api/me/ai-keys', (req, res, next) => {
   try {
     if (_aiKeysRouter) return _aiKeysRouter(req, res, next);
@@ -2735,6 +2736,24 @@ app.use('/api/me/ai-advisor', (req, res, next) => {
     return res.status(503).json({ ok: false, reason: 'advisor_not_initialized' });
   } catch (e) {
     console.error('[server] /api/me/ai-advisor mount error:', e && e.message);
+    return res.status(500).json({ ok: false, reason: 'mount_failed', detail: e.message });
+  }
+});
+
+// T99-A1 + A4 — lazy mount the workflow router (critique + explain)
+app.use('/api/me/ai-workflows', (req, res, next) => {
+  try {
+    if (_aiWorkflowsRouter) return _aiWorkflowsRouter(req, res, next);
+    if (db && auth && vault) {
+      const { createAiWorkflowsRouter } = require('./ai-workflows-routes');
+      _aiWorkflowsRouter = createAiWorkflowsRouter({
+        db, vault, requireAuth: auth.requireAuth, STRATEGIES,
+      });
+      return _aiWorkflowsRouter(req, res, next);
+    }
+    return res.status(503).json({ ok: false, reason: 'ai_workflows_not_initialized' });
+  } catch (e) {
+    console.error('[server] /api/me/ai-workflows mount error:', e && e.message);
     return res.status(500).json({ ok: false, reason: 'mount_failed', detail: e.message });
   }
 });
