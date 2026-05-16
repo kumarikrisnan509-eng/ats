@@ -41,6 +41,7 @@ const TITLES = {
   compare:    ["Automate",     "Compare strategies"],
   money:      ["Wealth",       "Money (profits → long-term)"],
   lab:        ["Validate",     "Strategy Lab"],
+  insights:   ["Wealth",       "AI insights"],
 };
 
 // Pre-auth hash routes — bypass the whole shell
