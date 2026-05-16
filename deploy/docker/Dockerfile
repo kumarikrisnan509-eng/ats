@@ -58,6 +58,7 @@ RUN mkdir -p /app/static
 COPY app.html                              /app/static/app.html
 COPY status.html                           /app/static/status.html
 COPY docs.html                             /app/static/docs.html
+COPY legal.html                            /app/static/legal.html
 COPY styles.css                            /app/static/styles.css
 COPY --from=frontend-build /work/out/src/  /app/static/src/
 

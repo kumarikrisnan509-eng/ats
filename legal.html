@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="index,nofollow">
+<title>ATS · Legal (Draft)</title>
+<style>
+  :root {
+    --bg:#0f1115; --surface:#171a21; --surface-2:#1d212a; --border:#262a35;
+    --text:#e6e7eb; --text-2:#a8acb8; --text-3:#7a7f8d;
+    --yellow:#eab308; --red:#ef4444; --blue:#3b82f6;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#fafafa; --surface:#ffffff; --surface-2:#f5f5f5; --border:#e5e7eb; --text:#0f1115; --text-2:#4b5563; --text-3:#6b7280; }
+  }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 0; line-height: 1.6; }
+  .layout { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; max-width: 1080px; margin: 0 auto; }
+  @media (max-width: 720px) { .layout { grid-template-columns: 1fr; } aside { border-right: none !important; border-bottom: 1px solid var(--border); position: static !important; height: auto !important; } }
+  aside { padding: 24px 16px; border-right: 1px solid var(--border); position: sticky; top: 0; height: 100vh; overflow-y: auto; background: var(--surface); }
+  aside h1 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+  aside .sub { color: var(--text-3); font-size: 12px; margin-bottom: 16px; }
+  aside nav a { display: block; padding: 6px 10px; margin: 1px 0; color: var(--text-2); text-decoration: none; font-size: 13px; border-radius: 6px; border-left: 2px solid transparent; }
+  aside nav a:hover { background: var(--surface-2); color: var(--text); }
+  aside nav a.active { background: var(--surface-2); color: var(--text); border-left-color: var(--blue); }
+  aside nav .group { color: var(--text-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; padding: 14px 10px 4px; }
+  main { padding: 32px 40px 64px; max-width: 760px; }
+  main h2 { font-size: 24px; margin: 32px 0 8px; font-weight: 600; scroll-margin-top: 16px; }
+  main h3 { font-size: 16px; margin: 20px 0 6px; font-weight: 600; }
+  main p { margin: 10px 0; }
+  main ul, main ol { margin: 10px 0; padding-left: 22px; }
+  main li { margin: 4px 0; }
+  main code { background: var(--surface-2); padding: 2px 6px; border-radius: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em; }
+  .banner { padding: 16px; border-radius: 8px; margin: 0 0 24px; border: 1px solid color-mix(in oklab, var(--yellow) 40%, var(--border)); background: color-mix(in oklab, var(--yellow) 12%, transparent); font-size: 13px; }
+  .banner strong { display: block; margin-bottom: 4px; font-size: 14px; }
+  section { padding: 12px 0 32px; }
+  section + section { border-top: 1px solid var(--border); }
+  footer { color: var(--text-3); font-size: 12px; text-align: center; padding: 32px 0; border-top: 1px solid var(--border); }
+  footer a { color: var(--blue); text-decoration: none; }
+  a.inline { color: var(--blue); text-decoration: none; }
+  a.inline:hover { text-decoration: underline; }
+  .meta { color: var(--text-3); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<aside>
+  <h1>ATS · Legal</h1>
+  <div class="sub">Drafts · May 2026</div>
+  <nav>
+    <a href="#about">About these documents</a>
+    <div class="group">Privacy</div>
+    <a href="#privacy">Privacy Policy</a>
+    <a href="#data-stored">What we store</a>
+    <a href="#data-not-stored">What we don't store</a>
+    <a href="#retention">Retention</a>
+    <a href="#rights">Your rights</a>
+    <a href="#breach">Breach notification</a>
+
+    <div class="group">Terms</div>
+    <a href="#terms">Terms of Service</a>
+    <a href="#advisory">Advisory only</a>
+    <a href="#byok">BYOK responsibilities</a>
+    <a href="#availability">Availability</a>
+    <a href="#liability">Liability</a>
+    <a href="#disputes">Disputes &amp; jurisdiction</a>
+
+    <div class="group">Data processing</div>
+    <a href="#dpa">DPA summary</a>
+    <a href="#subprocessors">Sub-processors</a>
+  </nav>
+</aside>
+
+<main>
+
+<div class="banner">
+  <strong>⚠ Draft — not yet reviewed by counsel</strong>
+  These documents are honest descriptions of how ATS handles your data and what
+  you agree to by using it. They have <strong>not</strong> been reviewed by an
+  Indian lawyer specialising in DPDP Act / SEBI compliance. Treat as informational
+  only until the "Reviewed by [counsel name], [date]" banner replaces this notice.
+</div>
+
+<section id="about">
+  <h2>About these documents</h2>
+  <p>Three things live here:</p>
+  <ul>
+    <li><strong>Privacy Policy</strong> — what personal data ATS handles, why, how long it's kept, and what you can do about it.</li>
+    <li><strong>Terms of Service</strong> — the conditions under which you use ATS.</li>
+    <li><strong>Data Processing Addendum (DPA)</strong> — a short summary of how ATS acts as a processor for your data, for users who need to file this with their own compliance teams.</li>
+  </ul>
+  <p class="meta">Last updated: 2026-05-17. Substantive changes will be announced at least 30 days in advance via the email address you signed up with.</p>
+</section>
+
+<!-- ============= PRIVACY ============= -->
+<section id="privacy">
+  <h2>Privacy Policy</h2>
+  <p>ATS ("we", "us") is a single-operator software service at
+  <a class="inline" href="https://ats.rajasekarselvam.com">ats.rajasekarselvam.com</a>
+  operated from India. This policy explains what we collect, why, and your control over it.</p>
+  <p>This policy is compatible with the spirit of India's <strong>Digital Personal Data Protection
+  Act, 2023</strong> and references the obligations applicable to a "Data Fiduciary" of small scale.</p>
+</section>
+
+<section id="data-stored">
+  <h3>What we store</h3>
+  <ul>
+    <li><strong>Account identity:</strong> email address, name (if provided), bcrypt-hashed password, account creation + last-login timestamps, IP address of the last login.</li>
+    <li><strong>Broker credentials:</strong> your Zerodha (or other) API key + access token, sealed with libsodium so they can be opened only by ATS at runtime with the master key. We never see your broker username or password.</li>
+    <li><strong>AI provider keys:</strong> Anthropic / OpenAI / Gemini API keys, sealed identically.</li>
+    <li><strong>Preferences:</strong> theme, density, daily AI spend cap, AI mode preference.</li>
+    <li><strong>Operational data:</strong> watchlist, paper trade history, P&amp;L attribution, AI call audit log (workflow, provider, model, token counts, cost, your thumb feedback), scanner signal history, append-only audit trail.</li>
+    <li><strong>Telegram chat ID</strong> (if you enable Telegram alerts) and a sealed bot token if you provide one.</li>
+  </ul>
+</section>
+
+<section id="data-not-stored">
+  <h3>What we don't store</h3>
+  <ul>
+    <li>Your broker login password (we use OAuth tokens only).</li>
+    <li>Your AI provider key cleartext outside the sealed vault. (We can read it only inside the server process to call the provider.)</li>
+    <li>The literal text of AI responses beyond the first ~600 characters per response (cached for re-display) and the token counts. The cache is in-memory; everything else lives in your private <code>ai_calls</code> rows.</li>
+    <li>Marketing/behavioural profiles. ATS has no advertising integration.</li>
+    <li>Web tracking pixels, third-party analytics, or session replay tools. (The only client-side JS that loads from a third party is Google Fonts on the landing page.)</li>
+  </ul>
+</section>
+
+<section id="retention">
+  <h3>Retention</h3>
+  <ul>
+    <li>Account + sealed credentials: kept until you delete your account (Account → Delete).</li>
+    <li>AI call audit log: trimmed automatically to the last 5,000 calls per user.</li>
+    <li>Append-only audit trail: rotated daily, 7 days kept on disk + archived to Google Drive (rclone). Archive retention is currently indefinite; future "delete archives older than N years" automation is on the roadmap.</li>
+    <li>Backups (nightly Google Drive snapshot): retained for 90 days minimum.</li>
+  </ul>
+</section>
+
+<section id="rights">
+  <h3>Your rights</h3>
+  <p>You can at any time:</p>
+  <ul>
+    <li><strong>Export</strong> all your data (Account → Export downloads a JSON of preferences, watchlist, paper trades, AI call history).</li>
+    <li><strong>Delete</strong> your account (Account → Danger zone → Delete account). Deletion cascades to all per-user tables and removes your sealed credentials from disk within 1 hour. The append-only audit trail keeps your user_id but no other PII for the SEBI-recommended 7-year retention; if you require complete erasure, email us and we'll honour it.</li>
+    <li><strong>Correct</strong> your email or name in Account → Profile.</li>
+    <li><strong>Withdraw consent</strong> for Telegram alerts, email digests, or AI processing (set spend cap to 0) without losing access to the rest of the platform.</li>
+  </ul>
+  <p>To exercise any right not visible in the UI, email
+  <a class="inline" href="mailto:rajasekarjavaee@gmail.com">rajasekarjavaee@gmail.com</a> and we'll respond
+  within 7 business days.</p>
+</section>
+
+<section id="breach">
+  <h3>Breach notification</h3>
+  <p>If we become aware of a personal-data breach affecting your account, we'll notify you by email
+  within 72 hours, describing what happened, what data was involved, what we've done, and what you
+  should do (e.g. rotate your broker API key). We'll also notify the Data Protection Board of India
+  per DPDP Act §8(6) when required by law.</p>
+</section>
+
+<!-- ============= TERMS ============= -->
+<section id="terms">
+  <h2>Terms of Service</h2>
+  <p>By creating an ATS account you accept these terms.</p>
+</section>
+
+<section id="advisory">
+  <h3>Advisory only — no execution authority</h3>
+  <p>ATS is an <strong>advisory tool, not an executing broker</strong>.</p>
+  <ul>
+    <li>ATS is <strong>not registered with SEBI</strong> as a Research Analyst (RA), Investment Adviser (RIA), or Portfolio Manager.</li>
+    <li>AI-generated outputs (signal critiques, monthly reviews, strategy explanations) are educational. They are not investment advice and create no fiduciary or advisory relationship.</li>
+    <li>ATS cannot place a trade on your behalf without your explicit per-trade confirmation. The 2FA-confirm-before-trade gate is structural, not configurable.</li>
+    <li>Past performance shown anywhere in the platform (your own backtests, benchmarks, paper P&amp;L) does not predict future results.</li>
+  </ul>
+  <p>You are solely responsible for every trade you place via your broker, regardless of what ATS or
+  any AI model suggested.</p>
+</section>
+
+<section id="byok">
+  <h3>BYOK responsibilities</h3>
+  <p>You bring your own API keys for your broker (Zerodha) and any AI provider (Anthropic / OpenAI /
+  Gemini). By providing these keys:</p>
+  <ul>
+    <li>You confirm you have the right to use them and that doing so via ATS doesn't violate the provider's terms.</li>
+    <li>You're responsible for monitoring spend on the provider's side. ATS exposes a daily spend cap (default ₹50) but cannot enforce caps the provider doesn't expose to clients (you may also want to set hard limits in your provider console).</li>
+    <li>If a provider key is revoked or suspended for any reason, the corresponding ATS functionality stops working until you replace it.</li>
+  </ul>
+</section>
+
+<section id="availability">
+  <h3>Availability</h3>
+  <p>ATS is provided on a best-effort basis. Today there are no formal SLAs.</p>
+  <ul>
+    <li>Planned target after Tier 2 (beta launch): 99% monthly uptime during market hours (09:15 – 15:30 IST Mon–Fri).</li>
+    <li>Status page at <a class="inline" href="/status.html">/status.html</a> shows live health.</li>
+    <li>Scheduled maintenance (rare) is announced via email at least 24 hours in advance.</li>
+  </ul>
+</section>
+
+<section id="liability">
+  <h3>Liability &amp; warranty</h3>
+  <p>ATS is provided "as is" without warranty of any kind. To the maximum extent permitted by Indian law:</p>
+  <ul>
+    <li>We are not liable for trading losses, missed trades, broker downtime, broker reconciliation errors, AI hallucinations, or any indirect / consequential damages.</li>
+    <li>Our total aggregate liability for any direct damages arising from ATS is limited to the fees you have paid to us in the 12 months preceding the claim. (Today: ₹0 — ATS is free during personal-tier phase.)</li>
+  </ul>
+  <p>Nothing in these terms limits liability for fraud, gross negligence, or anything else the law
+  doesn't allow us to limit.</p>
+</section>
+
+<section id="disputes">
+  <h3>Disputes &amp; jurisdiction</h3>
+  <p>These terms are governed by the laws of India. Any dispute will first be addressed through good-faith
+  email correspondence (<a class="inline" href="mailto:rajasekarjavaee@gmail.com">rajasekarjavaee@gmail.com</a>),
+  then through binding arbitration in Chennai under the Arbitration and Conciliation Act, 1996, with
+  a single arbitrator. Courts in Chennai have exclusive jurisdiction for any matter that cannot be arbitrated.</p>
+</section>
+
+<!-- ============= DPA ============= -->
+<section id="dpa">
+  <h2>Data Processing Addendum (summary)</h2>
+  <p>This short DPA describes how ATS handles personal data on your behalf. It supplements
+  (does not replace) the Privacy Policy above.</p>
+
+  <h3>Roles</h3>
+  <ul>
+    <li>You are the <strong>Data Principal</strong> (subject) for your own personal data.</li>
+    <li>ATS is the <strong>Data Fiduciary</strong> (controller) for account + operational data we collect from you directly.</li>
+    <li>ATS is a <strong>Data Processor</strong> for any data you upload (e.g. a CAS PDF you parse via the platform) — we process that data only to deliver the function you requested and don't retain it beyond the session.</li>
+  </ul>
+
+  <h3>Security measures</h3>
+  <ul>
+    <li>TLS 1.2+ on all public connections (Let's Encrypt cert auto-renewed monthly).</li>
+    <li>libsodium sealed-box encryption at rest for all third-party credentials (broker keys, AI keys, Telegram bot tokens).</li>
+    <li>Master encryption key stored only at <code>/etc/ats/master.key</code> with mode 0440, owner <code>root:ats</code>. Never logged, never backed up to GDrive — local copy only.</li>
+    <li>bcrypt for password hashing.</li>
+    <li>SQLite WAL mode with daily rclone snapshots to Google Drive.</li>
+    <li>Append-only audit log of every authentication + key trade-related action.</li>
+    <li>Optional static IP allowlist + 2FA-confirm-before-trade.</li>
+  </ul>
+
+  <h3>Sub-processors</h3>
+  <p id="subprocessors">ATS uses the following third-party services to deliver functionality. Each is
+  invoked only with your explicit configuration (e.g. you saved a Claude API key). We do not share your
+  data with them outside the function they're configured for.</p>
+  <ul>
+    <li><strong>Zerodha (Kite Connect)</strong> — broker integration, when you connect your account</li>
+    <li><strong>Anthropic / OpenAI / Google (Gemini)</strong> — AI provider, only when you save the corresponding API key</li>
+    <li><strong>Google (Google Drive via rclone)</strong> — nightly backup storage</li>
+    <li><strong>Let's Encrypt</strong> — TLS certificate issuance</li>
+    <li><strong>Telegram</strong> — alert delivery, only when you enable it</li>
+    <li><strong>Oracle Cloud Infrastructure (Mumbai region)</strong> — VM hosting</li>
+  </ul>
+
+  <h3>International data transfers</h3>
+  <p>The Oracle Cloud VM hosting ATS is located in India (Mumbai). AI provider APIs (Anthropic / OpenAI /
+  Gemini) are reached over the public internet and may process data in the United States or EU. By saving
+  an AI provider key, you authorise that limited transfer for the purpose of generating responses.</p>
+
+  <h3>Term &amp; termination</h3>
+  <p>This DPA is in force for as long as you have an active ATS account. On termination, ATS deletes your
+  personal data per the Retention section, except where extended retention is required for SEBI / income-tax
+  audit purposes (audit trail entries retained for 7 years).</p>
+</section>
+
+<footer>
+  <p>ATS Legal · drafts dated 2026-05-17 · <strong>not yet reviewed by counsel</strong></p>
+  <p>Contact: <a href="mailto:rajasekarjavaee@gmail.com">rajasekarjavaee@gmail.com</a> · <a href="/">app</a> · <a href="/docs.html">docs</a> · <a href="/status.html">status</a></p>
+</footer>
+
+</main>
+</div>
+
+<script>
+  var sections = document.querySelectorAll('section[id]');
+  var links = document.querySelectorAll('aside nav a');
+  function syncActive() {
+    var y = window.scrollY + 80;
+    var current = null;
+    sections.forEach(function (s) { if (s.offsetTop <= y) current = s.id; });
+    links.forEach(function (a) { a.classList.toggle('active', a.getAttribute('href') === '#' + current); });
+  }
+  window.addEventListener('scroll', syncActive, { passive: true });
+  syncActive();
+</script>
+</body>
+</html>

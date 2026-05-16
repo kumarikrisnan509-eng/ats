@@ -189,6 +189,7 @@ const LandingFooter = () => (
       </div>
       <div style={{ display: 'flex', gap: 16, fontSize: 12 }}>
         <a href="/docs" style={{ color: 'inherit', textDecoration: 'none', opacity: 0.8 }}>Docs</a>
+        <a href="/legal" style={{ color: 'inherit', textDecoration: 'none', opacity: 0.8 }}>Legal</a>
         <a href="/status.html" style={{ color: 'inherit', textDecoration: 'none', opacity: 0.8 }}>Status</a>
       </div>
       <div style={{ opacity: 0.8 }}>
