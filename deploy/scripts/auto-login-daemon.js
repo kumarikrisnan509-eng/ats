@@ -193,7 +193,7 @@ const server = http.createServer((req, res) => {
 
 server.listen(SOCKET_PATH, () => {
   // Permission so the container's docker user (uid 1001) can connect.
-  try { fs.chmodSync(SOCKET_PATH, 0o660); } catch (_) {}
+  try { fs.chmodSync(SOCKET_PATH, 0o666); } catch (_) {}
   console.log(`auto-login-daemon listening on ${SOCKET_PATH}`);
 });
 
