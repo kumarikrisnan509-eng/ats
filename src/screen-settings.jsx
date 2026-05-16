@@ -1,340 +1,349 @@
 /* eslint-disable */
-/* Settings screen */
+/* Tier 84: lean Settings page.
+   Stripped from 5 tabs of mostly-mock data to a single page with 3 sections
+   + Danger zone. Duplicates of Brokers / AI Advisor / Trading modes are gone --
+   each redirects via a small CTA card to the canonical page. */
 
 const SettingsScreen = () => {
-  const [tab, setTab] = useState("Profile");
-  // Tier 17: live profile + system info for the Profile + API Keys tabs
-  const [liveProf, setLiveProf] = React.useState(null);
-  const [liveInfo, setLiveInfo] = React.useState(null);
+  const [account, setAccount] = React.useState(null);
+  const [accountForm, setAccountForm] = React.useState({ name: '', email: '' });
+  const [accountSaving, setAccountSaving] = React.useState(false);
+  const [prefs, setPrefs] = React.useState(null);
+  const [prefsSaving, setPrefsSaving] = React.useState(false);
+  const [notif, setNotif] = React.useState(null);
+  const [notifForm, setNotifForm] = React.useState({
+    email_enabled: true, email_digest_time: '16:00',
+    telegram_enabled: false, telegram_chat_id: '', telegram_bot_token: '',
+    webhook_enabled: false, webhook_url: '', webhook_secret: '',
+  });
+  const [notifSaving, setNotifSaving] = React.useState(false);
+  const [toast, setToast] = React.useState(null);
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+
   React.useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
-        const [p, i] = await Promise.all([
-          window.fetchApi('/api/profile').catch(() => null),
-          window.fetchApi('/api/system/info').catch(() => null),
+        const [a, p, n] = await Promise.all([
+          fetch('/api/v1/me/account', { credentials: 'include' }).then(r => r.json()),
+          fetch('/api/v1/me/preferences', { credentials: 'include' }).then(r => r.json()),
+          fetch('/api/v1/me/notifications', { credentials: 'include' }).then(r => r.json()),
         ]);
         if (cancelled) return;
-        if (p && p.ok) setLiveProf(p);
-        if (i) setLiveInfo(i);
-      } catch (_e) {}
+        if (a.ok) { setAccount(a.account); setAccountForm({ name: a.account.name || '', email: a.account.email || '' }); }
+        if (p.ok) setPrefs(p.preferences);
+        if (n.ok) {
+          setNotif(n.notifications);
+          setNotifForm({
+            email_enabled: !!n.notifications.email_enabled,
+            email_digest_time: n.notifications.email_digest_time || '16:00',
+            telegram_enabled: !!n.notifications.telegram_enabled,
+            telegram_chat_id: n.notifications.telegram_chat_id || '',
+            telegram_bot_token: n.notifications.telegram_bot_token_set ? '(unchanged)' : '',
+            webhook_enabled: !!n.notifications.webhook_enabled,
+            webhook_url: n.notifications.webhook_url || '',
+            webhook_secret: n.notifications.webhook_secret_set ? '(unchanged)' : '',
+          });
+        }
+      } catch (e) { console.warn('[settings] load failed:', e.message); }
     };
     load();
-    const t = setInterval(load, 60000);
-    return () => { cancelled = true; clearInterval(t); };
   }, []);
-  const [, bump] = useState(0);
-  React.useEffect(() => {
-    const h = () => bump(n => n + 1);
-    window.addEventListener("modes-changed", h);
-    window.addEventListener("default-mode-changed", h);
-    return () => {
-      window.removeEventListener("modes-changed", h);
-      window.removeEventListener("default-mode-changed", h);
-    };
-  }, []);
-  const tabs = ["Profile", "API Keys", "Notifications", "AI Sources", "Backups"];
+
+  const flash = (msg, ok = true) => { setToast({ msg, ok }); setTimeout(() => setToast(null), 3500); };
+
+  const saveAccount = async () => {
+    setAccountSaving(true);
+    try {
+      const res = await fetch('/api/v1/me/account', {
+        method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: accountForm.name, email: accountForm.email })
+      });
+      const j = await res.json();
+      if (res.ok && j.ok) {
+        flash('Account updated' + (accountForm.email !== account?.email ? ' — re-verify your new email' : ''));
+        const refreshed = await fetch('/api/v1/me/account', { credentials: 'include' }).then(r => r.json());
+        if (refreshed.ok) setAccount(refreshed.account);
+      } else flash(j.detail || j.reason || 'save failed', false);
+    } catch (e) { flash(e.message, false); }
+    finally { setAccountSaving(false); }
+  };
+
+  const updatePref = async (patch) => {
+    if (!prefs) return;
+    const updated = { ...prefs, ...patch };
+    setPrefs(updated);
+    setPrefsSaving(true);
+    try {
+      const res = await fetch('/api/v1/me/preferences', {
+        method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated)
+      });
+      const j = await res.json();
+      if (res.ok && j.ok) {
+        if (patch.theme) document.documentElement.setAttribute('data-theme', patch.theme === 'auto' ? '' : patch.theme);
+        if (patch.density) document.documentElement.setAttribute('data-density', patch.density);
+        flash('Preferences saved');
+      } else flash(j.detail || 'save failed', false);
+    } catch (e) { flash(e.message, false); }
+    finally { setPrefsSaving(false); }
+  };
+
+  const saveNotif = async () => {
+    setNotifSaving(true);
+    try {
+      const payload = { ...notifForm };
+      if (payload.telegram_bot_token === '(unchanged)') delete payload.telegram_bot_token;
+      if (payload.webhook_secret === '(unchanged)') delete payload.webhook_secret;
+      const res = await fetch('/api/v1/me/notifications', {
+        method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const j = await res.json();
+      if (res.ok && j.ok) flash('Notifications saved');
+      else flash(j.detail || 'save failed', false);
+    } catch (e) { flash(e.message, false); }
+    finally { setNotifSaving(false); }
+  };
+
+  const exportData = () => { window.open('/api/v1/me/export', '_blank'); };
+
+  const confirmDelete = async () => {
+    const res = await fetch('/api/v1/me/account', {
+      method: 'DELETE', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: 'DELETE' })
+    });
+    if (res.ok) { window.dispatchEvent(new CustomEvent('logout')); window.location.hash = 'login'; }
+  };
 
   return (
     <>
       <div className="page-header">
         <div>
           <h1 className="page-header__title">Settings</h1>
-          <div className="page-header__sub">Account, API keys, notifications, AI and backups</div>
+          <div className="page-header__sub">Account, display, notifications.</div>
         </div>
       </div>
 
-      <div className="tabs">
-        {tabs.map(t => <button key={t} className={tab === t ? "on" : ""} onClick={() => setTab(t)}>{t}</button>)}
-      </div>
+      {toast && (
+        <div style={{
+          padding: 10, marginBottom: 12, borderRadius: 6, fontSize: 12,
+          background: toast.ok ? 'color-mix(in oklab, var(--up) 12%, transparent)' : 'color-mix(in oklab, var(--danger) 12%, transparent)',
+          color: toast.ok ? 'var(--up)' : 'var(--danger)', border: '1px solid currentColor',
+        }}>{toast.ok ? '✓' : '✕'} {toast.msg}</div>
+      )}
 
-      {tab === "Profile" && (
-        <>
-        <div className="grid grid-2">
-          <Card title="Account">
-            <div className="col" style={{ gap: 14 }}>
-              <div className="row" style={{ gap: 14 }}>
-                <div style={{ width: 64, height: 64, borderRadius: "50%", background: "linear-gradient(135deg, var(--accent), var(--violet))", color: "white", fontWeight: 600, fontSize: 22, display: "grid", placeItems: "center" }}>RS</div>
-                <div>
-                  <div style={{ fontSize: 15, fontWeight: 600 }}>Rajasekar Selvam</div>
-                  <div className="muted" style={{ fontSize: 12 }}>rajasekarselvam.com · Principal</div>
-                </div>
-              </div>
-              <SettingsField label="Name" value="Rajasekar Selvam"/>
-              <SettingsField label="Email" value="hello@rajasekarselvam.com"/>
-              <SettingsField label="Trading account" value="Zerodha · XB1234 (linked)"/>
-              <SettingsField label="Timezone" value="Asia/Kolkata (IST)"/>
-            </div>
-          </Card>
-
-          <Card title="Display">
-            <div className="col" style={{ gap: 14 }}>
-              <ToggleRow label="Dark mode" on note="Use theme toggle in top bar"/>
-              <ToggleRow label="Show P&L in header" on/>
-              <ToggleRow label="Compact tables" off/>
-              <ToggleRow label="Currency abbreviated (₹4.8L)" on/>
-              <ToggleRow label="Round to whole rupees" off/>
-            </div>
-          </Card>
+      <Card title="Account" sub="Your identity. Email change requires re-verification." style={{ marginBottom: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 12 }}>
+          <label>
+            <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>Name</div>
+            <input className="input" value={accountForm.name} onChange={e => setAccountForm(f => ({ ...f, name: e.target.value }))} />
+          </label>
+          <label>
+            <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>Email{account && !account.is_verified && <span style={{ color: 'var(--warn, #d97706)', marginLeft: 6 }}>· unverified</span>}</div>
+            <input className="input" type="email" value={accountForm.email} onChange={e => setAccountForm(f => ({ ...f, email: e.target.value }))} />
+          </label>
         </div>
-
-        {/* Trading preferences — default mode + behavior */}
-        <Card title="Trading preferences" sub="Default mode for new strategies and manual orders" style={{ marginTop: 16 }}>
-          <div className="grid grid-2" style={{ gap: 20 }}>
-            <div>
-              <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
-                <div className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>Default mode</div>
-                <div className="muted" style={{ fontSize: 10 }}>single-select · pre-fills new orders</div>
-              </div>
-              <div className="col" style={{ gap: 8 }}>
-                {window.MODE_IDS.map(id => {
-                  const meta = window.MODE_META[id];
-                  const isActive = window.isModeActive ? window.isModeActive(id) : true;
-                  const stored = (typeof localStorage !== "undefined" && localStorage.getItem("ats.defaultMode")) || "intraday";
-                  const isDefault = id === stored;
-                  const disabled = !isActive;
-                  return (
-                    <label key={id} className="row" style={{
-                      gap: 10, padding: "10px 12px",
-                      border: isDefault ? `1px solid ${meta.color}` : "1px solid var(--border)",
-                      background: disabled ? "var(--surface-2)" : isDefault ? meta.colorSoft : "var(--surface)",
-                      borderRadius: "var(--r-md)",
-                      cursor: disabled ? "not-allowed" : "pointer",
-                      opacity: disabled ? 0.55 : 1,
-                    }}
-                    onClick={(e) => {
-                      if (disabled) return;
-                      try { localStorage.setItem("ats.defaultMode", id); } catch(_) {}
-                      window.dispatchEvent(new CustomEvent("default-mode-changed", { detail: id }));
-                      e.currentTarget.querySelector("input").checked = true;
-                    }}>
-                      <input type="radio" name="default-mode" defaultChecked={isDefault} disabled={disabled} style={{ accentColor: meta.color }}/>
-                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: meta.color }}/>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 13, fontWeight: 500 }}>{meta.label}</div>
-                        <div className="muted" style={{ fontSize: 11 }}>{meta.tagline}</div>
-                      </div>
-                      {isDefault && !disabled && <Pill kind="acc">default</Pill>}
-                      {disabled && <Pill kind="warn">not active</Pill>}
-                    </label>
-                  );
-                })}
-              </div>
-              <div className="muted" style={{ fontSize: 11, marginTop: 10 }}>
-                Disabled modes are turned off in <a href="#modes" style={{ color: "var(--accent)" }}>Trading modes</a>. Default applies only to enabled modes.
-              </div>
-            </div>
-
-            <div>
-              <div className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>Mode behavior</div>
-              <div className="col" style={{ gap: 10 }}>
-                <ToggleRow label="Auto-pause idle modes" on note="After 30 days without orders"/>
-                <ToggleRow label="Confirm mode switch on orders" on note="Manual orders that mismatch default"/>
-                <ToggleRow label="Show mode badge in topbar" on note="Toggle active modes from any screen"/>
-                <ToggleRow label="Daily mode P&L email" off note="Morning 08:00 IST recap"/>
-              </div>
-            </div>
-          </div>
-        </Card>
-        </>
-      )}
-
-      {tab === "API Keys" && (
-        <div className="grid grid-2">
-          <Card title="Broker — primary data & execution" sub="Zerodha Kite Connect · all market data sourced here">
-            <div className="col" style={{ gap: 12 }}>
-              <SettingsField label="API key" value="••••••••••••a7d2" mono/>
-              <SettingsField label="API secret" value="••••••••••••••••••••" mono/>
-              <SettingsField label="Access token" value="valid · rotates 06:00 IST" mono/>
-              <div className="row" style={{ gap: 8, marginTop: 4 }}>
-                <button className="btn btn--sm">Rotate</button>
-                <button className="btn btn--sm">Test call</button>
-              </div>
-            </div>
-          </Card>
-          <Card title="Data feeds (from broker adapter)" sub="Ticks, candles, depth — all via Zerodha today; portable to any connected broker">
-            <div className="col" style={{ gap: 12 }}>
-              <SettingsField label="Live ticks (WebSocket)" value="Zerodha Kite WS · 14ms avg · 3000 symbols cap" mono/>
-              <SettingsField label="Historical candles" value="Zerodha /instruments · cached in Redis (VPS)" mono/>
-              <SettingsField label="Market depth (L5)" value="Zerodha Kite WS · top 5 bids/asks" mono/>
-              <SettingsField label="Positions + holdings" value="Zerodha REST · polled 5s" mono/>
-              <div className="divider"/>
-              <SettingsField label="News feed (non-broker)" value="Moneycontrol RSS + ET API (supplementary)" mono/>
-              <div className="muted" style={{ fontSize: 11 }}>All feeds abstracted by the broker adapter — switching to Upstox/Dhan routes data through the new provider without strategy code changes.</div>
-            </div>
-          </Card>
+        <div className="between">
+          <div className="muted" style={{ fontSize: 11 }}>Timezone: Asia/Kolkata (IST) · auto-detected</div>
+          <button className="btn btn--sm btn--primary" disabled={accountSaving || !account} onClick={saveAccount}>{accountSaving ? 'Saving…' : 'Save account'}</button>
         </div>
-      )}
+      </Card>
 
-      {tab === "Notifications" && (
-        <Card title="Channels">
-          <div className="col" style={{ gap: 14 }}>
-            {[
-              { ch: "Telegram", d: "@rajasekar_trading_bot · chat 140299", on: true },
-              { ch: "Email",    d: "hello@rajasekarselvam.com (digest at 16:00)", on: true },
-              { ch: "SMS",      d: "+91 9xxxxxx321 · critical only", on: false },
-              { ch: "Slack",    d: "#trading-alerts (personal workspace)", on: true },
-              { ch: "Webhook",  d: "POST https://rajasekarselvam.com/api/hook", on: true },
-            ].map((r, i) => (
-              <div key={i} className="between" style={{ padding: 12, border: "1px solid var(--border)", borderRadius: "var(--r-md)" }}>
+      <Card title="Display" sub="Theme, density, currency format." style={{ marginBottom: 16 }}>
+        {!prefs ? <div className="muted" style={{ fontSize: 12 }}>Loading…</div> : (
+          <div style={{ display: 'grid', gap: 12 }}>
+            <div className="between">
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>Theme</div>
+                <div className="muted" style={{ fontSize: 11 }}>Light, dark, or follow system.</div>
+              </div>
+              <Segmented value={prefs.theme} onChange={v => updatePref({ theme: v })}
+                options={[{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }, { value: 'auto', label: 'System' }]} />
+            </div>
+            <div className="between">
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>Density</div>
+                <div className="muted" style={{ fontSize: 11 }}>Comfortable spacing or compact rows.</div>
+              </div>
+              <Segmented value={prefs.density} onChange={v => updatePref({ density: v })}
+                options={[{ value: 'comfortable', label: 'Comfortable' }, { value: 'compact', label: 'Compact' }]} />
+            </div>
+            <div className="between">
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>Currency format</div>
+                <div className="muted" style={{ fontSize: 11 }}>Abbreviate large numbers vs. full digits.</div>
+              </div>
+              <Segmented value={prefs.currency_format} onChange={v => updatePref({ currency_format: v })}
+                options={[{ value: 'abbrev', label: '₹4.8L' }, { value: 'full', label: '₹4,82,340' }]} />
+            </div>
+            <div className="between">
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>Round to whole rupees</div>
+                <div className="muted" style={{ fontSize: 11 }}>Drop the paise on all displays.</div>
+              </div>
+              <Toggle on={!!prefs.round_rupees} onClick={() => updatePref({ round_rupees: !prefs.round_rupees })} />
+            </div>
+            <div className="between">
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>Show P&L in header</div>
+                <div className="muted" style={{ fontSize: 11 }}>Floating widget on the top bar with today's P&L.</div>
+              </div>
+              <Toggle on={!!prefs.show_pnl_in_header} onClick={() => updatePref({ show_pnl_in_header: !prefs.show_pnl_in_header })} />
+            </div>
+          </div>
+        )}
+      </Card>
+
+      <Card title="Notifications" sub="Where critical alerts land. Tokens are libsodium-sealed; never echoed back." style={{ marginBottom: 16 }}>
+        {!notif ? <div className="muted" style={{ fontSize: 12 }}>Loading…</div> : (
+          <div style={{ display: 'grid', gap: 14 }}>
+            <div style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 6 }}>
+              <div className="between" style={{ marginBottom: 8 }}>
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 500 }}>{r.ch}</div>
-                  <div className="muted" style={{ fontSize: 12 }}>{r.d}</div>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>Email digest</div>
+                  <div className="muted" style={{ fontSize: 11 }}>Daily summary of orders, P&L, and signals.</div>
                 </div>
-                <Toggle on={r.on}/>
+                <Toggle on={notifForm.email_enabled} onClick={() => setNotifForm(f => ({ ...f, email_enabled: !f.email_enabled }))} />
               </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      {tab === "AI Sources" && (
-        <>
-          <Card className="card--soft" style={{ marginBottom: 16 }}>
-            <div className="row" style={{ gap: 20, justifyContent: "space-between" }}>
-              {["Strategies", "AI Router", "Provider Adapter", "LLM Provider"].map((s, i, a) => (
-                <React.Fragment key={i}>
-                  <div style={{ textAlign: "center", flex: 1 }}>
-                    <div style={{ fontFamily: "var(--display)", fontSize: 16, letterSpacing: "-0.01em" }}>{s}</div>
-                    <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
-                      {["emit signal request", "route · critic · consensus", "uniform interface", "Claude · GPT · Gemini · …"][i]}
-                    </div>
-                  </div>
-                  {i < a.length - 1 && <div style={{ color: "var(--text-4)", fontFamily: "var(--mono)" }}>→</div>}
-                </React.Fragment>
-              ))}
+              {notifForm.email_enabled && (
+                <label style={{ display: 'block', marginTop: 8 }}>
+                  <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>Send time (IST)</div>
+                  <input className="input" type="time" value={notifForm.email_digest_time}
+                    onChange={e => setNotifForm(f => ({ ...f, email_digest_time: e.target.value }))} style={{ maxWidth: 160 }} />
+                </label>
+              )}
             </div>
-          </Card>
 
-          <div className="grid grid-3" style={{ marginBottom: 16 }}>
-            {[
-              { n: "Anthropic Claude", m: "claude-opus-4.6", key: "••••a2f7", st: "connected", badge: "Primary", lc: "#d97757", ll: "C", latency: "420ms", cost: "₹8.40/1M", use: "intraday · critic",
-                models: ["claude-opus-4.6", "claude-sonnet-4.6", "claude-haiku-4.6", "claude-opus-4.5", "claude-sonnet-4.5", "claude-haiku-4.5"] },
-              { n: "OpenAI", m: "gpt-5", key: "••••9dd1", st: "connected", badge: "Active", lc: "#10a37f", ll: "O", latency: "380ms", cost: "₹12.20/1M", use: "macro · news scan",
-                models: ["gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-4.1", "gpt-4.1-mini", "o4-mini", "o3", "o3-mini"] },
-              { n: "Google Gemini", m: "gemini-2.5-pro", key: "••••e4b2", st: "connected", badge: "Active", lc: "#4285f4", ll: "G", latency: "310ms", cost: "₹6.80/1M", use: "consensus · vision",
-                models: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-pro", "gemini-2.0-flash"] },
-            ].map((p, i) => (
-              <Card key={i} style={{ border: "1px solid color-mix(in oklab, var(--accent) 25%, var(--border))" }}>
-                <div className="between" style={{ marginBottom: 12 }}>
-                  <div className="row">
-                    <div style={{ width: 36, height: 36, borderRadius: 9, background: p.lc, color: "white", display: "grid", placeItems: "center", fontWeight: 700 }}>{p.ll}</div>
-                    <div>
-                      <div style={{ fontSize: 14, fontWeight: 600 }}>{p.n}</div>
-                      <div className="muted" style={{ fontSize: 11 }}>{p.models.length} models available</div>
-                    </div>
-                  </div>
-                  <Pill kind="acc">{p.badge}</Pill>
+            <div style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 6 }}>
+              <div className="between" style={{ marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>Telegram</div>
+                  <div className="muted" style={{ fontSize: 11 }}>Real-time alerts. Create your own bot via @BotFather, paste the token + chat ID below.</div>
                 </div>
-                <div className="col" style={{ gap: 8, fontSize: 12 }}>
-                  <div>
-                    <div className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Active model</div>
-                    <select defaultValue={p.m} style={{ width: "100%", padding: "7px 10px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-md)", fontFamily: "var(--mono)", fontSize: 12 }}>
-                      {p.models.map(m => <option key={m} value={m}>{m}</option>)}
-                    </select>
-                  </div>
-                  <div className="between"><span className="muted">API key</span><span className="mono">{p.key}</span></div>
-                  <div className="between"><span className="muted">Latency</span><span className="mono">{p.latency}</span></div>
-                  <div className="between"><span className="muted">Cost</span><span className="mono">{p.cost}</span></div>
-                  <div className="between"><span className="muted">Role</span><span style={{ fontSize: 11 }}>{p.use}</span></div>
+                <Toggle on={notifForm.telegram_enabled} onClick={() => setNotifForm(f => ({ ...f, telegram_enabled: !f.telegram_enabled }))} />
+              </div>
+              {notifForm.telegram_enabled && (
+                <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+                  <label>
+                    <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>Bot token</div>
+                    <input className="input" type="password" autoComplete="off" value={notifForm.telegram_bot_token}
+                      onChange={e => setNotifForm(f => ({ ...f, telegram_bot_token: e.target.value }))}
+                      placeholder={notif.telegram_bot_token_set ? '(unchanged)' : 'Paste from @BotFather'} />
+                  </label>
+                  <label>
+                    <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>Chat ID</div>
+                    <input className="input" value={notifForm.telegram_chat_id}
+                      onChange={e => setNotifForm(f => ({ ...f, telegram_chat_id: e.target.value }))}
+                      placeholder="e.g. 140299" />
+                  </label>
                 </div>
-                <div className="row" style={{ marginTop: 12, gap: 6 }}>
-                  <button className="btn btn--sm" style={{ flex: 1, justifyContent: "center" }}>Test</button>
-                  <button className="btn btn--sm" style={{ flex: 1, justifyContent: "center" }}>Rotate</button>
-                </div>
-              </Card>
-            ))}
-          </div>
-
-          <div className="grid grid-3" style={{ marginBottom: 16 }}>
-            {[
-              { n: "xAI Grok", ll: "x", lc: "#000000", note: "Adapter ready · key required" },
-              { n: "Mistral", ll: "M", lc: "#fa520f", note: "Adapter stub" },
-              { n: "DeepSeek", ll: "D", lc: "#4d6bfe", note: "Adapter stub" },
-              { n: "Perplexity", ll: "P", lc: "#20808d", note: "For news + live-web signals" },
-              { n: "Cohere", ll: "Co", lc: "#39594d", note: "Adapter stub" },
-              { n: "Local (Ollama)", ll: "L", lc: "#000000", note: "llama3.1:8b on VPS · free tier" },
-            ].map((p, i) => (
-              <div className="slot" key={i}>
-                <div style={{ width: 36, height: 36, borderRadius: 9, background: "color-mix(in oklab, " + p.lc + " 18%, transparent)", color: p.lc, display: "grid", placeItems: "center", fontWeight: 700 }}>{p.ll}</div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{p.n}</div>
-                <div style={{ fontSize: 11 }}>{p.note}</div>
-                <button className="btn btn--sm"><I.plus size={12}/> Connect</button>
-              </div>
-            ))}
-          </div>
-
-          <div className="grid grid-2">
-            <Card title="Routing rules" sub="How signals flow across providers">
-              <div className="col" style={{ gap: 10 }}>
-                {[
-                  { r: "Intraday momentum · primary", b: "Claude Haiku 4.5" },
-                  { r: "Macro / news scan", b: "GPT-4o-mini" },
-                  { r: "Consensus check (2-of-3)", b: "Claude + GPT + Gemini" },
-                  { r: "Vision (chart screenshots)", b: "Gemini 2.0 Flash" },
-                  { r: "Fallback when primary > 2s", b: "Gemini 2.0 Flash" },
-                  { r: "Zero-cost preview / dev", b: "Local Ollama (slot)" },
-                ].map((r, i) => (
-                  <div key={i} className="between" style={{ padding: 10, border: "1px solid var(--border)", borderRadius: "var(--r-md)", fontSize: 12 }}>
-                    <span>{r.r}</span>
-                    <Pill kind="acc">{r.b}</Pill>
-                  </div>
-                ))}
-              </div>
-            </Card>
-            <Card title="Behavior">
-              <div className="col" style={{ gap: 14 }}>
-                <ToggleRow label="Auto-route signals through LLM critic" on/>
-                <ToggleRow label="Require consensus (2 of 3)" on note="Reject signal if providers disagree"/>
-                <ToggleRow label="Explain trade rationale in logs" on/>
-                <ToggleRow label="Cost cap — max ₹500/day on LLM calls" on/>
-                <ToggleRow label="Learn from rejections" off note="Coming soon"/>
-              </div>
-            </Card>
-          </div>
-        </>
-      )}
-
-      {tab === "Backups" && (
-        <Card title="Backups" sub="PostgreSQL + strategy code">
-          <div className="col" style={{ gap: 12 }}>
-            <div className="between" style={{ padding: 12, border: "1px solid var(--border)", borderRadius: "var(--r-md)" }}>
-              <div><div style={{ fontSize: 13, fontWeight: 500 }}>Daily DB snapshot</div><div className="muted" style={{ fontSize: 12 }}>Oracle Object Storage · ap-mumbai-1 · retain 30d</div></div>
-              <Pill kind="up" dot>last 03:00 IST</Pill>
+              )}
             </div>
-            <div className="between" style={{ padding: 12, border: "1px solid var(--border)", borderRadius: "var(--r-md)" }}>
-              <div><div style={{ fontSize: 13, fontWeight: 500 }}>Git push hook</div><div className="muted" style={{ fontSize: 12 }}>strategies/ auto-push on change</div></div>
-              <Pill kind="up" dot>live</Pill>
+
+            <div style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 6 }}>
+              <div className="between" style={{ marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>Webhook</div>
+                  <div className="muted" style={{ fontSize: 11 }}>POST a signed payload on every alert. Optional HMAC secret signs the body.</div>
+                </div>
+                <Toggle on={notifForm.webhook_enabled} onClick={() => setNotifForm(f => ({ ...f, webhook_enabled: !f.webhook_enabled }))} />
+              </div>
+              {notifForm.webhook_enabled && (
+                <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+                  <label>
+                    <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>URL</div>
+                    <input className="input" type="url" value={notifForm.webhook_url}
+                      onChange={e => setNotifForm(f => ({ ...f, webhook_url: e.target.value }))}
+                      placeholder="https://example.com/hooks/ats" />
+                  </label>
+                  <label>
+                    <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>Signing secret (optional)</div>
+                    <input className="input" type="password" autoComplete="off" value={notifForm.webhook_secret}
+                      onChange={e => setNotifForm(f => ({ ...f, webhook_secret: e.target.value }))}
+                      placeholder={notif.webhook_secret_set ? '(unchanged)' : 'For HMAC-SHA256 X-ATS-Signature header'} />
+                  </label>
+                </div>
+              )}
             </div>
-            <div className="between" style={{ padding: 12, border: "1px solid var(--border)", borderRadius: "var(--r-md)" }}>
-              <div><div style={{ fontSize: 13, fontWeight: 500 }}>Weekly full snapshot</div><div className="muted" style={{ fontSize: 12 }}>Block-volume image · retain 8 weeks</div></div>
-              <Pill kind="up" dot>Sun 02:00</Pill>
+
+            <div className="row" style={{ justifyContent: 'flex-end' }}>
+              <button className="btn btn--sm btn--primary" disabled={notifSaving} onClick={saveNotif}>{notifSaving ? 'Saving…' : 'Save notifications'}</button>
             </div>
           </div>
-        </Card>
+        )}
+      </Card>
+
+      <Card title="Other settings" sub="Moved to their canonical pages — no duplication." style={{ marginBottom: 16 }}>
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <a className="btn btn--sm" href="#brokers">Broker API keys →</a>
+          <a className="btn btn--sm" href="#insights">AI advisor (BYOK) →</a>
+          <a className="btn btn--sm" href="#modes">Trading modes →</a>
+          <a className="btn btn--sm" href="#compliance">Compliance &amp; audit →</a>
+        </div>
+      </Card>
+
+      <Card title="Danger zone" sub="Irreversible actions." style={{ marginBottom: 16, borderColor: 'color-mix(in oklab, var(--danger) 30%, var(--border))' }}>
+        <div className="between" style={{ marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 500 }}>Export my data</div>
+            <div className="muted" style={{ fontSize: 11 }}>Download a JSON of all your data: account, brokers (no secrets), watchlist, paper orders, P&L history, preferences.</div>
+          </div>
+          <button className="btn btn--sm" onClick={exportData}>Download JSON</button>
+        </div>
+        <div className="divider" />
+        <div className="between" style={{ marginTop: 12 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--danger)' }}>Delete account</div>
+            <div className="muted" style={{ fontSize: 11 }}>Permanently delete this account, all brokers (sealed credentials), watchlist, P&L, and preferences. Cannot be undone.</div>
+          </div>
+          <button className="btn btn--sm" style={{ color: 'var(--danger)' }} onClick={() => setDeleteOpen(true)}>Delete account</button>
+        </div>
+      </Card>
+
+      {deleteOpen && (
+        <DeleteAccountModal onCancel={() => setDeleteOpen(false)} onConfirm={confirmDelete} email={account?.email} />
       )}
     </>
   );
 };
 
-const SettingsField = ({ label, value, mono }) => (
-  <div>
-    <div className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>{label}</div>
-    <div style={{ padding: "8px 10px", border: "1px solid var(--border)", borderRadius: "var(--r-md)", background: "var(--bg-soft)", fontFamily: mono ? "var(--mono)" : "inherit", fontSize: 13 }}>{value}</div>
-  </div>
-);
-
-const ToggleRow = ({ label, on, note }) => {
-  const [v, setV] = useState(!!on);
+const DeleteAccountModal = ({ onCancel, onConfirm, email }) => {
+  const [typed, setTyped] = React.useState('');
+  const valid = typed === 'DELETE';
   return (
-    <div className="between">
-      <div>
-        <div style={{ fontSize: 13, fontWeight: 500 }}>{label}</div>
-        {note && <div className="muted" style={{ fontSize: 11 }}>{note}</div>}
-      </div>
-      <Toggle on={v} onClick={() => setV(!v)}/>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'grid', placeItems: 'center', zIndex: 1000 }}>
+      <Card style={{ width: 'min(480px, 92vw)' }}>
+        <div className="between" style={{ marginBottom: 12 }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Delete account?</h3>
+          <button className="btn btn--sm btn--ghost" onClick={onCancel}>×</button>
+        </div>
+        <p style={{ fontSize: 13, color: 'var(--text-2)', margin: '0 0 12px' }}>
+          This permanently deletes <strong>{email || 'your account'}</strong> and all associated data:
+        </p>
+        <ul style={{ fontSize: 12, color: 'var(--text-2)', margin: '0 0 16px', paddingLeft: 18 }}>
+          <li>Sealed broker credentials (Zerodha API keys, TOTP seed, password)</li>
+          <li>Watchlist, alerts, paper trading state</li>
+          <li>Daily P&L history, cron run history</li>
+          <li>Notification settings (Telegram, Email, Webhook tokens)</li>
+        </ul>
+        <p style={{ fontSize: 12, color: 'var(--danger)', margin: '0 0 12px' }}>
+          This cannot be undone. Live broker connections at Zerodha are NOT affected — only our copies are deleted.
+        </p>
+        <label style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
+          Type <code style={{ background: 'var(--bg-soft)', padding: '2px 6px', borderRadius: 4 }}>DELETE</code> to confirm:
+        </label>
+        <input className="input" value={typed} onChange={e => setTyped(e.target.value)} autoFocus placeholder="DELETE" style={{ marginBottom: 16 }} />
+        <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+          <button className="btn btn--sm" onClick={onCancel}>Cancel</button>
+          <button className="btn btn--sm" disabled={!valid} onClick={() => valid && onConfirm()}
+            style={{ background: valid ? 'var(--danger)' : 'var(--bg-soft)', color: valid ? 'white' : 'var(--text-3)', opacity: valid ? 1 : 0.5 }}>
+            Delete account
+          </button>
+        </div>
+      </Card>
     </div>
   );
 };
 
-Object.assign(window, { SettingsScreen });
+Object.assign(window, { SettingsScreen, DeleteAccountModal });
