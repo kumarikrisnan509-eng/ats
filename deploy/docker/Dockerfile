@@ -56,6 +56,7 @@ COPY deploy/backend/ ./
 # src/ is the PRE-TRANSFORMED output from the frontend-build stage.
 RUN mkdir -p /app/static
 COPY app.html                              /app/static/app.html
+COPY status.html                           /app/static/status.html
 COPY styles.css                            /app/static/styles.css
 COPY --from=frontend-build /work/out/src/  /app/static/src/
 

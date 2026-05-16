@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="index,follow">
+<title>ATS · Status</title>
+<style>
+  :root {
+    --bg:#0f1115; --surface:#171a21; --surface-2:#1d212a; --border:#262a35;
+    --text:#e6e7eb; --text-2:#a8acb8; --text-3:#7a7f8d;
+    --green:#22c55e; --yellow:#eab308; --red:#ef4444; --blue:#3b82f6;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg:#fafafa; --surface:#ffffff; --surface-2:#f5f5f5; --border:#e5e7eb;
+      --text:#0f1115; --text-2:#4b5563; --text-3:#6b7280;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 0; line-height: 1.5; }
+  header { padding: 32px 24px 16px; max-width: 760px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; font-size: 24px; font-weight: 600; letter-spacing: -0.3px; }
+  .sub { color: var(--text-3); font-size: 13px; }
+  main { padding: 0 24px 32px; max-width: 760px; margin: 0 auto; }
+  .banner { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-radius: 10px; margin: 16px 0 24px; border: 1px solid var(--border); }
+  .banner .dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
+  .banner.up { background: color-mix(in oklab, var(--green) 8%, transparent); border-color: color-mix(in oklab, var(--green) 30%, var(--border)); }
+  .banner.degraded { background: color-mix(in oklab, var(--yellow) 12%, transparent); border-color: color-mix(in oklab, var(--yellow) 35%, var(--border)); }
+  .banner.down { background: color-mix(in oklab, var(--red) 12%, transparent); border-color: color-mix(in oklab, var(--red) 35%, var(--border)); }
+  .banner.up .dot { background: var(--green); box-shadow: 0 0 8px color-mix(in oklab, var(--green) 60%, transparent); }
+  .banner.degraded .dot { background: var(--yellow); }
+  .banner.down .dot { background: var(--red); }
+  .banner h2 { margin: 0 0 2px; font-size: 16px; font-weight: 600; }
+  .banner .meta { color: var(--text-3); font-size: 12px; }
+  .grid { display: grid; gap: 8px; }
+  .row { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+  .row .left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .row .left .pip { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .row .left .pip.up { background: var(--green); }
+  .row .left .pip.down { background: var(--red); }
+  .row .left .pip.warn { background: var(--yellow); }
+  .row .name { font-size: 14px; font-weight: 500; }
+  .row .note { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+  .row .right { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; color: var(--text-2); }
+  footer { color: var(--text-3); font-size: 11px; text-align: center; padding: 24px 0; }
+  footer a { color: var(--blue); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+  .actions { display: flex; gap: 8px; margin-top: 8px; }
+  .btn { padding: 6px 12px; font-size: 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); cursor: pointer; }
+  .btn:hover { background: var(--surface); }
+  .skeleton { opacity: 0.5; animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 0.3; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>ATS · Status</h1>
+  <div class="sub">Live health for <a href="/" style="color: var(--blue); text-decoration: none;">ats.rajasekarselvam.com</a> + the upstream services it depends on. Refreshes every 30s.</div>
+</header>
+<main>
+  <div id="banner" class="banner skeleton">
+    <div class="dot"></div>
+    <div style="flex: 1;">
+      <h2 id="banner-title">Checking…</h2>
+      <div class="meta" id="banner-meta">Probing services</div>
+    </div>
+  </div>
+
+  <div class="grid" id="services">
+    <div class="row skeleton"><div class="left"><div class="pip"></div><div><div class="name">Loading…</div></div></div></div>
+  </div>
+
+  <div class="actions">
+    <button class="btn" onclick="refresh(true)">Refresh now</button>
+    <a class="btn" href="/api/status" target="_blank" rel="noopener">Raw JSON →</a>
+  </div>
+</main>
+<footer>
+  <p>Status page is publicly cached for up to 30s.<br>
+  For history or to subscribe to alerts, contact <a href="mailto:rajasekarjavaee@gmail.com">rajasekarjavaee@gmail.com</a>.</p>
+</footer>
+<script>
+  // Service display metadata
+  var META = {
+    ats_app:          { label: 'ATS application',        note: 'API, database, broker resolver' },
+    nse_surveillance: { label: 'NSE surveillance feed',  note: 'ASM / GSM / T2T list freshness' },
+    kite:             { label: 'Zerodha Kite API',       note: 'broker auth + market data' },
+    nse_archive:      { label: 'NSE archives (sec list)', note: 'master surveillance list source' },
+    anthropic:        { label: 'Anthropic Claude',       note: 'BYOK provider status' },
+    openai:           { label: 'OpenAI',                 note: 'BYOK provider status' },
+    gemini:           { label: 'Google Gemini',          note: 'BYOK provider status' },
+  };
+  var ORDER = ['ats_app', 'nse_surveillance', 'kite', 'nse_archive', 'anthropic', 'openai', 'gemini'];
+
+  function fmtRow(key, svc) {
+    var m = META[key] || { label: key, note: '' };
+    var ok = svc && svc.ok;
+    var cls = ok ? 'up' : 'down';
+    var status = 'ok';
+    if (!svc) status = 'unknown';
+    else if (svc.ok) status = svc.elapsed_ms != null ? (svc.elapsed_ms + ' ms') : 'ok';
+    else if (svc.error) status = svc.error;
+    else if (svc.http) status = 'HTTP ' + svc.http;
+    else status = 'down';
+
+    var note = m.note;
+    if (svc && svc.age_minutes != null) note += ' · ' + svc.age_minutes + ' min stale';
+    if (svc && svc.counts) {
+      var c = svc.counts;
+      note += ' · ' + (c.gsm || 0) + ' GSM, ' + (c.t2t || 0) + ' T2T';
+    }
+
+    return '<div class="row">'
+      + '<div class="left">'
+      +   '<div class="pip ' + cls + '"></div>'
+      +   '<div><div class="name">' + escapeHtml(m.label) + '</div>'
+      +     '<div class="note">' + escapeHtml(note) + '</div></div>'
+      + '</div>'
+      + '<div class="right">' + escapeHtml(status) + '</div>'
+      + '</div>';
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+  }
+
+  async function refresh(forceFresh) {
+    try {
+      var url = '/api/status' + (forceFresh ? '?t=' + Date.now() : '');
+      var r = await fetch(url, { cache: forceFresh ? 'no-store' : 'default' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      var data = await r.json();
+      render(data);
+    } catch (e) {
+      var banner = document.getElementById('banner');
+      banner.classList.remove('skeleton', 'up', 'degraded');
+      banner.classList.add('down');
+      document.getElementById('banner-title').textContent = 'Status check failed';
+      document.getElementById('banner-meta').textContent = e.message;
+    }
+  }
+
+  function render(data) {
+    var banner = document.getElementById('banner');
+    banner.classList.remove('skeleton', 'up', 'degraded', 'down');
+    if (!data.ok) {
+      banner.classList.add('down');
+      document.getElementById('banner-title').textContent = 'Major outage';
+      document.getElementById('banner-meta').textContent = 'ATS application is not responding';
+    } else if (data.degraded) {
+      banner.classList.add('degraded');
+      document.getElementById('banner-title').textContent = 'Partial degradation';
+      document.getElementById('banner-meta').textContent = data.degraded_services.length + ' upstream service(s) degraded — your portfolio + paper trades are unaffected';
+    } else {
+      banner.classList.add('up');
+      document.getElementById('banner-title').textContent = 'All systems operational';
+      document.getElementById('banner-meta').textContent = 'Last checked ' + new Date(data.ts).toLocaleTimeString() + ' · ' + (data.cached ? 'cached ' + data.cache_age_sec + 's' : 'fresh');
+    }
+
+    var html = '';
+    for (var i = 0; i < ORDER.length; i++) {
+      var key = ORDER[i];
+      html += fmtRow(key, data.services && data.services[key]);
+    }
+    document.getElementById('services').innerHTML = html;
+  }
+
+  refresh(false);
+  setInterval(function () { refresh(false); }, 30000);
+</script>
+</body>
+</html>

@@ -390,6 +390,96 @@ app.get('/api/admin/observability', (req, res) => {
   });
 });
 
+// T-I2: public status page endpoint. No auth. 60s server-side cache so a runaway
+// uptime monitor + curious users don't hammer upstream providers. Probes a small
+// set of external dependencies (Kite, NSE, the 3 AI providers' status pages) and
+// returns a structured JSON the /status HTML page renders as a green/yellow/red
+// dashboard.
+let _statusCache = { ts: 0, payload: null };
+const STATUS_CACHE_MS = 60_000;
+
+async function _checkUrl(url, expectedContentType, timeoutMs = 6000) {
+  const ctl = new AbortController();
+  const to = setTimeout(() => ctl.abort(), timeoutMs);
+  const t0 = Date.now();
+  try {
+    const r = await fetch(url, { method: 'GET', signal: ctl.signal, headers: { 'User-Agent': 'ATS-StatusBot/1.0' } });
+    const elapsed = Date.now() - t0;
+    const ct = r.headers.get('content-type') || '';
+    const expectedOk = !expectedContentType || ct.includes(expectedContentType);
+    return { ok: r.ok && expectedOk, http: r.status, elapsed_ms: elapsed, content_type: ct };
+  } catch (e) {
+    return { ok: false, error: (e && e.message || 'error').slice(0, 100), elapsed_ms: Date.now() - t0 };
+  } finally { clearTimeout(to); }
+}
+
+async function _buildStatus() {
+  const t0 = Date.now();
+  const out = { ok: true, ts: new Date().toISOString(), services: {} };
+
+  // 1. ATS app self — DB read latency
+  try {
+    const t = Date.now();
+    if (db && db._conn) {
+      db._conn.prepare('SELECT 1').get();
+      out.services.ats_app = { ok: true, elapsed_ms: Date.now() - t, note: 'db read ok' };
+    } else {
+      out.services.ats_app = { ok: false, error: 'db not initialized' };
+    }
+  } catch (e) { out.services.ats_app = { ok: false, error: e.message }; }
+
+  // 2. Surveillance freshness (already cached in NseSurveillance)
+  try {
+    const st = _surveillance ? _surveillance.status() : { ready: false };
+    out.services.nse_surveillance = {
+      ok: st.ready,
+      counts: st.counts || {},
+      age_minutes: st.ageMs != null ? Math.round(st.ageMs / 60000) : null,
+    };
+  } catch (e) { out.services.nse_surveillance = { ok: false, error: e.message }; }
+
+  // 3. Kite public reachability (no auth — just a HEAD-ish on api.kite.trade root)
+  out.services.kite = await _checkUrl('https://api.kite.trade/', null, 5000);
+
+  // 4. NSE archive (the same URL surveillance uses)
+  out.services.nse_archive = await _checkUrl('https://archives.nseindia.com/content/equities/sec_list.csv', 'csv', 8000);
+
+  // 5. AI provider public status (just reachability of their docs/API roots)
+  const aiProbes = await Promise.all([
+    _checkUrl('https://status.anthropic.com/api/v2/status.json', 'json', 5000),
+    _checkUrl('https://status.openai.com/api/v2/status.json', 'json', 5000),
+    _checkUrl('https://status.cloud.google.com/incidents.json', 'json', 5000),
+  ]);
+  out.services.anthropic = aiProbes[0];
+  out.services.openai    = aiProbes[1];
+  out.services.gemini    = aiProbes[2];
+
+  // 6. Build summary
+  const hardOk = out.services.ats_app.ok;
+  const softWarn = Object.entries(out.services).filter(([k, v]) => k !== 'ats_app' && !v.ok).map(([k]) => k);
+  out.ok = hardOk;
+  out.degraded = softWarn.length > 0;
+  out.degraded_services = softWarn;
+  out.build_ms = Date.now() - t0;
+  return out;
+}
+
+app.get('/api/status', async (_req, res) => {
+  res.set('Cache-Control', 'public, max-age=30');
+  res.set('Access-Control-Allow-Origin', '*');
+  const now = Date.now();
+  if (_statusCache.payload && (now - _statusCache.ts) < STATUS_CACHE_MS) {
+    return res.json({ ..._statusCache.payload, cached: true, cache_age_sec: Math.round((now - _statusCache.ts) / 1000) });
+  }
+  try {
+    const payload = await _buildStatus();
+    _statusCache = { ts: now, payload };
+    res.json({ ...payload, cached: false });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // Tier 70: deeper health check (db, vault, broker resolver, market hours)
 app.get('/api/health-deep', async (_req, res) => {
   const checks = {};

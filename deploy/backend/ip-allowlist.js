@@ -20,7 +20,7 @@
 //                                week, check that your real IP isn't getting
 //                                false-positive flagged, then flip to enforce.
 //   API_IP_WHITELIST_BYPASS   -- comma-separated path prefixes always allowed.
-//                                Default: '/api/health,/api/brokers/zerodha/callback'
+//                                Default: '/api/health,/api/brokers/zerodha/callback,/api/status'
 //                                (health for uptime monitors, Kite OAuth callback
 //                                redirected from kite.zerodha.com).
 //
@@ -119,7 +119,7 @@ function clientIp(req) {
 function buildIpAllowlist(opts = {}) {
   const spec   = opts.whitelist != null ? opts.whitelist : (process.env.API_IP_WHITELIST || '');
   const mode   = opts.mode      != null ? opts.mode      : (process.env.API_IP_WHITELIST_MODE || 'enforce');
-  const bypass = opts.bypass    != null ? opts.bypass    : (process.env.API_IP_WHITELIST_BYPASS || '/api/health,/api/brokers/zerodha/callback');
+  const bypass = opts.bypass    != null ? opts.bypass    : (process.env.API_IP_WHITELIST_BYPASS || '/api/health,/api/brokers/zerodha/callback,/api/status');
   const audit  = typeof opts.audit === 'function' ? opts.audit : null;
 
   const matchers      = compileAllowlist(spec);
