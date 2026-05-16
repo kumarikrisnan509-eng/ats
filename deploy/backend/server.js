@@ -2373,6 +2373,59 @@ app.get('/api/me/pnl', withAuth((req, res) => {
   res.json({ ok:true, rows: db.pnl.recent(req.user.id, n) });
 }));
 
+// Tier 69b: per-user factor exposure (momentum / volatility / drawdown / concentration)
+// Uses real Kite historical candles for each holding. Sector mapping comes from the
+// instrument master (best-effort -- defaults to 'Unclassified').
+app.get('/api/me/factor-exposure', withAuth(async (req, res) => {
+  try {
+    // Resolve user's broker -> get holdings
+    const r = await _brokerResolver.resolveForRequest({ db, vault, globalBroker: null, fallbackToGlobal: false }, req);
+    if (!r.broker) return res.json({ ok: true, brokerConnected: false, enoughData: false, reason: 'broker_not_connected' });
+    const holdings = await r.broker.getHoldings();
+    if (!Array.isArray(holdings) || holdings.length === 0) {
+      return res.json({ ok: true, brokerConnected: true, enoughData: false, reason: 'no_holdings' });
+    }
+
+    // Pull 252 trading days of candles for each holding (parallel, capped concurrency)
+    const candlesBySymbol = {};
+    const sectorMap = {};
+    const today = new Date();
+    const fromDate = new Date(today.getTime() - 380 * 86400 * 1000);
+    const toStr = today.toISOString().slice(0, 10);
+    const fromStr = fromDate.toISOString().slice(0, 10);
+
+    for (const h of holdings) {
+      const sym = h.tradingsymbol || h.symbol;
+      if (!sym) continue;
+      try {
+        const candles = await r.broker.getHistorical({ symbol: sym, interval: 'day', from: fromStr, to: toStr });
+        candlesBySymbol[sym] = (candles || []).map(c => ({ date: c.date || c.timestamp, close: Number(c.close || 0) }));
+      } catch (e) {
+        candlesBySymbol[sym] = [];
+      }
+      // Sector lookup from instrument master if available
+      try {
+        if (broker && broker.instruments && typeof broker.instruments.lookup === 'function') {
+          const meta = broker.instruments.lookup(sym);
+          if (meta && meta.sector) sectorMap[sym] = meta.sector;
+        }
+      } catch (_) {}
+    }
+
+    const norm = holdings.map(h => ({
+      symbol: h.tradingsymbol || h.symbol,
+      qty: Number(h.quantity || h.qty || 0),
+      ltp: Number(h.ltp || h.last_price || 0),
+    }));
+
+    const { computeFactorExposure } = require('./factor-exposure');
+    const out = computeFactorExposure({ holdings: norm, candlesBySymbol, sectorMap });
+    res.json({ ok: true, brokerConnected: true, ...out });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: 'factor_exposure_failed', detail: e.message });
+  }
+}));
+
 // Tier 69a: per-user portfolio risk metrics derived from pnl_daily snapshots.
 // VaR (historical + parametric), max drawdown, Sharpe, Sortino, Calmar.
 app.get('/api/me/risk-metrics', withAuth((req, res) => {
