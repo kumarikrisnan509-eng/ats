@@ -2370,6 +2370,86 @@ app.get('/api/me/paper', withAuth((req, res) => {
   });
 }));
 
+// Tier 72: paper-trade order placement using live LTP from the global ticker.
+// Body: { symbol, side: 'BUY'|'SELL', qty, slippageBps?, strategy? }
+// The fill price = current WS LTP +/- slippage. Records to paper_orders + paper_positions.
+app.post('/api/me/paper/order', withAuth((req, res) => {
+  try {
+    const b = req.body || {};
+    const symbol = String(b.symbol || '').toUpperCase().trim();
+    const side = String(b.side || '').toUpperCase();
+    const qty = Math.floor(Number(b.qty || 0));
+    const slip = Number.isFinite(b.slippageBps) ? Number(b.slippageBps) : 5;
+    if (!symbol || !['BUY','SELL'].includes(side) || qty <= 0) {
+      return res.status(400).json({ ok:false, reason:'bad_input', detail:'symbol/side/qty required' });
+    }
+    // Get current LTP from the global ticker (market data, not user-specific).
+    let ltp = null;
+    try {
+      if (broker && broker.instruments && typeof broker.instruments.lastTickFor === 'function') {
+        const t = broker.instruments.lastTickFor(symbol);
+        if (t && t.ltp) ltp = Number(t.ltp);
+      }
+    } catch (_) {}
+    // Fallback: use most recent quote
+    if (ltp == null && broker && typeof broker.getQuote === 'function') {
+      // Note: this is sync-ish approximation; for true async we'd await. Skip on cold start.
+    }
+    if (ltp == null || !(ltp > 0)) {
+      return res.status(503).json({ ok:false, reason:'no_live_price', detail:'No live tick yet for this symbol. Try again shortly or pick a watchlist symbol.' });
+    }
+    const slippage = ltp * (slip / 10000);
+    const fillPrice = side === 'BUY' ? ltp + slippage : ltp - slippage;
+    const notional = fillPrice * qty;
+    const uid = req.user.id;
+    const state = db.paper.getState(uid);
+    if (side === 'BUY' && state.cash < notional) {
+      return res.status(400).json({ ok:false, reason:'insufficient_cash', cash: state.cash, needed: notional });
+    }
+    const orderId = 'PO-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
+    db.paper.placeOrder({
+      user_id: uid,
+      client_order_id: orderId,
+      strategy_tag: b.strategy || null,
+      symbol, side, qty,
+      order_type: 'MARKET', product: 'CNC',
+      req_price: ltp, fill_price: fillPrice, slippage,
+      status: 'filled', filled_at: new Date().toISOString(),
+    });
+    // Update position (FIFO weighted-avg). For BUY: increase qty + average price. For SELL: decrease.
+    const positions = db.paper.listPositions(uid) || [];
+    const existing = positions.find(p => p.symbol === symbol);
+    if (side === 'BUY') {
+      if (existing) {
+        const newQty = existing.qty + qty;
+        const newAvg = ((existing.qty * existing.avg_price) + (qty * fillPrice)) / newQty;
+        db._conn.prepare('UPDATE paper_positions SET qty = ?, avg_price = ? WHERE user_id = ? AND symbol = ?').run(newQty, newAvg, uid, symbol);
+      } else {
+        db._conn.prepare('INSERT INTO paper_positions (user_id, symbol, qty, avg_price) VALUES (?, ?, ?, ?)').run(uid, symbol, qty, fillPrice);
+      }
+      db.paper.setState({ ...state, cash: state.cash - notional, user_id: uid });
+    } else {
+      // SELL
+      if (!existing || existing.qty < qty) {
+        return res.status(400).json({ ok:false, reason:'insufficient_qty', have: existing ? existing.qty : 0, need: qty });
+      }
+      const realized = (fillPrice - existing.avg_price) * qty;
+      const remaining = existing.qty - qty;
+      if (remaining === 0) {
+        db._conn.prepare('DELETE FROM paper_positions WHERE user_id = ? AND symbol = ?').run(uid, symbol);
+      } else {
+        db._conn.prepare('UPDATE paper_positions SET qty = ? WHERE user_id = ? AND symbol = ?').run(remaining, uid, symbol);
+      }
+      // Record closed trade
+      db._conn.prepare('INSERT INTO paper_closed_trades (user_id, symbol, side, qty, entry_price, exit_price, pnl, strategy_tag, entered_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(uid, symbol, 'BUY', qty, existing.avg_price, fillPrice, realized, b.strategy || null, existing.opened_at || new Date().toISOString());
+      db.paper.setState({ ...state, cash: state.cash + notional, realized_pnl: (state.realized_pnl || 0) + realized, user_id: uid });
+    }
+    res.status(201).json({ ok:true, orderId, fillPrice, slippage, ltp, notional });
+  } catch (e) {
+    res.status(500).json({ ok:false, reason:'place_failed', detail: e.message });
+  }
+}));
+
 // Tier 66: user sets their own paper-trading initial capital. This wipes the
 // existing paper state for the user (orders/positions/closed-trades) so they
 // start fresh with the new capital.
