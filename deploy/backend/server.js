@@ -2310,6 +2310,37 @@ app.get('/api/me/paper', withAuth((req, res) => {
   });
 }));
 
+// Tier 66: user sets their own paper-trading initial capital. This wipes the
+// existing paper state for the user (orders/positions/closed-trades) so they
+// start fresh with the new capital.
+app.put('/api/me/paper/capital', withAuth((req, res) => {
+  try {
+    const cap = Number(req.body && req.body.initialCapital);
+    if (!Number.isFinite(cap) || cap < 1000 || cap > 10000000000) {
+      return res.status(400).json({ ok:false, reason:'initial_capital_out_of_range', detail:'Pick a value between INR 1,000 and INR 1,000 Cr.' });
+    }
+    const tier = (req.body && String(req.body.tier || '').slice(0,16)) || 'CUSTOM';
+    const reset = !!(req.body && req.body.reset);
+    const uid = req.user.id;
+    if (reset) {
+      // Wipe historical paper data so the new capital is a true starting point.
+      db._conn.prepare('DELETE FROM paper_orders WHERE user_id = ?').run(uid);
+      db._conn.prepare('DELETE FROM paper_positions WHERE user_id = ?').run(uid);
+      db._conn.prepare('DELETE FROM paper_closed_trades WHERE user_id = ?').run(uid);
+    }
+    db.paper.setState({
+      user_id: uid,
+      tier: tier,
+      cash: cap,
+      initial_capital: cap,
+      realized_pnl: reset ? 0 : Number(db.paper.getState(uid).realized_pnl || 0),
+    });
+    res.json({ ok:true, state: db.paper.getState(uid) });
+  } catch (e) {
+    res.status(500).json({ ok:false, reason:'capital_set_failed', detail: e.message });
+  }
+}));
+
 // Autorun config (per user)
 app.get('/api/me/autorun', withAuth((req, res) => {
   res.json({ ok:true,

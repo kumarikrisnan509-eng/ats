@@ -14,6 +14,9 @@ const OnboardingWizard = ({ onComplete }) => {
   const [err, setErr]     = React.useState(null);
   const [seedSymbols, setSeedSymbols] = React.useState(['NIFTY 50','RELIANCE','HDFCBANK','INFY','TCS']);
   const [customSym, setCustomSym] = React.useState('');
+  // Tier 66: paper-trading initial capital (the user picks this; was hardcoded INR 10L before)
+  const [paperCapital, setPaperCapital] = React.useState(1000000);
+  const [paperSaved, setPaperSaved] = React.useState(false);
 
   React.useEffect(() => {
     (async () => {
@@ -72,7 +75,8 @@ const OnboardingWizard = ({ onComplete }) => {
           {stepBadge(1, 'Welcome')}
           {stepBadge(2, 'Verify email')}
           {stepBadge(3, 'Connect broker')}
-          {stepBadge(4, 'Watchlist')}
+          {stepBadge(4, 'Paper capital')}
+          {stepBadge(5, 'Watchlist')}
         </div>
 
         {step === 1 && (
@@ -122,6 +126,55 @@ const OnboardingWizard = ({ onComplete }) => {
         )}
 
         {step === 4 && (
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Set your paper-trading capital</div>
+            <p style={{ color: 'var(--text-2)', fontSize: 13, lineHeight: 1.6, marginBottom: 14 }}>
+              Paper trading lets you practice with simulated fills against live prices. How much
+              virtual capital do you want to start with? You can change this anytime from the Paper
+              trading screen.
+            </p>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Initial capital (INR)</label>
+              <input
+                type="number" min={1000} max={10000000000} step={1000}
+                value={paperCapital}
+                onChange={ev => setPaperCapital(Math.max(1000, Number(ev.target.value) || 0))}
+                style={{ width: '100%', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--r-md)', fontFamily: 'var(--mono)', fontSize: 14 }}
+              />
+              <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-3)' }}>
+                Quick picks:
+                {[100000, 500000, 1000000, 2500000, 5000000].map(v => (
+                  <button key={v} onClick={() => setPaperCapital(v)} className="btn btn--sm" style={{ marginLeft: 6, padding: '2px 8px', fontSize: 11 }}>
+                    ₹{(v/100000).toFixed(v >= 100000 ? 0 : 1)}L
+                  </button>
+                ))}
+              </div>
+            </div>
+            {paperSaved && <div style={{ padding: 8, background: 'color-mix(in oklab, var(--up) 12%, transparent)', borderRadius: 'var(--r-md)', color: 'var(--up)', fontSize: 12, marginBottom: 10 }}>✓ Capital saved</div>}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={back} className="btn">Back</button>
+              <button
+                onClick={async () => {
+                  setBusy(true); setErr(null);
+                  try {
+                    const r = await window.fetchApi('/api/me/paper/capital', {
+                      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ initialCapital: paperCapital, tier: 'CUSTOM', reset: true }),
+                    });
+                    if (r && r.ok) { setPaperSaved(true); setStep(5); }
+                    else setErr(r && r.detail || r && r.reason || 'save failed');
+                  } catch (e) { setErr(String(e.message || e)); }
+                  finally { setBusy(false); }
+                }}
+                disabled={busy}
+                className="btn btn--accent"
+              >{busy ? 'Saving...' : 'Save and continue'}</button>
+            </div>
+            {err && <div style={{ padding: 8, background: 'color-mix(in oklab, var(--danger) 12%, transparent)', borderRadius: 'var(--r-md)', color: 'var(--danger)', fontSize: 12, marginTop: 10 }}>{err}</div>}
+          </div>
+        )}
+
+        {step === 5 && (
           <div>
             <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Pick your starter watchlist</div>
             <p style={{ color: 'var(--text-2)', fontSize: 13, marginBottom: 12 }}>
