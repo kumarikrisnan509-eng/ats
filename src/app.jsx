@@ -42,6 +42,7 @@ const TITLES = {
   money:      ["Wealth",       "Money (profits → long-term)"],
   lab:        ["Validate",     "Strategy Lab"],
   insights:   ["Wealth",       "AI insights"],
+  'ai-keys':  ["System",       "AI providers"],
 };
 
 // Pre-auth hash routes — bypass the whole shell
@@ -233,6 +234,7 @@ function App() {
     compare:    window.StrategyCompare ? <window.StrategyCompare/> : null,
     money:      window.MoneyScreen ? <window.MoneyScreen/> : null,
     lab:        window.StrategyLabScreen ? <window.StrategyLabScreen/> : null,
+    'ai-keys':  window.AiKeysScreen ? <window.AiKeysScreen/> : null,
   };
 
   const [crumb, title] = TITLES[route] || TITLES.dashboard;
