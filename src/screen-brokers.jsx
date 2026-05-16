@@ -72,8 +72,8 @@ const BrokerWizardModal = ({ open, mode, brokerName, existing, onClose, onSaved 
   const submit = async () => {
     setErr(''); setBusy(true); setProgress([{ step: 'save', status: 'pending', label: 'Save sealed credentials' }]);
     try {
-      const url = mode === 'edit' && existing ? `/api/me/broker/${existing.id}` : '/api/me/broker';
-      const method = mode === 'edit' ? 'PUT' : 'POST';
+      const url = mode === 'edit' && existing ? `/api/v1/me/brokers/${existing.id}` : '/api/v1/me/brokers';
+      const method = mode === 'edit' ? 'PATCH' : 'POST';
       const body = { broker: brokerName.toLowerCase(), broker_user_id: brokerUserId };
       if (apiKey)       body.api_key    = apiKey;
       if (apiSecret)    body.api_secret = apiSecret;
@@ -282,7 +282,7 @@ const BrokersScreen = () => {
 
   const refreshMyBrokers = React.useCallback(async () => {
     try {
-      const res = await fetch('/api/me/broker', { credentials: 'include' });
+      const res = await fetch('/api/v1/me/brokers', { credentials: 'include' });
       if (!res.ok) return;
       const j = await res.json();
       if (j.ok) setMyBrokers(j.brokers || []);
@@ -295,7 +295,7 @@ const BrokersScreen = () => {
   const testConnection = async () => {
     setBusy('test'); setTestResult(null);
     try {
-      const res = await fetch('/api/me/broker/test', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ broker: 'zerodha' }) });
+      const res = await fetch(`/api/v1/me/brokers/${myRow.id}/actions/test`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' } });
       const j = await res.json().catch(() => ({}));
       if (res.ok && j.ok) setTestResult({ ok: true, msg: `Connected as ${j.profile.user_id}${j.profile.email ? ' (' + j.profile.email + ')' : ''}.` });
       else setTestResult({ ok: false, msg: j.detail || j.reason || `HTTP ${res.status}`, reason: j.reason });
@@ -306,7 +306,7 @@ const BrokersScreen = () => {
   const autoReauth = async () => {
     setBusy('auto'); setTestResult({ ok: null, msg: 'Running headless Kite login (~10s)...' });
     try {
-      const res = await fetch('/api/me/broker/auto-reauth', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ broker: 'zerodha' }) });
+      const res = await fetch(`/api/v1/me/brokers/${myRow.id}/actions/reauth`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' } });
       const j = await res.json().catch(() => ({}));
       if (res.ok && j.ok) setTestResult({ ok: true, msg: `Token refreshed. Valid until ${new Date(j.expiresAt).toLocaleString()}.` });
       else {
@@ -323,7 +323,7 @@ const BrokersScreen = () => {
   const manualReauth = async () => {
     setBusy('manual'); setTestResult({ ok: null, msg: 'Opening Kite login window...' });
     try {
-      const r = await fetch('/api/me/broker-oauth-url', { credentials: 'include' });
+      const r = await fetch(`/api/v1/me/brokers/${myZerodha?.id || ''}/actions/reauth-url`, { credentials: 'include' });
       const j = await r.json();
       if (!r.ok || !j.ok) { setTestResult({ ok: false, msg: j.detail || j.reason || `HTTP ${r.status}` }); setBusy(null); return; }
       const popup = window.open(j.url, `kite-reauth-${Date.now()}`, 'width=520,height=720,popup=1,noopener=no');
@@ -349,7 +349,7 @@ const BrokersScreen = () => {
   const disconnect = async (id) => {
     const typed = prompt('Type DISCONNECT to permanently remove these credentials:');
     if (typed !== 'DISCONNECT') return;
-    const res = await fetch(`/api/me/broker/${id}`, { method: 'DELETE', credentials: 'include' });
+    const res = await fetch(`/api/v1/me/brokers/${id}`, { method: 'DELETE', credentials: 'include' });
     if (res.ok) { refreshMyBrokers(); setTestResult(null); }
   };
 
@@ -548,8 +548,8 @@ const BrokersScreen = () => {
                       onChange={async (e) => {
                         const enabled = e.target.checked;
                         try {
-                          const res = await fetch(`/api/me/broker/${myRow.id}/auto-reauth-toggle`, {
-                            method: 'PUT', credentials: 'include',
+                          const res = await fetch(`/api/v1/me/brokers/${myRow.id}/auto-reauth`, {
+                            method: 'PATCH', credentials: 'include',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ enabled })
                           });
