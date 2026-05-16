@@ -59,73 +59,9 @@ const formatNumber = (value, opts = {}) => {
 //                                                              (BrokerNotConnectedBanner handles that case from Tier 58)
 //   - Unauthenticated browser                               -> shown (blue, "Sign in")
 //   - Authenticated + explicit demo toggle ON               -> shown (amber, "Exit demo")
-const DemoBanner = () => {
-  const [, setTick] = React.useState(0);
-  React.useEffect(() => {
-    const h = () => setTick(t => t + 1);
-    window.addEventListener('ats-auth-changed', h);
-    window.addEventListener('demo-mode-changed', h);
-    return () => {
-      window.removeEventListener('ats-auth-changed', h);
-      window.removeEventListener('demo-mode-changed', h);
-    };
-  }, []);
-
-  const user = window.atsCurrentUser;
-  const explicitDemo = window.useDemoMode ? window.useDemoMode()[0] : false;
-  const brokerStatus = window.atsBrokerStatus || { connected: false };
-
-  if (user && brokerStatus.connected && brokerStatus.hasAccessToken && !explicitDemo) return null;
-  if (user && !explicitDemo) return null;
-
-  const isAnonymous = !user;
-  return (
-    <div role="status" style={{
-      position: "sticky", top: 0, zIndex: 90,
-      background: isAnonymous
-        ? "linear-gradient(90deg, oklch(94% 0.06 230), oklch(96% 0.04 230))"
-        : "linear-gradient(90deg, oklch(94% 0.07 80), oklch(96% 0.05 80))",
-      borderBottom: isAnonymous
-        ? "1px solid oklch(78% 0.10 230)"
-        : "1px solid oklch(78% 0.12 80)",
-      color: isAnonymous ? "oklch(35% 0.13 230)" : "oklch(35% 0.13 80)",
-      padding: "8px 24px",
-      fontSize: 12, fontWeight: 600, letterSpacing: "0.02em",
-      display: "flex", alignItems: "center", justifyContent: "center", gap: 12,
-    }}>
-      <span style={{ fontSize: 14 }}>{isAnonymous ? '\u{1F44B}' : '\u{1F9EA}'}</span>
-      {isAnonymous ? (
-        <>
-          <span>Welcome to ATS &mdash; you're browsing in demo mode.</span>
-          <span style={{ fontWeight: 400, opacity: 0.85 }}>Sign in to use live data and place real orders.</span>
-          <button
-            onClick={() => { location.hash = 'login'; }}
-            style={{
-              marginLeft: 12,
-              padding: "4px 14px", borderRadius: 999,
-              background: "oklch(35% 0.13 230)", color: "white",
-              fontSize: 11, fontWeight: 600, cursor: "pointer", border: "none",
-            }}
-          >Sign in</button>
-        </>
-      ) : (
-        <>
-          <span>DEMO MODE</span>
-          <span style={{ fontWeight: 400, opacity: 0.85 }}>No real orders &middot; all P&L is simulated</span>
-          <button
-            onClick={() => window.useDemoMode && window.useDemoMode()[1](false)}
-            style={{
-              marginLeft: 12,
-              padding: "3px 12px", borderRadius: 999,
-              background: "oklch(35% 0.13 80)", color: "white",
-              fontSize: 11, fontWeight: 600, cursor: "pointer", border: "none",
-            }}
-          >Exit demo</button>
-        </>
-      )}
-    </div>
-  );
-};
+// T83: DemoBanner removed -- demo mode killed entirely. Component returns null to
+// remain backward-compatible with any callers still rendering it.
+const DemoBanner = () => null;
 
 // ============ #16 PaperChrome ============
 // Visual isolation for paper-trading screens — yellow accent strip + watermark.
