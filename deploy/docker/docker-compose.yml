@@ -23,9 +23,8 @@ services:
       AUDIT_LOG: /var/log/ats/audit.log
       MASTER_KEY_PATH: /run/secrets/master.key
       TOKENS_DIR: /var/lib/ats/tokens
-      # Tier 79: socket path and shared bearer to talk to host auto-login daemon.
+      # Tier 79: socket path for the host auto-login daemon (token comes from env_file)
       AUTO_LOGIN_SOCKET: /var/run/ats/auto-login.sock
-      AUTO_LOGIN_TOKEN: ${AUTO_LOGIN_TOKEN:-}
     volumes:
       # Append-only audit log — host owns the directory; container appends.
       - type: bind
