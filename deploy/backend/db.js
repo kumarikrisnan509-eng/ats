@@ -96,6 +96,29 @@ function open(opts = {}) {
     );
   `);
 
+  // T99-A3: AI call audit log -- one row per LLM invocation. Drives /usage + cap.
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS ai_calls (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      ts                TEXT NOT NULL DEFAULT (datetime('now')),
+      workflow          TEXT,
+      provider          TEXT NOT NULL,
+      model             TEXT,
+      prompt_tokens     INTEGER DEFAULT 0,
+      completion_tokens INTEGER DEFAULT 0,
+      cost_inr          REAL NOT NULL DEFAULT 0,
+      status            TEXT NOT NULL DEFAULT 'ok',
+      error             TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_aicalls_user_ts ON ai_calls(user_id, ts DESC);
+  `);
+  conn.exec(`CREATE TRIGGER IF NOT EXISTS trim_ai_calls AFTER INSERT ON ai_calls BEGIN DELETE FROM ai_calls WHERE id IN (SELECT id FROM ai_calls WHERE user_id = NEW.user_id ORDER BY id DESC LIMIT -1 OFFSET 5000); END;`);
+
+  // T99-C1: daily AI spend cap (INR/day). Default 50; clamped 0-5000 in prefs.upsert.
+  try { conn.exec("ALTER TABLE user_preferences ADD COLUMN daily_ai_cap_inr REAL DEFAULT 50"); }
+  catch (e) { /* already migrated */ }
+
   // Record schema version 1 if not already
   const v = conn.prepare('SELECT COUNT(*) AS n FROM _schema_version').get().n;
   if (v === 0) conn.prepare('INSERT INTO _schema_version (version) VALUES (1)').run();

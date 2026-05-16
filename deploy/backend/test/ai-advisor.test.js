@@ -88,7 +88,8 @@ test('callLLM(anthropic) builds the right request and parses content', async () 
   const body = JSON.parse(captured.opts.body);
   assert.equal(body.model, 'claude-sonnet-4-6');
   assert.equal(body.system, 'sys');
-  assert.equal(out.summary, 'hello');
+  assert.equal(out.advice.summary, 'hello');
+  assert.equal(typeof out.usage.prompt_tokens, 'number');
 });
 
 test('callLLM(openai) sends Authorization header and parses choices[0]', async () => {
@@ -104,7 +105,8 @@ test('callLLM(openai) sends Authorization header and parses choices[0]', async (
   const out = await callLLM({ provider: 'openai', apiKey: 'sk-x', model: 'gpt-5.5', prompt: { system: 's', user: 'u' }, fetchImpl: fakeFetch });
   assert.equal(captured.url, 'https://api.openai.com/v1/chat/completions');
   assert.equal(captured.opts.headers.Authorization, 'Bearer sk-x');
-  assert.equal(out.summary, 'ok');
+  assert.equal(out.advice.summary, 'ok');
+  assert.equal(typeof out.usage.prompt_tokens, 'number');
 });
 
 test('callLLM(gemini) embeds api key in querystring and parses candidates', async () => {
@@ -120,7 +122,8 @@ test('callLLM(gemini) embeds api key in querystring and parses candidates', asyn
   const out = await callLLM({ provider: 'gemini', apiKey: 'gKey', model: 'gemini-3.1-flash-lite', prompt: { system: 's', user: 'u' }, fetchImpl: fakeFetch });
   assert.ok(captured.url.includes('gemini-3.1-flash-lite'));
   assert.ok(captured.url.includes('key=gKey'));
-  assert.equal(out.summary, 'g');
+  assert.equal(out.advice.summary, 'g');
+  assert.equal(typeof out.usage.prompt_tokens, 'number');
 });
 
 
