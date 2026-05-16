@@ -570,22 +570,22 @@ const BrokersScreen = () => {
               )}
 
               {/* Buttons — Auto button only when capable; Manual always; Test/Edit/Disconnect always */}
-              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+              <div className="row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'stretch' }}>
                 {myRow.auto_login_capable && (
-                  <button className="btn btn--sm btn--primary" disabled={busy !== null} onClick={autoReauth} style={{ flex: 1, minWidth: 110, justifyContent: 'center' }}>
+                  <button className="btn btn--sm btn--primary" disabled={busy !== null} onClick={autoReauth} style={{ flex: 1, minWidth: 110, justifyContent: 'center', whiteSpace: 'nowrap' }}>
                     {busy === 'auto' ? '⋯ logging in' : '⚡ Auto reauth'}
                   </button>
                 )}
-                <button className="btn btn--sm" disabled={busy !== null} onClick={manualReauth} style={{ flex: 1, minWidth: 90, justifyContent: 'center' }}>
+                <button className="btn btn--sm" disabled={busy !== null} onClick={manualReauth} style={{ flex: 1, minWidth: 100, justifyContent: 'center', whiteSpace: 'nowrap' }}>
                   {busy === 'manual' ? '⋯ popup' : 'Manual reauth'}
                 </button>
-                <button className="btn btn--sm" disabled={busy !== null} onClick={testConnection} style={{ flex: 1, minWidth: 70, justifyContent: 'center' }}>
+                <button className="btn btn--sm" disabled={busy !== null} onClick={testConnection} style={{ flex: 1, minWidth: 70, justifyContent: 'center', whiteSpace: 'nowrap' }}>
                   {busy === 'test' ? '⋯ testing' : 'Test'}
                 </button>
-                <button className="btn btn--sm" disabled={busy !== null} onClick={() => setModalState({ open: true, mode: 'edit', brokerName: 'Zerodha', existing: myRow })} style={{ flex: 1, minWidth: 70, justifyContent: 'center' }}>
+                <button className="btn btn--sm" disabled={busy !== null} onClick={() => setModalState({ open: true, mode: 'edit', brokerName: 'Zerodha', existing: myRow })} style={{ flex: 1, minWidth: 70, justifyContent: 'center', whiteSpace: 'nowrap' }}>
                   Edit
                 </button>
-                <button className="btn btn--sm" disabled={busy !== null} onClick={() => disconnect(myRow.id)} style={{ flex: 1, minWidth: 90, justifyContent: 'center', color: 'var(--danger)' }}>
+                <button className="btn btn--sm" disabled={busy !== null} onClick={() => disconnect(myRow.id)} style={{ flex: 1, minWidth: 100, justifyContent: 'center', color: 'var(--danger)', whiteSpace: 'nowrap' }}>
                   Disconnect
                 </button>
               </div>
