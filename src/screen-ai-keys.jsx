@@ -10,8 +10,8 @@ const _PROVIDER_META = {
     keyPrefix: 'sk-ant-',
     consoleUrl: 'https://console.anthropic.com/settings/keys',
     consoleLabel: 'console.anthropic.com',
-    defaultModel: 'claude-sonnet-4-5',
-    modelOptions: ['claude-sonnet-4-5', 'claude-opus-4-1', 'claude-haiku-4-5'],
+    defaultModel: 'claude-sonnet-4-6',
+    modelOptions: ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5'],
     desc: 'Best for complex reasoning + intraday critic + strategy explain.',
   },
   openai: {
@@ -20,8 +20,8 @@ const _PROVIDER_META = {
     keyPrefix: 'sk-',
     consoleUrl: 'https://platform.openai.com/api-keys',
     consoleLabel: 'platform.openai.com',
-    defaultModel: 'gpt-4o-mini',
-    modelOptions: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1', 'gpt-5'],
+    defaultModel: 'gpt-5.5',
+    modelOptions: ['gpt-5.5', 'gpt-5.4', 'o4-mini', 'o3-mini'],
     desc: 'Good for macro/news scan + general analysis.',
   },
   gemini: {
@@ -30,8 +30,8 @@ const _PROVIDER_META = {
     keyPrefix: 'AIza',
     consoleUrl: 'https://aistudio.google.com/apikey',
     consoleLabel: 'aistudio.google.com',
-    defaultModel: 'gemini-2.0-flash',
-    modelOptions: ['gemini-2.0-flash', 'gemini-2.5-pro', 'gemini-2.5-flash'],
+    defaultModel: 'gemini-3.1-pro',
+    modelOptions: ['gemini-3.1-pro', 'gemini-3-pro', 'gemini-3.1-flash-lite'],
     desc: 'Fast + cheap for consensus checks + vision (chart screenshots).',
   },
 };
