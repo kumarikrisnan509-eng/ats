@@ -2742,6 +2742,24 @@ app.use('/api/me/broker', (req, res, next) => {
   }
 });
 
+// ---------- Tier 81: v1 API surface ----------
+// RESTful, versioned, plural nouns. Mounted alongside legacy /api/me/broker for
+// 30-day backward-compat window. Frontend should call /api/v1/me/brokers/*.
+let _v1BrokersRouter = null;
+app.use('/api/v1/me/brokers', (req, res, next) => {
+  try {
+    if (_v1BrokersRouter) return _v1BrokersRouter(req, res, next);
+    if (db && auth && vault) {
+      const { createV1BrokersRouter } = require('./me-broker');
+      _v1BrokersRouter = createV1BrokersRouter({ db, vault, requireAuth: auth.requireAuth });
+      return _v1BrokersRouter(req, res, next);
+    }
+    return res.status(503).json({ ok: false, reason: 'broker_storage_not_initialized' });
+  } catch (e) {
+    return res.status(500).json({ ok: false, reason: 'v1_mount_failed', detail: e.message });
+  }
+});
+
 // ---------- Tier 64: Test Connection endpoint ----------
 // POST /api/me/broker-test
 // Uses the requesting user's per-user broker to call Kite /profile.
@@ -2840,7 +2858,8 @@ app.get('/api/me/broker-oauth-url', withAuth(async (req, res) => {
 
 // Per-user callback. If state is present, prefer per-user flow over legacy global.
 // Kite redirects with ?request_token=...&action=login&status=success&state=...
-app.get('/api/me/broker-callback', async (req, res) => {
+// Tier 81: callback handler now lives at both legacy and v1 paths
+const _zerodhaCallback = async (req, res) => {
   const rt = req.query.request_token;
   const state = req.query.state;
   if (!rt) return res.status(400).send('Missing request_token.');
@@ -2886,7 +2905,9 @@ app.get('/api/me/broker-callback', async (req, res) => {
     audit('zerodha.callback.per-user.error', { userId, msg: e.message });
     res.status(500).set('Content-Type', 'text/html').send(`<!DOCTYPE html><html><body style="font-family:sans-serif;padding:24px"><h2>Connection failed</h2><p>${(e.message || 'unknown').replace(/[<>&]/g, '')}</p><p><a href="/#brokers">Back to Brokers</a></p></body></html>`);
   }
-});
+};
+app.get('/api/me/broker-callback', _zerodhaCallback);          // legacy alias (Tier 62)
+app.get('/api/v1/oauth/zerodha/callback', _zerodhaCallback);   // v1 path (Tier 81)
 
 // ---------- Tier 50/51: auth endpoints (signup, login, logout, verify, reset) ----------
 app.post('/api/auth/signup', async (req, res) => {
