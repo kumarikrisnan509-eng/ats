@@ -7,7 +7,7 @@
 
 'use strict';
 
-const { SUPPORTED_PROVIDERS, DEFAULT_MODEL_BY_PROVIDER, buildPrompt, callLLM, normalizeAdvice } = require('./ai-advisor');
+const { SUPPORTED_PROVIDERS, DEFAULT_MODEL_BY_PROVIDER, DEPRECATED_MODEL_ALIASES, resolveModel, buildPrompt, callLLM, normalizeAdvice } = require('./ai-advisor');
 
 function createAiKeysRouter({ db, vault, requireAuth, brokerResolver }) {
   const express = require('express');
@@ -32,6 +32,22 @@ function createAiKeysRouter({ db, vault, requireAuth, brokerResolver }) {
   const listStmt   = db._conn.prepare("SELECT id, provider, model_pref, created_at FROM ai_keys WHERE user_id = ? ORDER BY created_at DESC");
   const getStmt    = db._conn.prepare("SELECT * FROM ai_keys WHERE user_id = ? AND provider = ?");
   const upsertStmt = db._conn.prepare("INSERT INTO ai_keys (user_id, provider, sealed_key, model_pref) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, provider) DO UPDATE SET sealed_key = excluded.sealed_key, model_pref = excluded.model_pref");
+
+  // T92: One-time migration -- rewrite any DB rows with a deprecated model_pref to the current default
+  try {
+    const allRows = db._conn.prepare("SELECT id, provider, model_pref FROM ai_keys").all();
+    const updateModel = db._conn.prepare("UPDATE ai_keys SET model_pref = ? WHERE id = ?");
+    let migrated = 0;
+    for (const r of allRows) {
+      if (r.model_pref && DEPRECATED_MODEL_ALIASES[r.model_pref]) {
+        updateModel.run(DEPRECATED_MODEL_ALIASES[r.model_pref], r.id);
+        migrated++;
+      }
+    }
+    if (migrated > 0) console.log(`[ai-keys] T92 model migration: rewrote ${migrated} stale model_pref values`);
+  } catch (e) {
+    console.warn('[ai-keys] T92 migration skipped:', e.message);
+  }
   const deleteStmt = db._conn.prepare("DELETE FROM ai_keys WHERE user_id = ? AND provider = ?");
 
   // GET /api/me/ai-keys -- list connected providers (no key material)
@@ -101,12 +117,20 @@ function createAdvisorAnalyzeRouter({ db, vault, requireAuth, brokerResolver }) 
         if (!row) return res.status(404).json({ ok: false, reason: 'no_key_saved' });
         apiKey = await vault.open(row.sealed_key);
       }
+      // T92: prefer request body model > DB saved model_pref > backend default
+      // resolveModel auto-upgrades deprecated aliases (e.g. claude-sonnet-4-5 -> 4-6)
+      let modelForTest = (req.body && req.body.model);
+      if (!modelForTest) {
+        const row = getStmt.get(req.user.id, provider);
+        if (row && row.model_pref) modelForTest = row.model_pref;
+      }
+      const resolvedModel = resolveModel(provider, modelForTest);
       const t0 = Date.now();
       // Minimal validation call per provider (cheap "hi" prompt, JSON mode where supported)
       const result = await callLLM({
         provider,
         apiKey,
-        model: (req.body && req.body.model) || DEFAULT_MODEL_BY_PROVIDER[provider],
+        model: resolvedModel,
         prompt: 'Respond with JSON {"ok":true} only. This is a connectivity test.',
         fetchImpl: globalThis.fetch,
       });
@@ -114,9 +138,13 @@ function createAdvisorAnalyzeRouter({ db, vault, requireAuth, brokerResolver }) 
       res.json({ ok: true, provider, elapsed_ms, sample: typeof result === 'string' ? result.slice(0, 80) : null });
     } catch (e) {
       const msg = e && e.message ? e.message : 'test_failed';
-      const reason = /401|unauthor|invalid/i.test(msg) ? 'invalid_api_key'
+      // T92: explicit 404 / not_found mapping so users see a clean error
+      const reason = /401|unauthor|invalid_api_key/i.test(msg) ? 'invalid_api_key'
                   : /429|rate/i.test(msg) ? 'rate_limited'
-                  : /timeout/i.test(msg) ? 'timeout' : 'send_failed';
+                  : /timeout/i.test(msg) ? 'timeout'
+                  : /404|not_found/i.test(msg) ? 'model_not_available'
+                  : /403|permission|forbidden/i.test(msg) ? 'no_access_to_model'
+                  : 'send_failed';
       res.status(400).json({ ok: false, provider: req.body && req.body.provider, reason, detail: msg });
     }
   });
