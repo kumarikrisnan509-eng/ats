@@ -22,7 +22,7 @@ const TimePicker = ({ value, onChange, disabled }) => {
 };
 
 // ============ skeleton placeholder ============
-const Skeleton = ({ h = 16, w = '100%', mb = 8, r = 4 }) => (
+const SettingsSkeleton = ({ h = 16, w = '100%', mb = 8, r = 4 }) => (
   <div style={{ height: h, width: w, marginBottom: mb, borderRadius: r,
     background: 'linear-gradient(90deg, var(--bg-soft) 0%, color-mix(in oklab, var(--bg-soft) 60%, var(--border)) 50%, var(--bg-soft) 100%)',
     backgroundSize: '200% 100%', animation: 'ats-shimmer 1.4s ease-in-out infinite',
@@ -304,7 +304,7 @@ const SettingsScreen = () => {
             sub="Your identity. Email change requires re-verification."
             savedAt={savedAt.account}>
             {!account ? (
-              <><Skeleton w="40%" h={14} /><Skeleton w="100%" h={36} /><Skeleton w="100%" h={36} /></>
+              <><SettingsSkeleton w="40%" h={14} /><SettingsSkeleton w="100%" h={36} /><SettingsSkeleton w="100%" h={36} /></>
             ) : (
               <>
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 16 }}>
@@ -330,7 +330,7 @@ const SettingsScreen = () => {
           <Section ref={refs.display} id="display" icon="🎨" title="Display"
             sub="Theme, density, currency format." savedAt={savedAt.display}>
             {!prefsForm ? (
-              <><Skeleton w="100%" h={40} /><Skeleton w="100%" h={40} /><Skeleton w="100%" h={40} /></>
+              <><SettingsSkeleton w="100%" h={40} /><SettingsSkeleton w="100%" h={40} /><SettingsSkeleton w="100%" h={40} /></>
             ) : (
               <>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
@@ -374,7 +374,7 @@ const SettingsScreen = () => {
           <Section ref={refs.notifications} id="notifications" icon="🔔" title="Notifications"
             sub="Where critical alerts land. Tokens are libsodium-sealed; never echoed back."
             savedAt={savedAt.notifications}>
-            {!notif ? <><Skeleton h={80} /><Skeleton h={80} /><Skeleton h={80} /></> : (
+            {!notif ? <><SettingsSkeleton h={80} /><SettingsSkeleton h={80} /><SettingsSkeleton h={80} /></> : (
               <div style={{ display: 'grid', gap: 14 }}>
                 {/* Email */}
                 <div style={{ padding: 14, border: '1px solid var(--border)', borderRadius: 6, background: notifForm.email_enabled ? 'transparent' : 'color-mix(in oklab, var(--bg-soft) 50%, transparent)' }}>
@@ -571,4 +571,4 @@ _settingsCSS.textContent = `
 `;
 if (!document.getElementById('ats-settings-css')) { _settingsCSS.id = 'ats-settings-css'; document.head.appendChild(_settingsCSS); }
 
-Object.assign(window, { SettingsScreen, DeleteAccountModal, TimePicker, Skeleton });
+Object.assign(window, { SettingsScreen, DeleteAccountModal, TimePicker});
