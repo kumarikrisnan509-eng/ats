@@ -168,6 +168,60 @@ function createAiKeysRouter({ db, vault, requireAuth, brokerResolver }) {
     }
   });
 
+
+  // T97: GET /api/me/ai-keys/models/:provider -- query provider's actual list-models API
+  // Returns the real list of models accessible with the user's saved key, filtered to chat-capable.
+  // Falls back gracefully if the user has no key or the provider's list endpoint fails.
+  router.get('/models/:provider', async (req, res) => {
+    try {
+      const provider = req.params.provider;
+      if (!SUPPORTED_PROVIDERS.includes(provider)) {
+        return res.status(400).json({ ok: false, reason: 'unsupported_provider' });
+      }
+      const row = getStmt.get(req.user.id, provider);
+      if (!row) return res.status(404).json({ ok: false, reason: 'no_key_saved' });
+      const apiKey = await vault.open(row.sealed_key);
+      const fetchFn = globalThis.fetch;
+
+      let models = [];
+      if (provider === 'anthropic') {
+        const r = await fetchFn('https://api.anthropic.com/v1/models?limit=100', {
+          headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        });
+        if (!r.ok) throw new Error(`anthropic ${r.status}: ${(await r.text()).slice(0,150)}`);
+        const j = await r.json();
+        // Newest first; Anthropic returns created_at; filter to chat-capable Claude models
+        models = (j.data || []).filter(m => /^claude-/.test(m.id))
+          .sort((a,b) => (b.created_at || '').localeCompare(a.created_at || ''))
+          .map(m => ({ id: m.id, display_name: m.display_name || m.id, created: m.created_at || null }));
+      } else if (provider === 'openai') {
+        const r = await fetchFn('https://api.openai.com/v1/models', {
+          headers: { 'Authorization': `Bearer ${apiKey}` },
+        });
+        if (!r.ok) throw new Error(`openai ${r.status}: ${(await r.text()).slice(0,150)}`);
+        const j = await r.json();
+        // Filter to chat-capable: gpt-* and o-family; exclude embedding/audio/image/moderation/tts/realtime
+        const exclude = /(embedding|tts|whisper|audio|moderation|davinci|babbage|ada|curie|search|edit|transcribe|realtime|image)/i;
+        models = (j.data || []).filter(m => /^(gpt-|o[0-9])/i.test(m.id) && !exclude.test(m.id))
+          .sort((a,b) => (b.created || 0) - (a.created || 0))
+          .map(m => ({ id: m.id, display_name: m.id, created: m.created || null }));
+      } else if (provider === 'gemini') {
+        const r = await fetchFn(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}&pageSize=100`);
+        if (!r.ok) throw new Error(`gemini ${r.status}: ${(await r.text()).slice(0,150)}`);
+        const j = await r.json();
+        // Only keep models that support generateContent; strip the 'models/' prefix
+        models = (j.models || [])
+          .filter(m => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
+          .filter(m => /^models\/gemini-/.test(m.name))
+          .map(m => ({ id: m.name.replace(/^models\//, ''), display_name: m.displayName || m.name, created: null }))
+          .sort((a,b) => b.id.localeCompare(a.id));
+      }
+      res.json({ ok: true, provider, count: models.length, models });
+    } catch (e) {
+      res.status(502).json({ ok: false, reason: 'list_models_failed', detail: (e && e.message) ? e.message.slice(0, 200) : 'unknown' });
+    }
+  });
+
   return router;
 }
 
