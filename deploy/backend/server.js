@@ -2742,6 +2742,40 @@ app.use('/api/me/broker', (req, res, next) => {
   }
 });
 
+// ---------- Tier 82: GET /api/v1/me/orders/by-mode -- per-user counts grouped by product/mode ----------
+app.get('/api/v1/me/orders/by-mode', withAuth(async (req, res) => {
+  try {
+    const buckets = { intraday: 0, swing: 0, options: 0, futures: 0 };
+    // Paper-trading orders count for this user (synchronous, fast)
+    let paperOrders = [];
+    try { paperOrders = (db && db.paper) ? db.paper.listOrders(req.user.id) : []; } catch (_) {}
+    // Live-broker orders if reachable
+    let liveOrders = [];
+    try {
+      const { getBrokerForUser } = require('./broker-resolver');
+      const ub = await getBrokerForUser({ db, vault }, req.user.id);
+      if (ub && ub.kc && typeof ub.kc.getOrders === 'function') {
+        liveOrders = await ub.kc.getOrders().catch(() => []);
+      }
+    } catch (_) {}
+    const all = [...paperOrders, ...liveOrders];
+    for (const o of all) {
+      const prod = String(o.product || o.product_type || '').toUpperCase();
+      const sym  = String(o.symbol || o.tradingsymbol || '').toUpperCase();
+      const isOpt = /CE$|PE$/.test(sym) || /OPT/.test(sym);
+      const isFut = /FUT/.test(sym);
+      if (prod === 'MIS') buckets.intraday++;
+      else if (prod === 'CNC') buckets.swing++;
+      else if (prod === 'NRML' && isOpt) buckets.options++;
+      else if (prod === 'NRML' && isFut) buckets.futures++;
+      else if (prod === 'NRML') buckets.options++; // default NRML -> options
+    }
+    res.json({ ok: true, total: all.length, byMode: buckets, source: liveOrders.length ? 'live+paper' : (paperOrders.length ? 'paper' : 'empty') });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: 'orders_by_mode_failed', detail: e.message });
+  }
+}));
+
 // ---------- Tier 81: v1 API surface ----------
 // RESTful, versioned, plural nouns. Mounted alongside legacy /api/me/broker for
 // 30-day backward-compat window. Frontend should call /api/v1/me/brokers/*.
