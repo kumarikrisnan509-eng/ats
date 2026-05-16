@@ -23,10 +23,14 @@ const _fmtRelativeFuture = (iso) => {
   const t = new Date(iso); if (Number.isNaN(t.getTime())) return '—';
   const dt = (t.getTime() - Date.now()) / 1000;
   if (dt <= 0) return 'expired';
-  if (dt < 60)    return `${Math.round(dt)}s left`;
-  if (dt < 3600)  return `${Math.round(dt/60)}m left`;
-  if (dt < 86400) return `${Math.round(dt/3600)}h ${Math.round((dt%3600)/60)}m left`;
-  return `${Math.round(dt/86400)}d left`;
+  if (dt < 60)    return `${Math.round(dt)}s`;
+  if (dt < 3600)  return `${Math.round(dt/60)}m`;
+  if (dt < 86400) {
+    const h = Math.floor(dt/3600);
+    const m = Math.round((dt%3600)/60);
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  }
+  return `${Math.round(dt/86400)}d`;
 };
 const _isBase32 = (s) => /^[A-Z2-7]{16,}={0,7}$/i.test((s||'').replace(/\s/g, ''));
 
@@ -479,15 +483,19 @@ const BrokersScreen = () => {
           const pill = statusPill(myRow);
           return (
             <Card key={i} style={{ border: "1px solid color-mix(in oklab, var(--accent) 30%, var(--border))" }}>
-              <div className="between" style={{ marginBottom: 12 }}>
-                <div className="row">
-                  <div style={{ width: 40, height: 40, borderRadius: 10, background: b.logoColor, color: "white", display: "grid", placeItems: "center", fontWeight: 700 }}>{b.logoLetter}</div>
-                  <div>
-                    <div style={{ fontSize: 15, fontWeight: 600 }}>{b.n}</div>
-                    <div className="muted" style={{ fontSize: 11, fontFamily: "var(--mono)" }}>{b.api} · {myRow.broker_user_id} {myRow.is_default && '· default'}</div>
+              <div className="between" style={{ marginBottom: 12, alignItems: 'flex-start', gap: 10 }}>
+                <div className="row" style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: b.logoColor, color: "white", display: "grid", placeItems: "center", fontWeight: 700, flexShrink: 0 }}>{b.logoLetter}</div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 15, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.n}</div>
+                    <div className="muted" style={{ fontSize: 11, fontFamily: "var(--mono)", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.api} · {myRow.broker_user_id} {myRow.is_default && '· default'}</div>
                   </div>
                 </div>
-                {pill && <Pill kind={pill.kind} dot={pill.dot}>{pill.text}</Pill>}
+                {pill && (
+                  <div style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
+                    <Pill kind={pill.kind} dot={pill.dot}>{pill.text}</Pill>
+                  </div>
+                )}
               </div>
 
               <div className="chip-row" style={{ marginBottom: 12 }}>
