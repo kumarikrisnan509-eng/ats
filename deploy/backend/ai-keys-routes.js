@@ -92,17 +92,7 @@ function createAiKeysRouter({ db, vault, requireAuth, brokerResolver }) {
     }
   });
 
-  return router;
-}
 
-function createAdvisorAnalyzeRouter({ db, vault, requireAuth, brokerResolver }) {
-  const express = require('express');
-  const router = express.Router();
-  router.use(express.json({ limit: '32kb' }));
-  router.use(requireAuth);
-
-  // POST /api/me/ai-advisor/analyze -- run analysis using stored key
-  // Body: { provider?: 'anthropic'|'openai'|'gemini', marketContext?: string }
   // Tier 86: POST /api/me/ai-keys/test {provider, apiKey?} -- send a minimal request to verify the key works
   router.post('/test', async (req, res) => {
     try {
@@ -149,6 +139,7 @@ function createAdvisorAnalyzeRouter({ db, vault, requireAuth, brokerResolver }) 
     }
   });
 
+
   // Tier 86: GET /api/me/ai-keys/usage -- aggregate per-provider call counts from audit
   router.get('/usage', (req, res) => {
     try {
@@ -172,6 +163,17 @@ function createAdvisorAnalyzeRouter({ db, vault, requireAuth, brokerResolver }) 
     }
   });
 
+  return router;
+}
+
+function createAdvisorAnalyzeRouter({ db, vault, requireAuth, brokerResolver }) {
+  const express = require('express');
+  const router = express.Router();
+  router.use(express.json({ limit: '32kb' }));
+  router.use(requireAuth);
+
+  // POST /api/me/ai-advisor/analyze -- run analysis using stored key
+  // Body: { provider?: 'anthropic'|'openai'|'gemini', marketContext?: string }
   router.post('/analyze', async (req, res) => {
     try {
       const body = req.body || {};
