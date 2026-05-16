@@ -22,11 +22,41 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-let chromium, authenticator;
+let chromium;
 try { ({ chromium } = require('playwright')); }
 catch (e) { console.error('!! playwright not installed:', e.message); process.exit(1); }
-try { ({ authenticator } = require('otplib')); }
-catch (e) { console.error('!! otplib not installed:', e.message); process.exit(1); }
+
+// Inline TOTP (RFC 6238, SHA-1, 30s window, 6 digits) -- avoids the otplib ESM mess on Node 18.
+const _crypto = require('crypto');
+function _base32Decode(s) {
+  const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  s = String(s).replace(/=+$/, '').replace(/\s/g, '').toUpperCase();
+  let bits = '';
+  for (const c of s) {
+    const idx = ALPHABET.indexOf(c);
+    if (idx < 0) throw new Error('invalid base32 char: ' + c);
+    bits += idx.toString(2).padStart(5, '0');
+  }
+  const bytes = [];
+  for (let i = 0; i + 8 <= bits.length; i += 8) bytes.push(parseInt(bits.slice(i, i + 8), 2));
+  return Buffer.from(bytes);
+}
+const authenticator = {
+  generate(secret, when = Date.now()) {
+    const key = _base32Decode(secret);
+    const counter = Buffer.alloc(8);
+    counter.writeBigUInt64BE(BigInt(Math.floor(when / 30000)));
+    const hmac = _crypto.createHmac('sha1', key).update(counter).digest();
+    const offset = hmac[hmac.length - 1] & 0xf;
+    const code = (
+      ((hmac[offset]     & 0x7f) << 24) |
+      ((hmac[offset + 1] & 0xff) << 16) |
+      ((hmac[offset + 2] & 0xff) << 8)  |
+       (hmac[offset + 3] & 0xff)
+    ) % 1000000;
+    return code.toString().padStart(6, '0');
+  }
+};
 
 const SOCKET_PATH = process.env.AUTO_LOGIN_SOCKET || '/var/run/ats/auto-login.sock';
 const AUTH_TOKEN  = process.env.AUTO_LOGIN_TOKEN  || '';
