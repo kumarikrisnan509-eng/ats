@@ -187,6 +187,10 @@ const LandingFooter = () => (
       <div>
         &copy; ATS &middot; Automated Trading System
       </div>
+      <div style={{ display: 'flex', gap: 16, fontSize: 12 }}>
+        <a href="/docs" style={{ color: 'inherit', textDecoration: 'none', opacity: 0.8 }}>Docs</a>
+        <a href="/status.html" style={{ color: 'inherit', textDecoration: 'none', opacity: 0.8 }}>Status</a>
+      </div>
       <div style={{ opacity: 0.8 }}>
         Investments in securities are subject to market risks. Read all related documents carefully.
       </div>

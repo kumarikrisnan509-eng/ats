@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="index,follow">
+<title>ATS · Docs</title>
+<style>
+  :root {
+    --bg:#0f1115; --surface:#171a21; --surface-2:#1d212a; --border:#262a35;
+    --text:#e6e7eb; --text-2:#a8acb8; --text-3:#7a7f8d;
+    --green:#22c55e; --yellow:#eab308; --red:#ef4444; --blue:#3b82f6;
+    --accent:#3b82f6;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#fafafa; --surface:#ffffff; --surface-2:#f5f5f5; --border:#e5e7eb; --text:#0f1115; --text-2:#4b5563; --text-3:#6b7280; }
+  }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 0; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+  .layout { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; max-width: 1100px; margin: 0 auto; }
+  @media (max-width: 720px) { .layout { grid-template-columns: 1fr; } aside { border-right: none !important; border-bottom: 1px solid var(--border); position: static !important; } }
+  aside { padding: 24px 16px; border-right: 1px solid var(--border); position: sticky; top: 0; height: 100vh; overflow-y: auto; background: var(--surface); }
+  aside h1 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+  aside .sub { color: var(--text-3); font-size: 12px; margin-bottom: 16px; }
+  aside nav a { display: block; padding: 6px 10px; margin: 1px 0; color: var(--text-2); text-decoration: none; font-size: 13px; border-radius: 6px; border-left: 2px solid transparent; }
+  aside nav a:hover { background: var(--surface-2); color: var(--text); }
+  aside nav a.active { background: var(--surface-2); color: var(--text); border-left-color: var(--accent); }
+  aside nav .group { color: var(--text-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; padding: 14px 10px 4px; }
+  main { padding: 32px 40px 64px; max-width: 760px; }
+  main h2 { font-size: 26px; margin: 0 0 8px; font-weight: 600; letter-spacing: -0.3px; scroll-margin-top: 16px; }
+  main h3 { font-size: 18px; margin: 32px 0 12px; font-weight: 600; }
+  main p { margin: 12px 0; color: var(--text); }
+  main ul, main ol { margin: 12px 0; padding-left: 22px; }
+  main li { margin: 4px 0; }
+  main code { background: var(--surface-2); padding: 2px 6px; border-radius: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em; }
+  main pre { background: var(--surface-2); padding: 14px 16px; border-radius: 8px; overflow-x: auto; border: 1px solid var(--border); font-size: 13px; line-height: 1.45; }
+  main pre code { background: transparent; padding: 0; font-size: 13px; }
+  main table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }
+  main th, main td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+  main th { font-weight: 600; color: var(--text-2); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; }
+  main .callout { padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border); margin: 16px 0; background: var(--surface-2); display: flex; gap: 10px; }
+  main .callout.warn { border-color: color-mix(in oklab, var(--yellow) 40%, var(--border)); background: color-mix(in oklab, var(--yellow) 10%, transparent); }
+  main .callout.tip { border-color: color-mix(in oklab, var(--green) 35%, var(--border)); background: color-mix(in oklab, var(--green) 8%, transparent); }
+  main .callout strong { color: var(--text); }
+  section { padding: 16px 0 32px; }
+  section + section { border-top: 1px solid var(--border); }
+  footer { color: var(--text-3); font-size: 12px; text-align: center; padding: 32px 0; border-top: 1px solid var(--border); }
+  footer a { color: var(--accent); text-decoration: none; }
+  a.inline { color: var(--accent); text-decoration: none; }
+  a.inline:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<aside>
+  <h1>ATS · Docs</h1>
+  <div class="sub">v1.0 · May 2026</div>
+  <nav>
+    <div class="group">Getting started</div>
+    <a href="#welcome">What ATS is</a>
+    <a href="#install">Sign up &amp; first login</a>
+    <a href="#broker">Connect your broker</a>
+    <a href="#ai-keys">Add an AI provider key</a>
+
+    <div class="group">How it works</div>
+    <a href="#signals">AI Signals page</a>
+    <a href="#workflows">15 AI workflows</a>
+    <a href="#auto-router">Auto-router &amp; modes</a>
+    <a href="#paper">Paper trading</a>
+    <a href="#surveillance">Surveillance gate</a>
+
+    <div class="group">Cost &amp; safety</div>
+    <a href="#cost-guide">Daily cost guide</a>
+    <a href="#spend-cap">Spend cap</a>
+    <a href="#sebi">SEBI &amp; advisory</a>
+    <a href="#privacy">Privacy &amp; data</a>
+
+    <div class="group">Operations</div>
+    <a href="#status">Status &amp; uptime</a>
+    <a href="#backups">Backups &amp; DR</a>
+    <a href="#support">Get help</a>
+    <a href="#faq">FAQ</a>
+  </nav>
+</aside>
+
+<main>
+
+<section id="welcome">
+  <h2>What ATS is</h2>
+  <p>ATS is a per-user algo-trading platform for Indian retail equity markets. It plugs into your Zerodha
+  account (read-only by default), runs a momentum scanner across your watchlist, and asks an AI model you
+  pay for directly (BYOK — bring your own key) to validate each signal before you act.</p>
+  <p>It is <strong>advisory only</strong>. ATS never executes a trade on your behalf without your
+  explicit confirmation. The AI critic suggests; you decide; your broker executes.</p>
+  <div class="callout tip">
+    <span>💡</span>
+    <span>If you're just exploring, sign up, add your Zerodha key in read-only mode, and run the
+    paper-trading sandbox. No real money is at risk.</span>
+  </div>
+</section>
+
+<section id="install">
+  <h2>Sign up &amp; first login</h2>
+  <ol>
+    <li>Visit <a class="inline" href="/">ats.rajasekarselvam.com</a> and click <strong>Sign up</strong>.</li>
+    <li>Enter your email + a password. A verification email arrives within ~30 seconds.</li>
+    <li>Click the verification link. You'll land on the onboarding wizard.</li>
+    <li>Complete the wizard: timezone, default watchlist (skip if unsure), preferred currency display.</li>
+  </ol>
+  <p>The first account on a fresh ATS install is automatically promoted to admin. There's exactly one
+  user today (you). Multi-user beta begins when Tier 2 readiness is met.</p>
+</section>
+
+<section id="broker">
+  <h2>Connect your broker</h2>
+  <p>ATS currently supports <strong>Zerodha (Kite Connect)</strong> in production, with Dhan and AngelOne
+  adapters available but not yet promoted to live.</p>
+  <ol>
+    <li>Go to <strong>Brokers</strong> in the sidebar.</li>
+    <li>Click <strong>Connect Zerodha</strong>. The 3-step wizard prompts for your Kite API key + secret.</li>
+    <li>The first OAuth login happens in a browser window. ATS stores the access token sealed in libsodium
+    (only your password-derived key can open it).</li>
+    <li>The daily auto-reauth cron fires at 05:45 IST so your token is fresh before market open.</li>
+  </ol>
+  <div class="callout warn">
+    <span>⚠</span>
+    <span>You need your own Kite Connect developer account (₹2000/month from Zerodha). ATS doesn't
+    proxy your trades through a shared key.</span>
+  </div>
+</section>
+
+<section id="ai-keys">
+  <h2>Add an AI provider key</h2>
+  <p>ATS uses your own API key for every AI call. The key is sealed with libsodium before being written
+  to the database; the cleartext is never logged or sent anywhere except the provider you configured.</p>
+  <ol>
+    <li>Open <strong>AI providers</strong> in the sidebar (or <a class="inline" href="/#ai-keys">/#ai-keys</a>).</li>
+    <li>Generate a key in your provider's console:
+      <ul>
+        <li><a class="inline" href="https://console.anthropic.com" target="_blank" rel="noopener">Claude (Anthropic)</a> — recommended primary</li>
+        <li><a class="inline" href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">OpenAI</a> — used as fallback</li>
+        <li><a class="inline" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google Gemini</a> — cheapest tier</li>
+      </ul>
+    </li>
+    <li>Paste the key into the provider's card on the page, click <strong>Test</strong> to verify it works,
+    then <strong>Save</strong>.</li>
+  </ol>
+  <p>You can add 1, 2, or 3 keys. The auto-router uses your most-preferred available provider for each
+  workflow; if your top pick is missing, it falls through to the next.</p>
+</section>
+
+<section id="signals">
+  <h2>AI Signals page</h2>
+  <p>The momentum scanner runs daily at 15:35 IST and inspects every symbol in your watchlist for these
+  technical signals:</p>
+  <ul>
+    <li><strong>RSI_OVERSOLD</strong> — 14-day RSI &lt; 30 (potential buy zone)</li>
+    <li><strong>RSI_OVERBOUGHT</strong> — 14-day RSI &gt; 70 (potential sell zone)</li>
+    <li><strong>EMA20_CROSS_UP</strong> — close crossed above 20-day EMA (trend up)</li>
+    <li><strong>EMA20_CROSS_DOWN</strong> — close crossed below 20-day EMA (trend down)</li>
+  </ul>
+  <p>Each signal appears as a card. Click the <strong>Critique</strong> button to get an AI verdict:
+  agree / caution / reject, with confidence score, summary, key risks, and a suggested next step.
+  Critiques are cached per signal so re-clicking the same card returns instantly at ₹0.</p>
+  <div class="callout tip">
+    <span>💡</span>
+    <span>The scanner already skips symbols on the NSE surveillance lists (T2T, GSM stage 2+).
+    See <a class="inline" href="#surveillance">Surveillance gate</a>.</span>
+  </div>
+</section>
+
+<section id="workflows">
+  <h2>15 AI workflows</h2>
+  <p>ATS organises every AI call into a named "workflow" with a quality tier. This drives auto-router
+  decisions, cost tracking, and the transparency view on the AI providers card.</p>
+  <table>
+    <thead><tr><th>Workflow</th><th>Family</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>analyze</code></td><td>STRONG</td><td>Holistic portfolio advisor — risk + factor + holdings</td></tr>
+      <tr><td><code>intraday_critic</code></td><td>STRONG</td><td>Per-signal verdict on AI Signals cards</td></tr>
+      <tr><td><code>signal_critique</code></td><td>STRONG</td><td>Alias of intraday_critic</td></tr>
+      <tr><td><code>monthly_review</code></td><td>STRONG / PREMIUM</td><td>30-day P&amp;L synthesis + suggested focus</td></tr>
+      <tr><td><code>strategy_explain</code></td><td>FAST</td><td>Plain-English explanation of a strategy</td></tr>
+      <tr><td><code>mf_pick</code></td><td>STRONG</td><td>Mutual-fund picker explainer</td></tr>
+      <tr><td><code>vision</code></td><td>STRONG</td><td>Chart image upload + extraction (Tier 3)</td></tr>
+      <tr><td><code>consensus</code></td><td>STRONG × 3</td><td>Multi-provider verdict for high-stakes calls (Tier 3)</td></tr>
+      <tr><td><code>strategy_autotune</code></td><td>STRONG</td><td>Weekly hyperparameter search (Tier 3)</td></tr>
+      <tr><td><code>news_sentiment</code></td><td>FAST</td><td>Sentiment chip on signal cards</td></tr>
+      <tr><td><code>email_digest</code></td><td>FAST</td><td>Daily / weekly email summary</td></tr>
+      <tr><td><code>onboarding_help</code></td><td>FAST</td><td>First-run explainers</td></tr>
+      <tr><td><code>test</code></td><td>FAST</td><td>Provider connectivity check</td></tr>
+      <tr><td><code>regime_inject</code></td><td>—</td><td>No AI call (local computation)</td></tr>
+      <tr><td><code>default</code></td><td>STRONG</td><td>Fallback when caller doesn't specify a workflow</td></tr>
+    </tbody>
+  </table>
+  <p>Families:</p>
+  <ul>
+    <li><strong>PREMIUM</strong>: Claude Opus / GPT-5 / Gemini Pro</li>
+    <li><strong>STRONG</strong>: Claude Sonnet / GPT-5 / Gemini Pro</li>
+    <li><strong>FAST</strong>: Claude Haiku / GPT-5-mini / Gemini Flash</li>
+    <li><strong>CHEAP</strong>: Claude Haiku / GPT-5-nano / Gemini Flash-lite</li>
+  </ul>
+</section>
+
+<section id="auto-router">
+  <h2>Auto-router &amp; modes</h2>
+  <p>You don't pick a model. ATS routes every AI call automatically based on the workflow + your mode setting.</p>
+  <ul>
+    <li><strong>Quality</strong> — always the best model in the family. Highest cost, highest signal quality.</li>
+    <li><strong>Balanced</strong> (default) — quality-first defaults. Critique + reviews stay on Sonnet
+    even though it's not the cheapest. Explainers drop to Haiku.</li>
+    <li><strong>Economy</strong> — cheapest viable model per workflow. Fastest + lowest cost; signal
+    quality may drop on STRONG workflows.</li>
+  </ul>
+  <p>The router prefers Anthropic when you have a Claude key, falls through to OpenAI then Gemini for
+  each call. See exactly what gets picked in the <strong>What ATS picks for each workflow</strong>
+  table on the AI providers page.</p>
+</section>
+
+<section id="paper">
+  <h2>Paper trading</h2>
+  <p>Paper mode is your sandbox. Trades execute against live market prices (from your Kite WebSocket
+  feed) but no real money moves. Cash, positions, P&amp;L all behave as if real.</p>
+  <ul>
+    <li>Set your initial paper capital on the Paper screen (default ₹10L).</li>
+    <li>Pick a strategy → bind it to a symbol → enable auto-runner if you want it to fire on signals.</li>
+    <li>Watch the P&amp;L attribution tab to see which strategies actually contributed.</li>
+  </ul>
+  <p>Recommendation: run a strategy in paper for 30 days minimum before promoting it to live, with the
+  win-rate gate at ≥55% and the monthly-review headline corroborating the numbers.</p>
+</section>
+
+<section id="surveillance">
+  <h2>Surveillance gate</h2>
+  <p>The scanner automatically excludes symbols that NSE has placed under surveillance restrictions.
+  These include:</p>
+  <ul>
+    <li><strong>T2T (Trade-to-Trade)</strong> — series BE/BZ/BL/ST/IV/SZ. Cash-only, no intraday, no margin.</li>
+    <li><strong>GSM (Graded Surveillance Measure)</strong> Stage II and above. Indicates circular-trading
+    suspicion or low-float pump-and-dump risk.</li>
+  </ul>
+  <p>Today the gate blocks ~500 symbols. The data refreshes every hour from
+  <code>archives.nseindia.com/content/equities/sec_list.csv</code>. You'll see them skipped in the
+  scanner audit log with the gate reason.</p>
+</section>
+
+<section id="cost-guide">
+  <h2>Daily cost guide</h2>
+  <p>Your ATS AI spend is paid directly to the provider — ATS never takes a cut. Typical per-day cost
+  depends on how many signals fire + which mode you're in.</p>
+  <table>
+    <thead><tr><th>Activity</th><th>Mode</th><th>Approx ₹/day</th></tr></thead>
+    <tbody>
+      <tr><td>20 signals × critique</td><td>Balanced (Sonnet)</td><td>₹3 – ₹6</td></tr>
+      <tr><td>20 signals × critique</td><td>Economy (Haiku)</td><td>₹0.50 – ₹1</td></tr>
+      <tr><td>Strategy explanations (5/day)</td><td>any</td><td>&lt; ₹0.50</td></tr>
+      <tr><td>1 monthly review</td><td>STRONG</td><td>₹2 – ₹4 (once per month)</td></tr>
+      <tr><td>Holistic analyze (occasional)</td><td>STRONG</td><td>₹4 – ₹8</td></tr>
+    </tbody>
+  </table>
+  <p>The AI providers card shows your real spend today/week/month, broken down by workflow.</p>
+</section>
+
+<section id="spend-cap">
+  <h2>Spend cap</h2>
+  <p>Every account has a daily spend cap (default ₹50/day). When the cap is hit, new AI calls return
+  <code>spend_cap_exceeded (HTTP 429)</code> until midnight IST. The cap protects you from runaway
+  costs if a script gets stuck in a loop.</p>
+  <ul>
+    <li>Editable on the AI providers card (range ₹0 – ₹5,000).</li>
+    <li>Set to ₹0 to disable all AI calls entirely without removing your keys.</li>
+    <li>The cap is enforced before the LLM call is made — blocked attempts are logged with
+    <code>status=blocked_by_cap</code> at ₹0 so you can audit them in the cost breakdown.</li>
+  </ul>
+</section>
+
+<section id="sebi">
+  <h2>SEBI &amp; advisory</h2>
+  <p>ATS is <strong>not registered with SEBI</strong> as a Research Analyst or Investment Adviser. Every
+  AI-generated output renders the standard advisory disclaimer:</p>
+  <blockquote style="border-left: 3px solid var(--border); padding: 0 14px; color: var(--text-2); margin: 14px 0; font-style: italic;">
+    Advisory only. Not investment advice. All AI-generated views are for educational use; you remain
+    solely responsible for any trade you place. Past performance does not predict future results.
+  </blockquote>
+  <p>The platform also enforces a <strong>2FA confirm-before-trade</strong> step on live orders. The
+  AI critic can suggest a trade but cannot place one — that gate is structural, not configurable.</p>
+</section>
+
+<section id="privacy">
+  <h2>Privacy &amp; data</h2>
+  <p>ATS stores the minimum needed to run your account:</p>
+  <ul>
+    <li>Your email + bcrypt-hashed password</li>
+    <li>Sealed broker access tokens (libsodium-encrypted at rest)</li>
+    <li>Sealed AI provider API keys (same vault)</li>
+    <li>Paper trade history + P&amp;L attribution</li>
+    <li>AI call audit log (workflow, provider, model, token counts, cost, thumb feedback)</li>
+    <li>Append-only audit trail of key events</li>
+  </ul>
+  <p>What ATS does <em>not</em> store: real trade execution data (that lives on your broker), your raw
+  account balance, anything you put into a freeform notes field. AI prompts include your symbol +
+  signal context, but never your password, broker secrets, or AI key cleartext.</p>
+  <p>A formal Privacy Policy + Terms of Service draft is in progress (Tier I6); when published they'll
+  live at <a class="inline" href="/legal">/legal</a>.</p>
+</section>
+
+<section id="status">
+  <h2>Status &amp; uptime</h2>
+  <p>Live health of ATS + the upstream services it depends on (Kite, NSE, AI providers):
+  <a class="inline" href="/status.html">status.html</a> · raw JSON at
+  <a class="inline" href="/api/status">/api/status</a>.</p>
+  <p>Page auto-refreshes every 30 seconds. Server-side cache is 60 seconds so uptime monitors can hit
+  it freely.</p>
+</section>
+
+<section id="backups">
+  <h2>Backups &amp; DR</h2>
+  <p>Nightly at 02:30 UTC (08:00 IST), a cron pushes the SQLite database + sealed token directory +
+  rotated audit logs to Google Drive via rclone. Recovery point objective is 24 hours; recovery time
+  objective is &lt;1 hour.</p>
+  <p>The DR test script (<code>/opt/ats/scripts/dr-restore-test.sh --notify</code>) restores from the
+  latest snapshot into a scratch directory and verifies integrity. The result is recorded in
+  <code>/api/health-deep</code> under <code>drLastTestAgo</code>; if it's been &gt;30 days since a
+  successful test, <code>drStale: true</code> warns operators.</p>
+</section>
+
+<section id="support">
+  <h2>Get help</h2>
+  <p>Email <a class="inline" href="mailto:rajasekarjavaee@gmail.com">rajasekarjavaee@gmail.com</a> for
+  anything — questions, bug reports, feature requests, complaints about the AI's verdict, anything at
+  all.</p>
+  <p>For incidents during market hours (09:15 – 15:30 IST Mon-Fri), expect a response within an hour.
+  Off-hours: best-effort within 4 hours.</p>
+</section>
+
+<section id="faq">
+  <h2>FAQ</h2>
+
+  <h3>Why do I need to bring my own AI key?</h3>
+  <p>So ATS never sits between you and a high-cost provider. You see your real spend on the provider's
+  bill, you control your spend cap, and there's no surprise markup. ATS itself is free (single user
+  today; pricing for multi-user beta TBD).</p>
+
+  <h3>Why is the spend cap ₹50/day default?</h3>
+  <p>It covers a normal day of personal trading (~10-20 critiques + 1 analyze + occasional explainer).
+  If you're scanning a 200-symbol watchlist with all critiques on Sonnet, raise it; if you only use
+  ATS for a couple of weekly reviews, lower it.</p>
+
+  <h3>Can the AI place a trade for me?</h3>
+  <p>No. The architecture makes this impossible — the AI critic only emits structured JSON verdicts.
+  Trade placement goes through a separate path that requires a 2FA confirmation per trade.</p>
+
+  <h3>Why does the scanner skip some of my watchlist symbols?</h3>
+  <p>Most likely they're on the NSE surveillance lists (T2T / GSM). Check the scanner audit log; each
+  skip is recorded with the gate reason. You can still trade these on your broker — ATS just refuses
+  to suggest them.</p>
+
+  <h3>What happens if Kite API is down?</h3>
+  <p>The status page shows it. The scanner skips that run. Cached prices stay frozen until the next
+  successful tick. You'll see a yellow banner on the dashboard.</p>
+
+  <h3>Can I export my data?</h3>
+  <p>Yes — Account → Export downloads a JSON of your preferences, watchlist, paper trades, and AI
+  call history. Sealed credentials are NOT exported (they wouldn't be useful without the master key).</p>
+
+  <h3>Where do I read the audit trail?</h3>
+  <p>Compliance → Audit log shows the WORM-style append-only trail of every key action: logins, broker
+  connects, AI calls, paper trades, scanner runs. Auto-rotated daily; 7 days kept on disk + archived
+  forever to GDrive.</p>
+</section>
+
+<footer>
+  ATS docs · last updated 2026-05-17 · <a href="/">app</a> · <a href="/status.html">status</a> · <a href="/api/status">raw status JSON</a>
+</footer>
+
+</main>
+</div>
+
+<script>
+  // Highlight active section in sidebar based on scroll position.
+  var sections = document.querySelectorAll('section[id]');
+  var links = document.querySelectorAll('aside nav a');
+  function syncActive() {
+    var y = window.scrollY + 80;
+    var current = null;
+    sections.forEach(function (s) {
+      if (s.offsetTop <= y) current = s.id;
+    });
+    links.forEach(function (a) {
+      a.classList.toggle('active', a.getAttribute('href') === '#' + current);
+    });
+  }
+  window.addEventListener('scroll', syncActive, { passive: true });
+  syncActive();
+</script>
+</body>
+</html>
