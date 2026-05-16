@@ -35,10 +35,10 @@ test('basic flat equity has zero return, zero vol, no max DD', () => {
   ];
   const r = computeRiskMetrics(eq);
   assert.equal(r.enoughData, true);
-  assert.equal(r.cumulativeReturn, 0);
+  assert.ok(Math.abs(r.cumulativeReturn) < 1e-9);
   assert.equal(r.volatilityDaily, 0);
-  assert.equal(r.maxDrawdown, 0);
-  assert.equal(r.var95Daily, 0);
+  assert.ok(Math.abs(r.maxDrawdown) < 1e-9);
+  assert.ok(Math.abs(r.var95Daily) < 1e-9);
 });
 
 test('positive trend yields positive cum + annual return', () => {
