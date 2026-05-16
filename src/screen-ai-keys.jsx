@@ -243,3 +243,4 @@ const _relTime = (s) => {
 };
 
 Object.assign(window, { AiKeysScreen });
+try { window.dispatchEvent(new Event('screens-changed')); } catch (_) {}
