@@ -8,16 +8,15 @@ ENV_FILE=/etc/ats/auto-login.env
 SOCKET_DIR=/var/run/ats
 LOG_DIR=/var/log/ats
 BROWSERS_DIR="$DAEMON_DIR/browsers"
+NPM_CACHE_DIR="$DAEMON_DIR/.npm-cache"
 
 # 1. Ensure runtime user "ats" exists in docker group (no-op if already exists).
 if ! id ats >/dev/null 2>&1; then
   useradd --system --shell /bin/false --home-dir /var/lib/ats --groups docker ats
 fi
 
-# 2. Directories owned by ats so Playwright + npm can write everywhere they need to.
-install -d -o ats -g docker -m 0775 "$DAEMON_DIR" "$SOCKET_DIR" "$LOG_DIR" /etc/ats /var/lib/ats "$BROWSERS_DIR"
-
-# Make sure ats can write to the daemon dir (in case it pre-existed with wrong perms).
+# 2. Directories owned by ats, including npm + Playwright cache locations.
+install -d -o ats -g docker -m 0775 "$DAEMON_DIR" "$SOCKET_DIR" "$LOG_DIR" /etc/ats /var/lib/ats "$BROWSERS_DIR" "$NPM_CACHE_DIR"
 chown -R ats:docker "$DAEMON_DIR"
 
 # 3. Copy daemon + service unit (call this script from the dir that contains them).
@@ -36,23 +35,25 @@ E
   chmod 0640 "$ENV_FILE"; chown root:docker "$ENV_FILE"
   echo "Generated AUTO_LOGIN_TOKEN. Add to docker-compose env: $TOKEN"
 else
-  # Add PLAYWRIGHT_BROWSERS_PATH if missing in pre-existing env file.
   if ! grep -q '^PLAYWRIGHT_BROWSERS_PATH=' "$ENV_FILE"; then
     echo "PLAYWRIGHT_BROWSERS_PATH=$BROWSERS_DIR" >> "$ENV_FILE"
   fi
   echo "Reusing existing AUTO_LOGIN_TOKEN from $ENV_FILE"
 fi
 
-# 5. Install Node deps INTO the daemon dir, then Playwright Chromium with explicit cache dir.
+# 5. Run npm/npx as ats with HOME + npm_config_cache pointed at writable dirs
+#    (existing ats user has $HOME=/opt/ats which it can't write to).
+RUN_AS_ATS="sudo -u ats env HOME=$DAEMON_DIR npm_config_cache=$NPM_CACHE_DIR PLAYWRIGHT_BROWSERS_PATH=$BROWSERS_DIR"
+
 cd "$DAEMON_DIR"
-sudo -u ats npm init -y >/dev/null 2>&1 || true
-sudo -u ats npm install --no-audit --no-fund playwright otplib
+$RUN_AS_ATS npm init -y >/dev/null 2>&1 || true
+$RUN_AS_ATS npm install --no-audit --no-fund playwright otplib
 
-# Chromium download — explicit env path so it doesn't try /opt/ats/.cache
-sudo -u ats PLAYWRIGHT_BROWSERS_PATH="$BROWSERS_DIR" npx playwright install chromium
+# Chromium download — explicit env path so it doesn't touch /opt/ats/.cache
+$RUN_AS_ATS npx playwright install chromium
 
-# Optional: install OS deps for headless Chromium (libnss3 etc). Best-effort.
-npx playwright install-deps chromium 2>/dev/null || true
+# Optional: install OS deps for headless Chromium (libnss3 etc). Best-effort, runs as root.
+npx --yes playwright@latest install-deps chromium 2>/dev/null || true
 
 # 6. systemd
 systemctl daemon-reload
