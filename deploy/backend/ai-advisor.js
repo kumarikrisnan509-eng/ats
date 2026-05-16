@@ -16,7 +16,7 @@ const SUPPORTED_PROVIDERS = ['anthropic', 'openai', 'gemini'];
 const DEFAULT_MODEL_BY_PROVIDER = {
   anthropic: 'claude-sonnet-4-6',
   openai:    'gpt-5.5',
-  gemini:    'gemini-3.1-flash-lite',
+  gemini:    'gemini-3.1-pro-preview',
 };
 
 // T92: Map deprecated/aged-off model aliases to the current default for that provider.
@@ -31,11 +31,11 @@ const DEPRECATED_MODEL_ALIASES = {
   'gpt-4o-mini':       'gpt-5.5',
   'gpt-4o':            'gpt-5.5',
   'gpt-4.1':           'gpt-5.5',
-  // Gemini
+  // Gemini -- bare *-pro aliases don't resolve on Gemini API; must use -preview suffix
   'gemini-2.0-flash':  'gemini-3.1-flash-lite',
-  'gemini-2.5-pro':    'gemini-3.1-flash-lite',
-  'gemini-3.1-pro':    'gemini-3.1-flash-lite',
-  'gemini-3-pro':      'gemini-3.1-flash-lite',
+  'gemini-2.5-pro':    'gemini-3.1-pro-preview',
+  'gemini-3.1-pro':    'gemini-3.1-pro-preview',
+  'gemini-3-pro':      'gemini-3-pro-preview',
   'gemini-2.5-flash':  'gemini-3.1-flash-lite',
 };
 
