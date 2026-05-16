@@ -16,9 +16,18 @@
 'use strict';
 
 const URL_SEC_LIST = 'https://archives.nseindia.com/content/equities/sec_list.csv';
+const URL_ASM      = 'https://www.nseindia.com/api/reportASM';   // backfilled in May 2026
 const CACHE_TTL_MS = 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 12_000;
 const UA = 'Mozilla/5.0 (compatible; ATSBot/1.0; +https://ats.rajasekarselvam.com)';
+// nseindia.com/api endpoints require browser-ish headers; sec_list at archives.* works with the simple UA above
+const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36',
+  'Accept': 'application/json,text/plain,*/*',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Referer': 'https://www.nseindia.com/',
+};
+const ROMAN_STAGE = { 'I': 1, 'II': 2, 'III': 3, 'IV': 4 };
 
 const T2T_SERIES = new Set(['BE', 'BZ', 'BL', 'ST', 'IV', 'SZ']);
 const ROMAN = { '0': 0, 'I': 1, 'II': 2, 'III': 3, 'IV': 4, 'V': 5 };
@@ -39,11 +48,26 @@ class NseSurveillance {
   async _doRefresh() {
     if (!this.fetchFn) throw new Error('no global fetch (need Node 18+)');
     const t0 = Date.now();
-    const csv = await this._fetchCsv(URL_SEC_LIST).catch(e => {
-      console.warn('[surveillance] sec_list fetch failed:', e.message);
-      return null;
-    });
+    const [csv, asmJson] = await Promise.all([
+      this._fetchCsv(URL_SEC_LIST).catch(e => { console.warn('[surveillance] sec_list fetch failed:', e.message); return null; }),
+      this._fetchAsm(URL_ASM).catch(e => { console.warn('[surveillance] reportASM fetch failed:', e.message); return null; }),
+    ]);
     const parsed = this._parseSecList(csv);
+    // Merge ASM from reportASM API into the parsed cache (it carries stage info sec_list lacks)
+    if (asmJson && typeof asmJson === 'object') {
+      const merge = (arr) => {
+        for (const row of (arr || [])) {
+          const sym = String(row.symbol || '').toUpperCase().trim();
+          if (!sym) continue;
+          const stageRaw = String(row.asmSurvIndicator || '').trim();
+          const m = stageRaw.match(/Stage\s+(IV|III|II|I|\d+)/i);
+          const stage = m ? (ROMAN_STAGE[m[1].toUpperCase()] != null ? ROMAN_STAGE[m[1].toUpperCase()] : parseInt(m[1], 10)) : null;
+          if (Number.isFinite(stage)) parsed.asm.set(sym, { stage, raw: stageRaw, code: row.survCode });
+        }
+      };
+      merge(asmJson.longterm && asmJson.longterm.data);
+      merge(asmJson.shortterm && asmJson.shortterm.data);
+    }
     this._cache = {
       ts: Date.now(),
       fetchedMs: Date.now() - t0,
@@ -52,6 +76,16 @@ class NseSurveillance {
     };
     console.log(`[surveillance] refreshed in ${this._cache.fetchedMs}ms — GSM=${parsed.gsm.size} T2T=${parsed.t2t.size} ASM=${parsed.asm.size}`);
     return this._cache;
+  }
+
+  async _fetchAsm(url) {
+    const ctl = new AbortController();
+    const to = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const r = await this.fetchFn(url, { headers: BROWSER_HEADERS, signal: ctl.signal });
+      if (!r.ok) throw new Error(`${url} -> ${r.status}`);
+      return await r.json();
+    } finally { clearTimeout(to); }
   }
 
   async _fetchCsv(url) {
