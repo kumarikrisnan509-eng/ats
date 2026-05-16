@@ -108,7 +108,7 @@ const SettingsScreen = () => {
   // refs for scrollspy
   const refs = {
     account: React.useRef(null), display: React.useRef(null), notifications: React.useRef(null),
-    connected: React.useRef(null), danger: React.useRef(null),
+    aiProviders: React.useRef(null), connected: React.useRef(null), danger: React.useRef(null),
   };
 
   React.useEffect(() => {
@@ -144,7 +144,7 @@ const SettingsScreen = () => {
   // scrollspy
   React.useEffect(() => {
     const handler = () => {
-      const sections = ['account', 'display', 'notifications', 'connected', 'danger'];
+      const sections = ['account', 'display', 'notifications', 'aiProviders', 'connected', 'danger'];
       let current = sections[0];
       for (const s of sections) {
         const el = refs[s].current;
@@ -288,6 +288,7 @@ const SettingsScreen = () => {
           <NavRow icon="👤" label="Account"         active={activeSection === 'account'}        onClick={() => jumpTo('account')} />
           <NavRow icon="🎨" label="Display"         active={activeSection === 'display'}        onClick={() => jumpTo('display')} />
           <NavRow icon="🔔" label="Notifications"   active={activeSection === 'notifications'}  onClick={() => jumpTo('notifications')} />
+          <NavRow icon="🤖" label="AI providers"    active={activeSection === 'aiProviders'}    onClick={() => jumpTo('aiProviders')} />
           <NavRow icon="🔗" label="Connected apps"  active={activeSection === 'connected'}      onClick={() => jumpTo('connected')} />
           <NavRow icon="⚠"  label="Danger zone"    active={activeSection === 'danger'}         onClick={() => jumpTo('danger')} />
           <div style={{ marginTop: 16, padding: '10px 14px', borderTop: '1px solid var(--border)' }}>
@@ -462,6 +463,12 @@ const SettingsScreen = () => {
             )}
           </Section>
 
+          {/* T87 Option C: AI providers inline card — quick view + link to dedicated #ai-keys */}
+          <Section ref={refs.aiProviders} id="ai-providers" icon="🤖" title="AI providers (BYOK)"
+            sub="Bring your own keys for Claude, OpenAI, and Gemini. Sealed with libsodium.">
+            <AiProvidersInline />
+          </Section>
+
           {/* Connected apps — moved UP from below danger zone */}
           <Section ref={refs.connected} id="connected" icon="🔗" title="Connected apps"
             sub="Other settings live on their canonical pages — no duplication.">
@@ -570,5 +577,48 @@ _settingsCSS.textContent = `
   }
 `;
 if (!document.getElementById('ats-settings-css')) { _settingsCSS.id = 'ats-settings-css'; document.head.appendChild(_settingsCSS); }
+
+// T87 Option C: AI providers inline card — compact summary + CTA to dedicated page
+const AiProvidersInline = () => {
+  const [keys, setKeys] = React.useState(null);
+  const [meta, setMeta] = React.useState({ supportedProviders: ['anthropic', 'openai', 'gemini'] });
+  React.useEffect(() => {
+    fetch('/api/me/ai-keys', { credentials: 'include' })
+      .then(r => r.json()).then(j => {
+        if (j.ok) { setKeys(j.keys || []); if (j.supportedProviders) setMeta(m => ({ ...m, supportedProviders: j.supportedProviders, defaultModels: j.defaultModels })); }
+      }).catch(() => setKeys([]));
+  }, []);
+  const PROV = { anthropic: { label: 'Claude', logo: 'C', color: '#d97757' },
+                 openai:    { label: 'OpenAI', logo: 'O', color: '#10a37f' },
+                 gemini:    { label: 'Gemini', logo: 'G', color: '#4285f4' } };
+  const findKey = (p) => (keys || []).find(k => k.provider === p);
+  const configured = (keys || []).length;
+  return (
+    <>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: 14 }}>
+        {meta.supportedProviders.map(p => {
+          const pm = PROV[p] || { label: p, logo: p[0]?.toUpperCase(), color: '#888' };
+          const k = findKey(p);
+          return (
+            <div key={p} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, border: '1px solid var(--border)', borderRadius: 6, background: k ? 'color-mix(in oklab, var(--up) 6%, transparent)' : 'transparent' }}>
+              <div style={{ width: 32, height: 32, borderRadius: 8, background: pm.color, color: 'white', display: 'grid', placeItems: 'center', fontWeight: 700, flexShrink: 0 }}>{pm.logo}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>{pm.label}</div>
+                <div className="muted" style={{ fontSize: 11 }}>{k ? `✓ ${k.model_pref || 'default model'}` : 'Not set'}</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="between" style={{ paddingTop: 12, borderTop: '1px dashed var(--border)' }}>
+        <div className="muted" style={{ fontSize: 12 }}>
+          {keys === null ? 'Loading…' : `${configured} of ${meta.supportedProviders.length} providers configured`}
+        </div>
+        <a className="btn btn--sm btn--primary" href="#ai-keys">Manage AI keys →</a>
+      </div>
+    </>
+  );
+};
+Object.assign(window, { AiProvidersInline });
 
 Object.assign(window, { SettingsScreen, DeleteAccountModal, TimePicker});
