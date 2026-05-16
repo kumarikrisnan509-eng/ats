@@ -302,6 +302,21 @@ function createMeBrokerRouter({ db, vault, requireAuth }) {
     }
   });
 
+  // Tier 80: PUT /api/me/broker/:id/auto-reauth-toggle -- enable/disable daily cron for this row.
+  router.put('/:id/auto-reauth-toggle', (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ ok: false, reason: 'bad_id' });
+      const existing = db.brokers.getFull(req.user.id, id);
+      if (!existing) return res.status(404).json({ ok: false, reason: 'not_found' });
+      const enabled = !!(req.body && req.body.enabled);
+      db.brokers.setAutoReauth(req.user.id, id, enabled);
+      res.json({ ok: true, enabled });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: 'toggle_failed', detail: e.message });
+    }
+  });
+
   // Tier 79: POST /api/me/broker/auto-reauth -- one-click headless Kite login.
   router.post('/auto-reauth', async (req, res) => {
     try {
