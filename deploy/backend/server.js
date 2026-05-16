@@ -1532,6 +1532,68 @@ app.get('/api/paper/tiers', (_req, res) => {
   res.json({ ok:true, tiers: paper.availableTiers(), current: paper.stats().cash + paper.stats().totalEquity ? paper.stats() : null });
 });
 
+// ============ E5: paper-to-live promotion gates (require auth) ============
+// Decides whether a {strategy, symbol} pair has earned the right to fire on the
+// live broker. Pure read-only — does NOT change any state. The Trading page calls
+// this when the user clicks "promote to live"; if any gate is red, the live route
+// stays blocked and the UI explains which gate needs to pass first.
+app.post('/api/me/paper/promote-check', (req, res) => {
+  if (!db || !db._conn) return res.status(503).json({ ok: false, reason: 'db_not_ready' });
+  if (!req.user || !req.user.id) return res.status(401).json({ ok: false, reason: 'auth_required' });
+  const b = req.body || {};
+  const strategy = (b.strategy || '').toString().trim();
+  const symbol = (b.symbol || '').toString().toUpperCase().trim();
+  const minTrades = Math.max(5, Math.min(200, parseInt(b.min_trades || '20', 10)));
+  const minWinRate = Math.max(0.3, Math.min(0.9, parseFloat(b.min_win_rate) || 0.55));
+
+  if (!strategy) return res.status(400).json({ ok: false, reason: 'bad_request', detail: 'strategy required' });
+
+  try {
+    // === Gate 1: win-rate over last 30 days, optionally filtered to this symbol ===
+    const cutoff = new Date(Date.now() - 30 * 86400_000).toISOString();
+    const params = [req.user.id, strategy, cutoff];
+    let where = "user_id = ? AND strategy_tag = ? AND exited_at > ?";
+    if (symbol) { where += " AND symbol = ?"; params.push(symbol); }
+    const rows = db._conn.prepare(`SELECT pnl FROM paper_closed_trades WHERE ${where}`).all(...params);
+    const trades = rows.length;
+    const wins = rows.filter(r => Number(r.pnl) > 0).length;
+    const winRate = trades > 0 ? +(wins / trades).toFixed(4) : 0;
+    const grossPnl = rows.reduce((s, r) => s + Number(r.pnl || 0), 0);
+    const winRateGate = { pass: trades >= minTrades && winRate >= minWinRate, trades, wins, win_rate: winRate, gross_pnl_inr: +grossPnl.toFixed(2), min_trades: minTrades, min_win_rate: minWinRate };
+
+    // === Gate 2: surveillance — symbol must be clean ===
+    let surveillanceGate = { pass: true, reason: 'no_symbol_check' };
+    if (symbol && _surveillance) {
+      const v = _surveillance.classifySync(symbol);
+      surveillanceGate = v
+        ? { pass: false, reason: v.reason, list: v.list, stage: v.stage }
+        : { pass: true, reason: 'clean' };
+    }
+
+    // === Gate 3: 2FA reachable (Telegram configured) so confirm-before-trade can fire ===
+    let twofaGate = { pass: false, reason: 'no_notif_row' };
+    try {
+      const n = db.notif.get(req.user.id);
+      const ready = !!(n && n.telegram_enabled && n.telegram_bot_token && n.telegram_chat_id);
+      twofaGate = ready
+        ? { pass: true, reason: 'telegram_ready' }
+        : { pass: false, reason: 'telegram_not_configured', detail: 'Enable Telegram alerts in Settings so the 2FA confirm-before-trade challenge can reach you.' };
+    } catch (_) {}
+
+    const can_promote = winRateGate.pass && surveillanceGate.pass && twofaGate.pass;
+    res.json({
+      ok: true,
+      can_promote,
+      strategy, symbol: symbol || null,
+      gates: { win_rate: winRateGate, surveillance: surveillanceGate, twofa: twofaGate },
+      window: '30d',
+      ts: new Date().toISOString(),
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: 'promote_check_failed', detail: e.message });
+  }
+});
+
 // ---------- P&L Attribution ----------
 // GET /api/pnl/daily?days=30 -- equity time series
 app.get('/api/pnl/daily', (req, res) => {
