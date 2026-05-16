@@ -79,14 +79,14 @@ test('callLLM(anthropic) builds the right request and parses content', async () 
   const out = await callLLM({
     provider: 'anthropic',
     apiKey: 'sk-test-key',
-    model: 'claude-sonnet-4-5',
+    model: 'claude-sonnet-4-6',
     prompt: { system: 'sys', user: 'usr' },
     fetchImpl: fakeFetch,
   });
   assert.equal(captured.url, 'https://api.anthropic.com/v1/messages');
   assert.equal(captured.opts.headers['x-api-key'], 'sk-test-key');
   const body = JSON.parse(captured.opts.body);
-  assert.equal(body.model, 'claude-sonnet-4-5');
+  assert.equal(body.model, 'claude-sonnet-4-6');
   assert.equal(body.system, 'sys');
   assert.equal(out.summary, 'hello');
 });
@@ -101,7 +101,7 @@ test('callLLM(openai) sends Authorization header and parses choices[0]', async (
       text: async () => '',
     };
   };
-  const out = await callLLM({ provider: 'openai', apiKey: 'sk-x', model: 'gpt-4o-mini', prompt: { system: 's', user: 'u' }, fetchImpl: fakeFetch });
+  const out = await callLLM({ provider: 'openai', apiKey: 'sk-x', model: 'gpt-5.5', prompt: { system: 's', user: 'u' }, fetchImpl: fakeFetch });
   assert.equal(captured.url, 'https://api.openai.com/v1/chat/completions');
   assert.equal(captured.opts.headers.Authorization, 'Bearer sk-x');
   assert.equal(out.summary, 'ok');
@@ -117,10 +117,23 @@ test('callLLM(gemini) embeds api key in querystring and parses candidates', asyn
       text: async () => '',
     };
   };
-  const out = await callLLM({ provider: 'gemini', apiKey: 'gKey', model: 'gemini-2.0-flash', prompt: { system: 's', user: 'u' }, fetchImpl: fakeFetch });
-  assert.ok(captured.url.includes('gemini-2.0-flash'));
+  const out = await callLLM({ provider: 'gemini', apiKey: 'gKey', model: 'gemini-3.1-pro', prompt: { system: 's', user: 'u' }, fetchImpl: fakeFetch });
+  assert.ok(captured.url.includes('gemini-3.1-pro'));
   assert.ok(captured.url.includes('key=gKey'));
   assert.equal(out.summary, 'g');
+});
+
+
+test('T92: resolveModel auto-upgrades deprecated aliases', async () => {
+  const { resolveModel, DEPRECATED_MODEL_ALIASES, DEFAULT_MODEL_BY_PROVIDER } = require('../ai-advisor');
+  // deprecated alias gets upgraded
+  assert.equal(resolveModel('anthropic', 'claude-sonnet-4-5'), DEPRECATED_MODEL_ALIASES['claude-sonnet-4-5']);
+  assert.equal(resolveModel('openai', 'gpt-4o-mini'), DEPRECATED_MODEL_ALIASES['gpt-4o-mini']);
+  // current model passes through unchanged
+  assert.equal(resolveModel('anthropic', 'claude-sonnet-4-6'), 'claude-sonnet-4-6');
+  // empty/undefined falls back to provider default
+  assert.equal(resolveModel('anthropic', null), DEFAULT_MODEL_BY_PROVIDER.anthropic);
+  assert.equal(resolveModel('openai', ''), DEFAULT_MODEL_BY_PROVIDER.openai);
 });
 
 test('callLLM unsupported provider throws', async () => {
