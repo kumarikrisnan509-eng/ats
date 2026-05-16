@@ -159,7 +159,11 @@ async function callLLM({ provider, apiKey, model, prompt, fetchImpl }) {
     }
     const j = await resp.json();
     const text = (j.content && j.content[0] && j.content[0].text) || '';
-    return _parseJsonResponse(text);
+    const usage = {
+      prompt_tokens: (j.usage && j.usage.input_tokens) || 0,
+      completion_tokens: (j.usage && j.usage.output_tokens) || 0,
+    };
+    return { advice: _parseJsonResponse(text), usage };
   }
 
   if (provider === 'openai') {
@@ -192,7 +196,11 @@ async function callLLM({ provider, apiKey, model, prompt, fetchImpl }) {
     }
     const j = await resp.json();
     const text = (j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '';
-    return _parseJsonResponse(text);
+    const usage = {
+      prompt_tokens: (j.usage && j.usage.prompt_tokens) || 0,
+      completion_tokens: (j.usage && j.usage.completion_tokens) || 0,
+    };
+    return { advice: _parseJsonResponse(text), usage };
   }
 
   if (provider === 'gemini') {
@@ -212,10 +220,61 @@ async function callLLM({ provider, apiKey, model, prompt, fetchImpl }) {
     }
     const j = await resp.json();
     const text = (j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts && j.candidates[0].content.parts[0] && j.candidates[0].content.parts[0].text) || '';
-    return _parseJsonResponse(text);
+    const usage = {
+      prompt_tokens: (j.usageMetadata && j.usageMetadata.promptTokenCount) || 0,
+      completion_tokens: (j.usageMetadata && j.usageMetadata.candidatesTokenCount) || 0,
+    };
+    return { advice: _parseJsonResponse(text), usage };
   }
 
   throw new Error(`unsupported provider: ${provider}`);
+}
+
+// T99-A3: Provider+model rate card (USD per 1M tokens). Used by estimateCost() to
+// log a real ₹ figure per call into ai_calls. Conservative defaults when model is
+// unknown — we pick the priciest in the family so the cap never silently overruns.
+// Updated May 2026. USD->INR = 85 (rounded; refresh if FX moves >5%).
+const USD_INR = 85;
+const PRICE_USD_PER_M = {
+  // Anthropic
+  'claude-opus-4-7':      { in: 15.00, out: 75.00 },
+  'claude-opus-4-6':      { in: 15.00, out: 75.00 },
+  'claude-sonnet-4-6':    { in:  3.00, out: 15.00 },
+  'claude-haiku-4-5':     { in:  1.00, out:  5.00 },
+  // OpenAI
+  'gpt-5':                { in:  1.25, out: 10.00 },
+  'gpt-5-mini':           { in:  0.25, out:  2.00 },
+  'gpt-5-nano':           { in:  0.10, out:  0.40 },
+  'o3':                   { in:  2.00, out:  8.00 },
+  // Gemini
+  'gemini-3.1-pro-preview':   { in:  1.25, out: 10.00 },
+  'gemini-3.1-flash':         { in:  0.30, out:  2.50 },
+  'gemini-3.1-flash-lite':    { in:  0.10, out:  0.40 },
+};
+function _priceFor(model) {
+  if (!model) return { in: 3.0, out: 15.0 };       // default: Sonnet rate
+  if (PRICE_USD_PER_M[model]) return PRICE_USD_PER_M[model];
+  // Family fallback
+  if (/opus/i.test(model))   return { in: 15.0, out: 75.0 };
+  if (/sonnet/i.test(model)) return { in: 3.0,  out: 15.0 };
+  if (/haiku/i.test(model))  return { in: 1.0,  out: 5.0 };
+  if (/gpt-5-nano/i.test(model))  return { in: 0.10, out: 0.40 };
+  if (/gpt-5-mini/i.test(model))  return { in: 0.25, out: 2.00 };
+  if (/^(gpt-5|o[0-9])/i.test(model)) return { in: 1.25, out: 10.0 };
+  if (/flash-lite/i.test(model))  return { in: 0.10, out: 0.40 };
+  if (/flash/i.test(model))       return { in: 0.30, out: 2.50 };
+  if (/pro/i.test(model))         return { in: 1.25, out: 10.0 };
+  return { in: 3.0, out: 15.0 };  // worst-case default
+}
+/** Compute ₹ cost for a single call given token usage. */
+function estimateCost({ provider, model, prompt_tokens, completion_tokens }) {
+  const p = _priceFor(model);
+  const usd = ((prompt_tokens || 0) * p.in + (completion_tokens || 0) * p.out) / 1_000_000;
+  return +(usd * USD_INR).toFixed(4);     // ₹ to 4 decimals
+}
+/** Cheap pre-call estimate so the spend-cap check has something before the LLM responds. */
+function estimateCostBudget({ provider, model, expectedInTokens = 800, expectedOutTokens = 1500 }) {
+  return estimateCost({ provider, model, prompt_tokens: expectedInTokens, completion_tokens: expectedOutTokens });
 }
 
 /**
@@ -273,5 +332,8 @@ module.exports = {
   buildPrompt,
   callLLM,
   normalizeAdvice,
-  _internal: { _parseJsonResponse },
+  // T99-A3
+  estimateCost,
+  estimateCostBudget,
+  _internal: { _parseJsonResponse, _priceFor },
 };

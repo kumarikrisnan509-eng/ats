@@ -40,6 +40,8 @@ const AiKeysScreen = () => {
   const [keys, setKeys] = React.useState(null);            // server state
   const [supportedProviders, setSupported] = React.useState(['anthropic', 'openai', 'gemini']);
   const [usage, setUsage] = React.useState({});
+  const [usageMeta, setUsageMeta] = React.useState({ cap_inr: 50, spent_today_inr: 0, cap_remaining_inr: 50, cap_used_pct: 0, byPeriod: {} });
+  const [capDraft, setCapDraft] = React.useState('');     // T99-C1 spend-cap editor
   const [drafts, setDrafts] = React.useState({});          // {anthropic: {key:'', model:''}, ...}
   const [busy, setBusy] = React.useState({});              // {anthropic: 'save'|'test'|'remove'|null}
   const [results, setResults] = React.useState({});        // {anthropic: {ok, msg}, ...}
@@ -67,12 +69,40 @@ const AiKeysScreen = () => {
             .catch(() => { /* fall back to hardcoded list */ });
         }
       }
-      if (u.ok) setUsage(u.usage || {});
+      if (u.ok) {
+        setUsage(u.usage || {});
+        setUsageMeta({
+          cap_inr: u.cap_inr != null ? u.cap_inr : 50,
+          spent_today_inr: u.spent_today_inr || 0,
+          cap_remaining_inr: u.cap_remaining_inr != null ? u.cap_remaining_inr : 50,
+          cap_used_pct: u.cap_used_pct || 0,
+          byPeriod: u.byPeriod || {},
+        });
+        if (!capDraft) setCapDraft(String(u.cap_inr != null ? u.cap_inr : 50));
+      }
     } catch (e) { console.warn('[ai-keys] refresh failed:', e.message); }
   }, []);
   React.useEffect(() => { refresh(); }, [refresh]);
 
   const flash = (msg, ok = true) => { setToast({ msg, ok }); setTimeout(() => setToast(null), 3500); };
+
+  // T99-C1: save daily spend cap. PUT /api/me/preferences merges with existing prefs.
+  const saveCap = async () => {
+    const n = Number(capDraft);
+    if (!Number.isFinite(n) || n < 0 || n > 5000) { flash('Cap must be ₹0–5000', false); return; }
+    try {
+      // Pull current prefs so we don't overwrite other fields with nulls
+      const cur = await fetch('/api/me/preferences', { credentials: 'include' }).then(r => r.json()).catch(() => null);
+      const body = { ...(cur && cur.preferences ? cur.preferences : {}), daily_ai_cap_inr: n };
+      const r = await fetch('/api/me/preferences', {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).then(r => r.json());
+      if (r.ok) { flash(`Daily AI cap set to ₹${n}`); refresh(); }
+      else flash(r.reason || 'cap_save_failed', false);
+    } catch (e) { flash('cap_save_failed: ' + e.message, false); }
+  };
 
   const findKey = (provider) => (keys || []).find(k => k.provider === provider);
   const setDraft = (provider, patch) => setDrafts(d => ({ ...d, [provider]: { ...d[provider], ...patch } }));
@@ -166,6 +196,71 @@ const AiKeysScreen = () => {
           color: toast.ok ? 'var(--up)' : 'var(--danger)', border: '1px solid currentColor',
         }}>{toast.ok ? '✓' : '✕'} {toast.msg}</div>
       )}
+
+      {/* T99-A3/C1: spend summary + daily cap editor */}
+      <div style={{
+        padding: 14, marginBottom: 16, borderRadius: 8, border: '1px solid var(--border)',
+        background: 'var(--surface-2, rgba(0,0,0,0.02))',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Today's AI spend</div>
+            <div style={{ fontSize: 28, fontWeight: 700, fontFamily: 'var(--mono)' }}>
+              ₹{Number(usageMeta.spent_today_inr || 0).toFixed(2)}
+              <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-3)', marginLeft: 6 }}>
+                / ₹{Number(usageMeta.cap_inr || 0).toFixed(0)} cap
+              </span>
+            </div>
+            <div style={{
+              marginTop: 6, height: 6, borderRadius: 4, overflow: 'hidden',
+              background: 'color-mix(in oklab, currentColor 10%, transparent)',
+            }}>
+              <div style={{
+                width: Math.min(100, Math.max(0, Number(usageMeta.cap_used_pct || 0))) + '%',
+                height: '100%',
+                background: usageMeta.cap_used_pct > 90 ? 'var(--danger)' : usageMeta.cap_used_pct > 70 ? 'var(--warn, #d97706)' : 'var(--up)',
+                transition: 'width 200ms ease',
+              }}/>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 6 }}>
+              {usageMeta.cap_used_pct > 90 ? 'Near cap — new AI calls will be blocked.' :
+               usageMeta.cap_used_pct > 70 ? 'Approaching cap.' :
+               `${(usageMeta.cap_remaining_inr || 0).toFixed(2)} remaining today.`}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+            <div>
+              <label style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', marginBottom: 4 }}>
+                Daily cap (₹)
+              </label>
+              <input
+                type="number" min="0" max="5000" step="10"
+                value={capDraft}
+                onChange={e => setCapDraft(e.target.value)}
+                style={{
+                  padding: '6px 10px', fontSize: 14, fontFamily: 'var(--mono)',
+                  border: '1px solid var(--border)', borderRadius: 6, width: 100,
+                  background: 'var(--surface, white)', color: 'var(--text)',
+                }}
+              />
+            </div>
+            <button
+              onClick={saveCap}
+              disabled={!capDraft || Number(capDraft) === Number(usageMeta.cap_inr)}
+              style={{
+                padding: '7px 14px', fontSize: 13, borderRadius: 6,
+                border: '1px solid var(--accent, #3b82f6)',
+                background: 'var(--accent, #3b82f6)', color: 'white',
+                cursor: 'pointer', opacity: (!capDraft || Number(capDraft) === Number(usageMeta.cap_inr)) ? 0.5 : 1,
+              }}
+            >Save cap</button>
+          </div>
+        </div>
+        <div style={{ marginTop: 10, fontSize: 11, color: 'var(--text-3)' }}>
+          Hard cap on total ₹ ATS spends on AI per day, across all your providers. Default ₹50. When reached, new AI calls return <code>spend_cap_exceeded</code> until midnight IST or you raise the cap.
+        </div>
+      </div>
 
       <div className="grid grid-3" style={{ gap: 16, marginBottom: 16 }}>
         {supportedProviders.map(provider => {

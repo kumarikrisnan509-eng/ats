@@ -75,12 +75,15 @@ class Scanner {
    * @param {(event:string,data:object)=>void} [opts.audit]
    * @param {string} [opts.storePath]
    */
-  constructor({ broker, watchlist, notify, audit, storePath }) {
+  constructor({ broker, watchlist, notify, audit, storePath, surveillance }) {
     this.broker = broker;
     this.watchlist = watchlist;
     this.notify = notify || (() => Promise.resolve());
     this.audit = audit || (() => {});
     this.storePath = storePath || DEFAULT_STORE;
+    // T99-E2: optional NseSurveillance gate. When provided, skip ASM/GSM/T2T symbols.
+    this.surveillance = surveillance || null;
+    this._lastSkipped = [];
     /** Map<"SYMBOL|SIGNAL", { date:'YYYY-MM-DD', value:number }> */
     this._fired = new Map();
     /** Array of { ts, symbol, signal, value, message } — most-recent-first. */
@@ -212,8 +215,30 @@ class Scanner {
     this._inflight = true;
 
     const startedAt = Date.now();
-    const symbols = (this.watchlist ? this.watchlist.list() : [])
+    let symbols = (this.watchlist ? this.watchlist.list() : [])
       .filter(s => this._isScannable(s));
+
+    // T99-E2: surveillance gate. Refresh ASM/GSM/T2T list (if surveillance is wired),
+    // then filter out any restricted names BEFORE we fetch candles. Skips are recorded
+    // for audit and exposed via getStatus().
+    const skipped = [];
+    if (this.surveillance) {
+      try { await this.surveillance._getFresh(); } catch (e) { console.warn('[scanner] surveillance refresh failed:', e.message); }
+      const safe = [];
+      for (const sym of symbols) {
+        const verdict = this.surveillance.classifySync(sym);
+        if (verdict) {
+          skipped.push({ symbol: sym, ...verdict });
+          this.audit('scanner.skip_surveillance', { symbol: sym, gate: verdict.reason, list: verdict.list, stage: verdict.stage });
+        } else {
+          safe.push(sym);
+        }
+      }
+      if (skipped.length) console.log(`[scanner] surveillance gate blocked ${skipped.length} symbol(s):`, skipped.slice(0,5).map(x => `${x.symbol}(${x.reason})`).join(', '));
+      symbols = safe;
+    }
+    this._lastSkipped = skipped;
+
     const subset = Number.isFinite(limit) ? symbols.slice(0, limit) : symbols;
 
     let scanned = 0;

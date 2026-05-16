@@ -26,6 +26,8 @@ const { notify, postTelegram } = require('./notify');
 const { Alerts }       = require('./alerts');
 const { Watchlist }    = require('./watchlist');
 const { Scanner, classifyRegime } = require('./scanner');
+const { NseSurveillance } = require('./nse-surveillance');     // T99-E2 ASM/GSM/T2T gate
+let _surveillance = null;     // T99-E2 NseSurveillance instance (lazy refresh)
 const { runBacktest, computeSignal } = require('./backtest');
 const { PaperTrading } = require('./paper');
 const { PnlAttribution } = require('./pnl-attribution');
@@ -126,12 +128,19 @@ async function init() {
   });
   watchlist.load();
 
+  // T99-E2: build surveillance gate once; it will refresh lazily on first scanner run
+  // and re-fetch every 60min thereafter. Failures are tolerated (cached or empty maps).
+  _surveillance = new NseSurveillance({});
+  // Kick off a warm-up refresh in the background; don't block boot.
+  _surveillance.refresh().catch(e => console.warn('[server] surveillance warm-up failed:', e.message));
+
   scanner = new Scanner({
     broker,
     watchlist,
     notify,
     audit,
     storePath: process.env.SCANNER_PATH || '/var/lib/ats/tokens/_scanner.json',
+    surveillance: _surveillance,
   });
   scanner.load();
   scanner.scheduleDaily();
@@ -388,9 +397,21 @@ app.get('/api/health-deep', async (_req, res) => {
   try { checks.vault = !!vault; } catch (e) { checks.vault = false; }
   try { checks.brokerResolver = !!_brokerResolver; } catch (e) { checks.brokerResolver = false; }
   try { checks.broker = !!(broker && broker.name); } catch (e) { checks.broker = false; }
+  try {
+    if (_surveillance) {
+      const st = _surveillance.status();
+      checks.surveillance = st.ready;
+      checks.surveillanceCounts = st.counts;
+      checks.surveillanceAgeMin = st.ageMs != null ? Math.round(st.ageMs / 60000) : null;
+    } else {
+      checks.surveillance = false;
+    }
+  } catch (e) { checks.surveillance = false; }
   checks.uptimeSec = Math.round(process.uptime());
   checks.memMB = Math.round(process.memoryUsage().rss / 1024 / 1024);
-  res.json({ ok: Object.values(checks).every(v => v !== false), checks });
+  // Surveillance is "soft" — treat boolean false as OK for top-level ok flag (NSE archive can be down briefly).
+  const hardChecks = ['db', 'vault', 'brokerResolver'];
+  res.json({ ok: hardChecks.every(k => checks[k] !== false), checks });
 });
 
 app.disable('x-powered-by');

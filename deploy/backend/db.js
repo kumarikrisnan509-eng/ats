@@ -139,6 +139,12 @@ function makeRepo(conn) {
     wlAdd:    conn.prepare('INSERT OR IGNORE INTO watchlist (user_id, symbol, exchange) VALUES (?, ?, ?)'),
     wlRemove: conn.prepare('DELETE FROM watchlist WHERE user_id = ? AND symbol = ?'),
     wlList:   conn.prepare('SELECT symbol, exchange, added_at FROM watchlist WHERE user_id = ? ORDER BY added_at DESC'),
+
+    // T99-A3 / C1: ai_calls audit log + spend rollups + daily-cap getter
+    aiCallInsert: conn.prepare("INSERT INTO ai_calls (user_id, workflow, provider, model, prompt_tokens, completion_tokens, cost_inr, status, error) VALUES (@user_id, @workflow, @provider, @model, @prompt_tokens, @completion_tokens, @cost_inr, @status, @error)"),
+    aiCallsDailySpend: conn.prepare("SELECT COALESCE(SUM(cost_inr), 0) AS spent FROM ai_calls WHERE user_id = ? AND status = 'ok' AND date(ts) = date('now')"),
+    aiCallsByPeriod: conn.prepare("SELECT provider, COUNT(*) AS calls, COALESCE(SUM(cost_inr),0) AS cost, COALESCE(SUM(prompt_tokens),0) AS prompt_tokens, COALESCE(SUM(completion_tokens),0) AS completion_tokens FROM ai_calls WHERE user_id = ? AND ts > datetime('now', ?) AND status = 'ok' GROUP BY provider"),
+    aiDailyCap: conn.prepare("SELECT COALESCE(daily_ai_cap_inr, 50) AS cap FROM user_preferences WHERE user_id = ?"),
   };
 
   // Tier 53: extra repos (alerts, paper, autorun, pnl)
@@ -193,9 +199,9 @@ function makeRepo(conn) {
 
     // Tier 84: preferences
     prefsGet: conn.prepare('SELECT * FROM user_preferences WHERE user_id = ?'),
-    prefsUpsert: conn.prepare(`INSERT INTO user_preferences (user_id, theme, density, currency_format, round_rupees, show_pnl_in_header, updated_at)
-      VALUES (@user_id, @theme, @density, @currency_format, @round_rupees, @show_pnl_in_header, datetime('now'))
-      ON CONFLICT(user_id) DO UPDATE SET theme=@theme, density=@density, currency_format=@currency_format, round_rupees=@round_rupees, show_pnl_in_header=@show_pnl_in_header, updated_at=datetime('now')`),
+    prefsUpsert: conn.prepare(`INSERT INTO user_preferences (user_id, theme, density, currency_format, round_rupees, show_pnl_in_header, daily_ai_cap_inr, updated_at)
+      VALUES (@user_id, @theme, @density, @currency_format, @round_rupees, @show_pnl_in_header, @daily_ai_cap_inr, datetime('now'))
+      ON CONFLICT(user_id) DO UPDATE SET theme=@theme, density=@density, currency_format=@currency_format, round_rupees=@round_rupees, show_pnl_in_header=@show_pnl_in_header, daily_ai_cap_inr=@daily_ai_cap_inr, updated_at=datetime('now')`),
     // Tier 84: notifications
     notifGet: conn.prepare('SELECT * FROM user_notifications WHERE user_id = ?'),
     notifUpsert: conn.prepare(`INSERT INTO user_notifications (user_id, email_enabled, email_digest_time, telegram_enabled, telegram_bot_token, telegram_chat_id, webhook_enabled, webhook_url, webhook_secret, updated_at)
@@ -235,6 +241,28 @@ function makeRepo(conn) {
     pnl: {
       upsertDay: (row) => x.pnlUpsertDay.run(row),
       recent: (uid, n) => x.pnlRecent.all(uid, Math.min(365, Math.max(1, n || 7))),
+    },
+
+    // T99-A3 / C1: AI call log + daily-cap helpers
+    ai: {
+      logCall: (row) => stmts.aiCallInsert.run({
+        user_id: row.user_id,
+        workflow: row.workflow || null,
+        provider: row.provider,
+        model: row.model || null,
+        prompt_tokens: row.prompt_tokens || 0,
+        completion_tokens: row.completion_tokens || 0,
+        cost_inr: row.cost_inr || 0,
+        status: row.status || 'ok',
+        error: row.error || null,
+      }),
+      dailySpend: (uid) => Number(stmts.aiCallsDailySpend.get(uid).spent || 0),
+      // window: '-1 day' | '-7 days' | '-30 days'
+      byPeriod: (uid, window) => stmts.aiCallsByPeriod.all(uid, window),
+      dailyCapInr: (uid) => {
+        const row = stmts.aiDailyCap.get(uid);
+        return row ? Number(row.cap || 50) : 50;
+      },
     },
 
     users: {
@@ -312,15 +340,29 @@ function makeRepo(conn) {
     },
     // Tier 84: per-user preferences
     prefs: {
-      get: (userId) => x.prefsGet.get(userId) || { user_id: userId, theme: 'auto', density: 'comfortable', currency_format: 'abbrev', round_rupees: 0, show_pnl_in_header: 1 },
-      upsert: (row) => x.prefsUpsert.run({
-        user_id: row.user_id,
-        theme: ['light','dark','auto'].includes(row.theme) ? row.theme : 'auto',
-        density: ['comfortable','compact'].includes(row.density) ? row.density : 'comfortable',
-        currency_format: ['abbrev','full'].includes(row.currency_format) ? row.currency_format : 'abbrev',
-        round_rupees: row.round_rupees ? 1 : 0,
-        show_pnl_in_header: row.show_pnl_in_header == null ? 1 : (row.show_pnl_in_header ? 1 : 0),
-      }),
+      get: (userId) => {
+        const row = x.prefsGet.get(userId);
+        // Default cap of ₹50/day matches the column default and the v11 plan's quality-first defaults.
+        // Cap chosen for personal tier (1 user) — bump in Settings when ready to use more.
+        const base = { user_id: userId, theme: 'auto', density: 'comfortable', currency_format: 'abbrev', round_rupees: 0, show_pnl_in_header: 1, daily_ai_cap_inr: 50 };
+        if (!row) return base;
+        return { ...base, ...row, daily_ai_cap_inr: row.daily_ai_cap_inr == null ? 50 : Number(row.daily_ai_cap_inr) };
+      },
+      upsert: (row) => {
+        // T99-C1: clamp cap to [0, 5000] to avoid fat-finger ₹50,000 entries
+        let cap = Number(row.daily_ai_cap_inr);
+        if (!Number.isFinite(cap)) cap = 50;
+        cap = Math.max(0, Math.min(5000, cap));
+        return x.prefsUpsert.run({
+          user_id: row.user_id,
+          theme: ['light','dark','auto'].includes(row.theme) ? row.theme : 'auto',
+          density: ['comfortable','compact'].includes(row.density) ? row.density : 'comfortable',
+          currency_format: ['abbrev','full'].includes(row.currency_format) ? row.currency_format : 'abbrev',
+          round_rupees: row.round_rupees ? 1 : 0,
+          show_pnl_in_header: row.show_pnl_in_header == null ? 1 : (row.show_pnl_in_header ? 1 : 0),
+          daily_ai_cap_inr: cap,
+        });
+      },
     },
     // Tier 84: per-user notification settings
     notif: {

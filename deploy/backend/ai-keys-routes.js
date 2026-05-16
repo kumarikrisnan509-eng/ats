@@ -7,7 +7,7 @@
 
 'use strict';
 
-const { SUPPORTED_PROVIDERS, DEFAULT_MODEL_BY_PROVIDER, DEPRECATED_MODEL_ALIASES, resolveModel, buildPrompt, callLLM, normalizeAdvice } = require('./ai-advisor');
+const { SUPPORTED_PROVIDERS, DEFAULT_MODEL_BY_PROVIDER, DEPRECATED_MODEL_ALIASES, resolveModel, buildPrompt, callLLM, normalizeAdvice, estimateCost, estimateCostBudget } = require('./ai-advisor');
 
 function createAiKeysRouter({ db, vault, requireAuth, brokerResolver }) {
   const express = require('express');
@@ -134,6 +134,16 @@ function createAiKeysRouter({ db, vault, requireAuth, brokerResolver }) {
         if (row && row.model_pref) modelForTest = row.model_pref;
       }
       const resolvedModel = resolveModel(provider, modelForTest);
+
+      // T99-C1: pre-check daily AI spend cap (ping is tiny but still counts)
+      const cap = db.ai.dailyCapInr(req.user.id);
+      const alreadySpent = db.ai.dailySpend(req.user.id);
+      const budget = estimateCostBudget({ provider, model: resolvedModel, expectedInTokens: 20, expectedOutTokens: 20 });
+      if (alreadySpent + budget > cap) {
+        try { db.ai.logCall({ user_id: req.user.id, workflow: 'test', provider, model: resolvedModel, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'blocked_by_cap', error: `daily cap ₹${cap} reached (spent ₹${alreadySpent.toFixed(2)})` }); } catch (_) {}
+        return res.status(429).json({ ok: false, reason: 'spend_cap_exceeded', cap_inr: cap, spent_inr: +alreadySpent.toFixed(2), detail: `Daily AI spend cap of ₹${cap} reached. Raise it in Settings to continue today.` });
+      }
+
       const t0 = Date.now();
       // Minimal validation call per provider (cheap "hi" prompt, JSON mode where supported)
       const result = await callLLM({
@@ -147,7 +157,11 @@ function createAiKeysRouter({ db, vault, requireAuth, brokerResolver }) {
         fetchImpl: globalThis.fetch,
       });
       const elapsed_ms = Date.now() - t0;
-      res.json({ ok: true, provider, elapsed_ms, sample: typeof result === 'string' ? result.slice(0, 80) : null });
+      // T99-A3: log to ai_calls with real token usage + cost
+      const usage = (result && result.usage) || { prompt_tokens: 0, completion_tokens: 0 };
+      const cost_inr = estimateCost({ provider, model: resolvedModel, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens });
+      try { db.ai.logCall({ user_id: req.user.id, workflow: 'test', provider, model: resolvedModel, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null }); } catch (e) { console.warn('[ai-keys] ai_calls log failed:', e.message); }
+      res.json({ ok: true, provider, model: resolvedModel, elapsed_ms, cost_inr, usage, sample: typeof result === 'string' ? result.slice(0, 80) : null });
     } catch (e) {
       const msg = e && e.message ? e.message : 'test_failed';
       // T92: explicit 404 / not_found mapping so users see a clean error
@@ -159,6 +173,8 @@ function createAiKeysRouter({ db, vault, requireAuth, brokerResolver }) {
                   : /\b429\b|rate[ _-]?limit/i.test(msg) ? 'rate_limited'
                   : /timeout/i.test(msg) ? 'timeout'
                   : 'send_failed';
+      // T99-A3: log error to ai_calls (cost=0, status=error)
+      try { db.ai.logCall({ user_id: req.user.id, workflow: 'test', provider: req.body && req.body.provider, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: `${reason}: ${msg.slice(0,200)}` }); } catch (_) {}
       res.status(400).json({ ok: false, provider: req.body && req.body.provider, reason, detail: msg });
     }
   });
@@ -167,21 +183,36 @@ function createAiKeysRouter({ db, vault, requireAuth, brokerResolver }) {
   // Tier 86: GET /api/me/ai-keys/usage -- aggregate per-provider call counts from audit
   router.get('/usage', (req, res) => {
     try {
-      // Aggregate from errors_log or audit if available. Conservative implementation:
-      // count entries from a hypothetical ai_advisor_calls table if it exists, else return zeros.
-      const out = {};
-      for (const p of SUPPORTED_PROVIDERS) out[p] = { calls_30d: 0, est_cost_inr: 0 };
-      try {
-        // If we ever add an ai_calls table, query it here. For now return placeholder.
-        const tableExists = db._conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='ai_calls'").get();
-        if (tableExists) {
-          const rows = db._conn.prepare("SELECT provider, COUNT(*) AS calls, COALESCE(SUM(cost_inr),0) AS cost FROM ai_calls WHERE user_id = ? AND ts > datetime('now','-30 days') GROUP BY provider").all(req.user.id);
+      // T99-A3: real usage from ai_calls table.
+      // Returns today, 7d, 30d breakdown per provider + the user's current daily cap + today's spend.
+      const periods = [['today', '-1 day'], ['week', '-7 days'], ['month', '-30 days']];
+      const byPeriod = {};
+      for (const [name, window] of periods) {
+        const out = {};
+        for (const p of SUPPORTED_PROVIDERS) out[p] = { calls: 0, cost_inr: 0, prompt_tokens: 0, completion_tokens: 0 };
+        try {
+          const rows = db.ai.byPeriod(req.user.id, window);
           for (const r of rows) {
-            if (out[r.provider]) { out[r.provider].calls_30d = r.calls; out[r.provider].est_cost_inr = r.cost; }
+            if (out[r.provider]) {
+              out[r.provider] = { calls: r.calls, cost_inr: +Number(r.cost || 0).toFixed(4), prompt_tokens: r.prompt_tokens, completion_tokens: r.completion_tokens };
+            }
           }
-        }
-      } catch (_) {}
-      res.json({ ok: true, usage: out, period: '30d' });
+        } catch (_) {}
+        byPeriod[name] = out;
+      }
+      const cap_inr = db.ai.dailyCapInr(req.user.id);
+      const spent_today = +db.ai.dailySpend(req.user.id).toFixed(4);
+      res.json({
+        ok: true,
+        period: '30d',
+        cap_inr,
+        spent_today_inr: spent_today,
+        cap_remaining_inr: +Math.max(0, cap_inr - spent_today).toFixed(4),
+        cap_used_pct: cap_inr > 0 ? +((spent_today / cap_inr) * 100).toFixed(1) : 0,
+        byPeriod,
+        // Tier 86 back-compat: callers expecting `usage` keyed by provider w/ calls_30d + est_cost_inr
+        usage: Object.fromEntries(Object.entries(byPeriod.month).map(([p, v]) => [p, { calls_30d: v.calls, est_cost_inr: v.cost_inr }])),
+      });
     } catch (e) {
       res.status(500).json({ ok: false, reason: 'usage_failed', detail: e.message });
     }
@@ -269,6 +300,15 @@ function createAdvisorAnalyzeRouter({ db, vault, requireAuth, brokerResolver }) 
       const apiKey = await vault.open(chosen.sealed_key);
       const model = chosen.model_pref || DEFAULT_MODEL_BY_PROVIDER[chosen.provider];
 
+      // T99-C1: pre-check daily AI spend cap
+      const cap = db.ai.dailyCapInr(req.user.id);
+      const alreadySpent = db.ai.dailySpend(req.user.id);
+      const budget = estimateCostBudget({ provider: chosen.provider, model, expectedInTokens: 1500, expectedOutTokens: 1500 });
+      if (alreadySpent + budget > cap) {
+        try { db.ai.logCall({ user_id: req.user.id, workflow: 'analyze', provider: chosen.provider, model, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'blocked_by_cap', error: `daily cap ₹${cap} reached (spent ₹${alreadySpent.toFixed(2)})` }); } catch (_) {}
+        return res.status(429).json({ ok: false, reason: 'spend_cap_exceeded', cap_inr: cap, spent_inr: +alreadySpent.toFixed(2), detail: `Daily AI spend cap of ₹${cap} reached. Raise it in Settings to continue today.` });
+      }
+
       // Gather context: risk metrics + factor exposure + top holdings
       const pnlRows = db.pnl.recent(req.user.id, 252);
       const { computeRiskMetrics } = require('./risk-engine');
@@ -305,14 +345,22 @@ function createAdvisorAnalyzeRouter({ db, vault, requireAuth, brokerResolver }) 
         marketContext: body.marketContext || null,
       });
 
-      const raw = await callLLM({ provider: chosen.provider, apiKey, model, prompt });
+      const llmResult = await callLLM({ provider: chosen.provider, apiKey, model, prompt });
+      // T99-A3: callLLM now returns {advice, usage}; tolerate the old shape too in case
+      // something else still passes raw JSON through.
+      const raw = (llmResult && llmResult.advice !== undefined) ? llmResult.advice : llmResult;
+      const usage = (llmResult && llmResult.usage) || { prompt_tokens: 0, completion_tokens: 0 };
       const advice = normalizeAdvice(raw);
+      const cost_inr = estimateCost({ provider: chosen.provider, model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens });
+      try { db.ai.logCall({ user_id: req.user.id, workflow: 'analyze', provider: chosen.provider, model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null }); } catch (e) { console.warn('[ai-keys] analyze log failed:', e.message); }
 
       res.json({
         ok: true,
         provider: chosen.provider,
         model,
         advice,
+        cost_inr,
+        usage,
         // Echo inputs for transparency (no secrets)
         inputs: {
           hasRiskMetrics: !!(riskMetrics && riskMetrics.enoughData),
@@ -321,6 +369,7 @@ function createAdvisorAnalyzeRouter({ db, vault, requireAuth, brokerResolver }) 
         },
       });
     } catch (e) {
+      try { db.ai.logCall({ user_id: req.user.id, workflow: 'analyze', provider: req.body && req.body.provider, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e && e.message || 'analyze_failed').slice(0,200) }); } catch (_) {}
       res.status(500).json({ ok: false, reason: 'analyze_failed', detail: e.message });
     }
   });

@@ -265,8 +265,10 @@ const AiAdvisorScreen = () => {
           )}
 
           <div style={{ marginTop: 16, padding: 10, background: 'color-mix(in oklab, var(--info, #3b82f6) 8%, transparent)', borderRadius: 6, fontSize: 11, color: 'var(--text-3)' }}>
-            Not financial advice. Inputs: {advice.inputs?.hasRiskMetrics ? '✓ risk metrics' : 'no risk metrics'}, {advice.inputs?.hasFactorExposure ? '✓ factor exposure' : 'no factor exposure'}, {advice.inputs?.holdingCount || 0} holdings.
+            Inputs: {advice.inputs?.hasRiskMetrics ? '✓ risk metrics' : 'no risk metrics'}, {advice.inputs?.hasFactorExposure ? '✓ factor exposure' : 'no factor exposure'}, {advice.inputs?.holdingCount || 0} holdings. Cost: ₹{Number(advice.cost_inr || 0).toFixed(4)}.
           </div>
+          {/* T99-H3: mandatory SEBI advisory disclaimer */}
+          {window.SebiDisclaimer && <window.SebiDisclaimer compact={false}/>}
         </window.Card>
       )}
     </>
