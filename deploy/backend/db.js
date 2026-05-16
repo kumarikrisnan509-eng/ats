@@ -39,6 +39,16 @@ function open(opts = {}) {
   const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
   conn.exec(schema);
 
+  // Tier 79: add per-test bookkeeping columns to broker_accounts (idempotent, ignored if exist)
+  const _tier79Cols = [
+    "ALTER TABLE broker_accounts ADD COLUMN last_test_at TEXT",
+    "ALTER TABLE broker_accounts ADD COLUMN last_test_ok INTEGER",
+    "ALTER TABLE broker_accounts ADD COLUMN last_test_error TEXT",
+  ];
+  for (const sql of _tier79Cols) {
+    try { conn.exec(sql); } catch (e) { /* duplicate column = already migrated */ }
+  }
+
   // Record schema version 1 if not already
   const v = conn.prepare('SELECT COUNT(*) AS n FROM _schema_version').get().n;
   if (v === 0) conn.prepare('INSERT INTO _schema_version (version) VALUES (1)').run();
@@ -107,7 +117,7 @@ function makeRepo(conn) {
     pnlRecent:    conn.prepare('SELECT * FROM pnl_daily WHERE user_id = ? ORDER BY date DESC LIMIT ?'),
 
     // Tier 57: broker_accounts CRUD
-    brokerListByUser: conn.prepare('SELECT id, user_id, broker, broker_user_id, issued_at, expires_at, is_default, created_at, (api_key IS NOT NULL) AS has_api_key, (access_token IS NOT NULL) AS has_access_token, (totp_seed IS NOT NULL) AS has_totp, (feed_token IS NOT NULL) AS has_password FROM broker_accounts WHERE user_id = ? ORDER BY is_default DESC, created_at DESC'),
+    brokerListByUser: conn.prepare('SELECT id, user_id, broker, broker_user_id, issued_at, expires_at, is_default, created_at, last_test_at, last_test_ok, last_test_error, (api_key IS NOT NULL) AS has_api_key, (access_token IS NOT NULL) AS has_access_token, (totp_seed IS NOT NULL) AS has_totp, (feed_token IS NOT NULL) AS has_password FROM broker_accounts WHERE user_id = ? ORDER BY is_default DESC, created_at DESC'),
     brokerGetFull:    conn.prepare('SELECT * FROM broker_accounts WHERE id = ? AND user_id = ?'),
     brokerGetByBrokerForUser: conn.prepare('SELECT * FROM broker_accounts WHERE user_id = ? AND broker = ? ORDER BY is_default DESC, created_at DESC LIMIT 1'),
     brokerUpsert:     conn.prepare(`
@@ -128,6 +138,7 @@ function makeRepo(conn) {
     brokerDelete:     conn.prepare('DELETE FROM broker_accounts WHERE id = ? AND user_id = ?'),
     brokerClearDefault: conn.prepare('UPDATE broker_accounts SET is_default = 0 WHERE user_id = ?'),
     brokerSetDefault:   conn.prepare('UPDATE broker_accounts SET is_default = 1 WHERE id = ? AND user_id = ?'),
+    brokerRecordTest:   conn.prepare("UPDATE broker_accounts SET last_test_at = datetime('now'), last_test_ok = ?, last_test_error = ? WHERE id = ? AND user_id = ?"),
   };
 
   return {
@@ -216,6 +227,9 @@ function makeRepo(conn) {
         x.brokerClearDefault.run(userId);
         return x.brokerSetDefault.run(id, userId);
       },
+      /** Tier 79: record test outcome (called by /broker-test and /broker-auto-reauth). */
+      recordTest: (userId, id, ok, errMsg) =>
+        x.brokerRecordTest.run(ok ? 1 : 0, errMsg ? String(errMsg).slice(0, 300) : null, id, userId),
     },
   };
 }
