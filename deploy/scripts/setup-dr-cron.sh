@@ -58,11 +58,21 @@ echo "==> [2/4] ensure DR auth token at $TOKEN_PATH"
 if [[ ! -s "$TOKEN_PATH" ]] || [[ "$(cat "$TOKEN_PATH" 2>/dev/null)" == "unset" ]]; then
   head -c 32 /dev/urandom | xxd -p | tr -d '\n' > "$TOKEN_PATH"
   echo "" >> "$TOKEN_PATH"
-  chmod 0440 "$TOKEN_PATH"
-  chown root:root "$TOKEN_PATH"
   echo "    generated new 32-byte token"
+fi
+# Always normalize perms (idempotent — also fixes T-36 v1 tokens written as
+# root:root 0440 that the container's non-root process couldn't read).
+# Group 'ats' (GID 987) matches backend.env's existing pattern.
+if getent group ats >/dev/null 2>&1; then
+  chown root:ats "$TOKEN_PATH"
+  chmod 0440 "$TOKEN_PATH"
+  echo "    perms set: root:ats 0440 (readable by container)"
 else
-  echo "    token already present - leaving as-is"
+  # No 'ats' group — make world-readable. The token is a shared secret, not a
+  # private key; this matches how master.key is mode 0444 in this deploy.
+  chown root:root "$TOKEN_PATH"
+  chmod 0444 "$TOKEN_PATH"
+  echo "    perms set: root:root 0444 (no ats group on host)"
 fi
 
 # The backend container mounts /etc/ats:/etc/ats:ro (per T99-T36 compose change)

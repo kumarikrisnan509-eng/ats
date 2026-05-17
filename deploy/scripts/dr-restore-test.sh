@@ -26,7 +26,7 @@ REMOTE="${REMOTE:-ats-archive:ats-audit-archive}"
 DR_STAGE="${DR_STAGE:-/var/tmp/ats-dr-test}"
 DR_LOG="${DR_LOG:-/var/log/ats/dr-restore-test.log}"
 MASTER_KEY_PATH="${MASTER_KEY_PATH:-/etc/ats/master.key}"
-PROD_DB="${PROD_DB:-/data/ats/ats.db}"
+PROD_DB="${PROD_DB:-/var/lib/ats/tokens/ats.db}"  # T-36 fix: actual prod path
 PROD_TOKENS="${PROD_TOKENS:-/var/lib/ats/tokens}"
 NOTIFY=0
 [[ "${1:-}" == "--notify" ]] && NOTIFY=1
@@ -150,10 +150,20 @@ emit | tee -a "$DR_LOG"
 # === 7. Optional: POST to backend so dashboard can show ===
 if [[ "$NOTIFY" -eq 1 ]]; then
   log "step: POST to /api/admin/dr-status"
-  curl -s -X POST "http://127.0.0.1:8080/api/admin/dr-status" \
+  # T-36 fix: capture status code + body separately so failures are debuggable.
+  # The POST goes through nginx (https) -> backend container — using
+  # 127.0.0.1:8080 directly bypasses TLS for less moving parts.
+  TOKEN="$(cat /etc/ats/.dr-token 2>/dev/null || echo unset)"
+  HTTP=$(curl -s -o /tmp/dr-post.out -w '%{http_code}' -X POST "http://127.0.0.1:8080/api/admin/dr-status" \
     -H "Content-Type: application/json" \
-    -H "x-ats-dr-token: $(cat /etc/ats/.dr-token 2>/dev/null || echo unset)" \
-    -d "$(emit)" >> "$DR_LOG" 2>&1 || log "WARN: admin POST failed (non-fatal)"
+    -H "x-ats-dr-token: $TOKEN" \
+    -d "$(emit)") || HTTP="curl_err"
+  if [[ "$HTTP" == "200" ]]; then
+    log "POST OK (200): $(cat /tmp/dr-post.out)"
+  else
+    log "WARN: admin POST failed: HTTP=$HTTP body=$(cat /tmp/dr-post.out 2>/dev/null | head -c 200)"
+  fi
+  rm -f /tmp/dr-post.out
 fi
 
 exit 0
