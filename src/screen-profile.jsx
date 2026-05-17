@@ -319,49 +319,48 @@ const ApiTab = () => (
 
 const PlanTab = () => (
   <>
+    {/* T99-T84: honest plan/billing — every signed-in user previously saw
+        'Pro · ₹2,499/mo · renews 12 May 2026' with fake invoice rows. There
+        is no billing/subscription service wired up yet, so the only honest
+        thing to show is a 'no active subscription' state plus a banner. */}
+    <div role="note" style={{
+      padding: '8px 12px', marginBottom: 12, borderRadius: 6,
+      border: '1px solid color-mix(in oklab, var(--warn, #d97706) 35%, var(--border))',
+      background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
+      fontSize: 12, color: 'var(--text-2)',
+    }}>
+      <strong>Billing not wired yet.</strong>{' '}
+      The plan/subscription service hasn't shipped. Until it does, this app is
+      effectively free to use and there are no usage caps on AI tokens,
+      strategies, or backtests. Plan management UI below is a placeholder.
+    </div>
+
     <Card title="Current plan" style={{ marginBottom: 16 }}>
       <div className="between">
         <div>
           <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
-            <h3 style={{ fontSize: 22, fontWeight: 600, letterSpacing: "-0.01em" }}>Pro</h3>
-            <Pill kind="info">Active</Pill>
+            <h3 style={{ fontSize: 22, fontWeight: 600, letterSpacing: "-0.01em" }}>—</h3>
+            <Pill kind="muted">No subscription</Pill>
           </div>
-          <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>₹2,499 / month · renews 12 May 2026</div>
+          <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>No active billing plan</div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn">Change plan</button>
-          <button className="btn btn--ghost" style={{ color: "var(--down)" }}>Cancel</button>
+          <button className="btn" disabled title="Plan management not wired">Change plan</button>
         </div>
       </div>
       <div style={{ marginTop: 20, padding: "14px 16px", background: "var(--bg-soft)", borderRadius: "var(--r-md)" }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
-          <div><div className="muted" style={{ fontSize: 11 }}>AI tokens</div><div className="mono" style={{ fontWeight: 600 }}>23.7M / 50M</div></div>
-          <div><div className="muted" style={{ fontSize: 11 }}>Strategies</div><div className="mono" style={{ fontWeight: 600 }}>5 / unlimited</div></div>
-          <div><div className="muted" style={{ fontSize: 11 }}>Backtests</div><div className="mono" style={{ fontWeight: 600 }}>42 this month</div></div>
-          <div><div className="muted" style={{ fontSize: 11 }}>Brokers</div><div className="mono" style={{ fontWeight: 600 }}>2 / 4</div></div>
+          <div><div className="muted" style={{ fontSize: 11 }}>AI tokens</div><div className="mono" style={{ fontWeight: 600 }}>—</div></div>
+          <div><div className="muted" style={{ fontSize: 11 }}>Strategies</div><div className="mono" style={{ fontWeight: 600 }}>—</div></div>
+          <div><div className="muted" style={{ fontSize: 11 }}>Backtests</div><div className="mono" style={{ fontWeight: 600 }}>—</div></div>
+          <div><div className="muted" style={{ fontSize: 11 }}>Brokers</div><div className="mono" style={{ fontWeight: 600 }}>—</div></div>
         </div>
       </div>
     </Card>
     <Card title="Billing history">
-      <table className="tbl">
-        <thead><tr><th>Date</th><th>Description</th><th style={{ textAlign: "right" }}>Amount</th><th>Invoice</th></tr></thead>
-        <tbody>
-          {[
-            ["12 Apr 2026", "Pro · monthly", "₹2,499", "INV-2026-041"],
-            ["12 Mar 2026", "Pro · monthly", "₹2,499", "INV-2026-032"],
-            ["12 Feb 2026", "Pro · monthly", "₹2,499", "INV-2026-022"],
-            ["12 Jan 2026", "Pro · monthly", "₹2,499", "INV-2026-012"],
-            ["12 Dec 2025", "Plus → Pro upgrade", "₹1,499", "INV-2025-128"],
-          ].map((r, i) => (
-            <tr key={i}>
-              <td className="mono" style={{ fontSize: 12 }}>{r[0]}</td>
-              <td>{r[1]}</td>
-              <td className="mono" style={{ textAlign: "right", fontWeight: 500 }}>{r[2]}</td>
-              <td><a href="#" style={{ color: "var(--accent)", fontSize: 12 }}>{r[3]}</a></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="muted" style={{ fontSize: 12, padding: "16px 4px", textAlign: "center" }}>
+        No invoices yet. Billing will start tracking once the subscription service ships.
+      </div>
     </Card>
   </>
 );
