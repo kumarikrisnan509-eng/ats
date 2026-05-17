@@ -76,7 +76,7 @@ const AttributionScreen = () => {
             Decompose total PnL by different lenses. Answer the question: <em>where is my alpha actually coming from?</em>
           </div>
         </div>
-        <select className="input" style={{ width: 140 }} defaultValue="mar2026">
+        <select className="input" style={{ width: 140 }} defaultValue="ytd">
           <option value="mar2026">March 2026</option>
           <option value="q1-2026">Q1 2026</option>
           <option value="ytd">YTD 2026</option>
@@ -94,6 +94,19 @@ const AttributionScreen = () => {
           ]}/>
         </div>
       )}
+
+      {/* T99-T73: honest banner — only byStrategy is live; other lenses are
+          hardcoded demo until backend aggregations ship. */}
+      <div role="note" style={{
+        padding: '8px 12px', marginBottom: 12, borderRadius: 6,
+        border: '1px solid color-mix(in oklab, var(--warn, #d97706) 35%, var(--border))',
+        background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
+        fontSize: 12, color: 'var(--text-2)',
+      }}>
+        <strong>Only "By strategy" is live data from /api/pnl/by-strategy.</strong>{' '}
+        By mode / by symbol / by alpha source are demo aggregations pending backend implementation —
+        ignore those numbers when reviewing your actual performance.
+      </div>
 
       {/* Net PnL headline */}
       <Card>
