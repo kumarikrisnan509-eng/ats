@@ -1,9 +1,9 @@
 /* eslint-disable */
 /* Portfolio screen — long-term holdings + profit sweep waterfall.
-   2026-05-13: equity `holdings` now loads from /api/portfolio/holdings.
-   MFs / ETFs remain hardcoded sample data — Kite has no MF/ETF holdings API
-   that we use here (MF data comes from CAMS/Karvy, ETFs would migrate to
-   real holdings table separately). */
+   2026-05-13: equity `holdings` loads from /api/portfolio/holdings (per-user).
+   2026-05-17 T-66: MF + ETF loaded from /api/me/portfolio/mf|etf (per-user).
+                    Empty until CAS upload persists data to mf_holdings table.
+                    Shows clean empty-state UI rather than misleading samples. */
 
 
 
@@ -236,17 +236,25 @@ const PortfolioScreen = () => {
     return () => { cancelled = true; };
   }, []);
 
-  const mf = [
-    { n: "Parag Parikh Flexi Cap",  t: "Flexi Cap",   sip: 15000, inv: 420000, cur: 498240, xirr: 18.4 },
-    { n: "Mirae Large & Midcap",    t: "L&MC",        sip: 10000, inv: 280000, cur: 318400, xirr: 14.1 },
-    { n: "Nippon Small Cap",        t: "Small Cap",   sip: 8000,  inv: 224000, cur: 282720, xirr: 22.8 },
-    { n: "HDFC Balanced Advantage", t: "Hybrid",      sip: 5000,  inv: 140000, cur: 151200, xirr: 9.6 },
-  ];
-  const etf = [
-    { n: "NIFTYBEES", q: 120, avg: 228.40, ltp: 252.30 },
-    { n: "GOLDBEES",  q: 400, avg: 58.20,  ltp: 64.80  },
-    { n: "JUNIORBEES",q: 80,  avg: 618.00, ltp: 694.40 },
-  ];
+  // T99-T66: real per-user MF + ETF holdings from backend (no more sample data).
+  // Backend endpoints currently return empty until CAS-upload persistence lands;
+  // the empty-state UI guides the user to upload their CAS PDF.
+  const [mf, setMf] = React.useState([]);
+  const [etf, setEtf] = React.useState([]);
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const j = await window.fetchApi('/api/me/portfolio/mf');
+        if (!cancelled && j && j.ok) setMf(j.holdings || []);
+      } catch (_) {}
+      try {
+        const j2 = await window.fetchApi('/api/me/portfolio/etf');
+        if (!cancelled && j2 && j2.ok) setEtf(j2.holdings || []);
+      } catch (_) {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const totalEquity = holdings.reduce((s, h) => s + h.qty * h.ltp, 0);
   const totalMF = mf.reduce((s, m) => s + m.cur, 0);
@@ -360,27 +368,42 @@ const PortfolioScreen = () => {
         </Card>
 
         <Card title="Mutual funds" sub="Active SIPs" flush>
-          <table className="table">
-            <thead><tr><th>Fund</th><th className="num-l">SIP</th><th className="num-l">Invested</th><th className="num-l">Current</th><th className="num-l">XIRR</th></tr></thead>
-            <tbody>
-              {mf.map((m, i) => (
-                <tr key={i}>
-                  <td>
-                    <div style={{ fontWeight: 500 }}>{m.n}</div>
-                    <div className="muted" style={{ fontSize: 11 }}>{m.t}</div>
-                  </td>
-                  <td className="num">{inr(m.sip)}/mo</td>
-                  <td className="num">{inrCompact(m.inv)}</td>
-                  <td className="num">{inrCompact(m.cur)}</td>
-                  <td className="num up">{pct(m.xirr, 1)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {mf.length === 0 ? (
+            <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>
+              <div style={{ fontSize: 24, marginBottom: 8 }}>📈</div>
+              <div style={{ fontWeight: 500, marginBottom: 4, color: 'var(--text-2)' }}>No mutual fund holdings yet</div>
+              <div style={{ fontSize: 12 }}>Upload your CAS (Consolidated Account Statement) PDF on the Mutual Funds screen to populate.</div>
+            </div>
+          ) : (
+            <table className="table">
+              <thead><tr><th>Fund</th><th className="num-l">SIP</th><th className="num-l">Invested</th><th className="num-l">Current</th><th className="num-l">XIRR</th></tr></thead>
+              <tbody>
+                {mf.map((m, i) => (
+                  <tr key={i}>
+                    <td>
+                      <div style={{ fontWeight: 500 }}>{m.n}</div>
+                      <div className="muted" style={{ fontSize: 11 }}>{m.t}</div>
+                    </td>
+                    <td className="num">{inr(m.sip)}/mo</td>
+                    <td className="num">{inrCompact(m.inv)}</td>
+                    <td className="num">{inrCompact(m.cur)}</td>
+                    <td className="num up">{pct(m.xirr, 1)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </Card>
       </div>
 
       <Card title="ETFs" flush>
+        {etf.length === 0 ? (
+          <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>
+            <div style={{ fontSize: 24, marginBottom: 8 }}>🪙</div>
+            <div style={{ fontWeight: 500, marginBottom: 4, color: 'var(--text-2)' }}>No ETF holdings yet</div>
+            <div style={{ fontSize: 12 }}>ETFs purchased on NSE/BSE will appear under <b>Equity holdings</b> above when your broker is connected.</div>
+          </div>
+        ) : (
         <table className="table">
           <thead><tr><th>ETF</th><th className="num-l">Qty</th><th className="num-l">Avg</th><th className="num-l">LTP</th><th className="num-l">Value</th><th className="num-l">P&L %</th></tr></thead>
           <tbody>
@@ -399,6 +422,7 @@ const PortfolioScreen = () => {
             })}
           </tbody>
         </table>
+        )}
       </Card>
       <FactorTiltPanel />
     </>
