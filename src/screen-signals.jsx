@@ -340,10 +340,42 @@ const SignalsScreen = () => {
       )}
 
       <div className="grid grid-4" style={{ marginBottom: 16 }}>
-        <Card><Stat label="Signals today" value="47" delta="+12 vs yday" deltaKind="up" sub="across 6 sources"/></Card>
-        <Card><Stat label="Paper → Live rate" value="28%" delta="+4pp" deltaKind="up" sub="30-day"/></Card>
-        <Card><Stat label="Live accuracy" value="71%" delta="+2pp" deltaKind="up" sub="vs paper"/></Card>
-        <Card><Stat label="Swept to long-term" value={inrCompact(182500)} delta="this month" deltaKind="muted" sub="auto"/></Card>
+        {/* T99-T81: replaced hardcoded 47/28%/71%/₹1,82,500 with real scanner data.
+            We display real counts from scannerStats + realSignals; the two
+            ratios (paper→live rate, live accuracy) need a per-trade promotion
+            ledger that hasn't shipped yet, so they read '—' with honest subs.  */}
+        <Card><Stat
+          label="Signals today"
+          value={(() => {
+            if (!Array.isArray(realSignals)) return '—';
+            const today = new Date().toISOString().slice(0, 10);
+            const n = realSignals.filter(s => {
+              const t = s.at || s.ts || s.time;
+              return t && String(t).slice(0, 10) === today;
+            }).length;
+            return String(n);
+          })()}
+          sub={scannerStats && scannerStats.lastRun
+            ? `last scan ${new Date(scannerStats.lastRun.at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`
+            : 'no scan run yet'}
+        /></Card>
+        <Card><Stat
+          label="Last scan"
+          value={scannerStats && scannerStats.lastRun ? String(scannerStats.lastRun.fired) : '—'}
+          sub={scannerStats && scannerStats.lastRun
+            ? `${scannerStats.lastRun.scanned} symbols scanned`
+            : 'awaiting first scan'}
+        /></Card>
+        <Card><Stat
+          label="Paper → Live rate"
+          value="—"
+          sub="needs promotion ledger"
+        /></Card>
+        <Card><Stat
+          label="Swept to long-term"
+          value="—"
+          sub="needs sweep history endpoint"
+        /></Card>
       </div>
 
       <div className="pipe-scroll" style={{ marginBottom: 16 }}>
