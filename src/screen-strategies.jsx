@@ -178,12 +178,18 @@ const StrategiesScreen = () => {
   // Real backend strategy registry + watchlist backtest trigger, exposed via window helpers.
   const [backendStrats, setBackendStrats] = React.useState([]);
   const [runStatus, setRunStatus]         = React.useState(null);
+  // T99-T99: per-user risk metrics (Sharpe / max DD) from /api/me/risk-metrics.
+  const [riskMetrics, setRiskMetrics] = React.useState(null);
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const j = await window.fetchApi('/api/strategies');
         if (!cancelled) setBackendStrats((j && j.strategies) || []);
+      } catch {}
+      try {
+        const r = await window.fetchApi('/api/me/risk-metrics?days=30');
+        if (!cancelled && r && r.ok) setRiskMetrics(r);
       } catch {}
     })();
     return () => { cancelled = true; };
@@ -323,16 +329,22 @@ const StrategiesScreen = () => {
         </div>
       </div>
 
-      {/* T99-T88: replaced hardcoded 62.1% / 1.82 / -3.8% with '—'.
-          Combined 30d P&L IS derived from the strats array (sums pnl30 across
-          visible rows), so it stays live. The other three need a per-trade
-          performance ledger which isn't aggregated per-user yet. Same pattern
-          as T-81 (Signals KPIs). */}
+      {/* T99-T99: Sharpe + Max DD now wired to /api/me/risk-metrics (Tier 69a).
+          Win rate still needs a per-trade ledger. Combined 30d P&L is derived
+          from the strats array. */}
       <div className="grid grid-4" style={{ marginBottom: 16 }}>
         <Card><Stat label="Combined 30d P&L" value={(combinedPnl >= 0 ? "+" : "") + inr(combinedPnl)} sub="sum of visible strategies"/></Card>
         <Card><Stat label="Avg win rate" value="—" sub="needs per-trade ledger"/></Card>
-        <Card><Stat label="Sharpe (30d)" value="—" sub="needs daily-equity series"/></Card>
-        <Card><Stat label="Max drawdown" value="—" sub="needs equity peak/trough"/></Card>
+        <Card><Stat
+          label="Sharpe (30d)"
+          value={riskMetrics && Number.isFinite(riskMetrics.sharpeRatio) ? riskMetrics.sharpeRatio.toFixed(2) : "—"}
+          sub={riskMetrics && riskMetrics.pointCount ? `${riskMetrics.pointCount} daily snapshots` : "needs daily-equity series"}
+        /></Card>
+        <Card><Stat
+          label="Max drawdown"
+          value={riskMetrics && Number.isFinite(riskMetrics.maxDrawdown) ? (riskMetrics.maxDrawdown * 100).toFixed(1) + "%" : "—"}
+          sub={riskMetrics && Number.isFinite(riskMetrics.maxDrawdownDays) ? `${riskMetrics.maxDrawdownDays} day drawdown` : "needs equity peak/trough"}
+        /></Card>
       </div>
 
       {/* Filter bar — mode filter is primary */}
