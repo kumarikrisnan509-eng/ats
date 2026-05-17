@@ -102,17 +102,24 @@ R[latest_audit_entries]="$ENTRIES"
 R[t_verify_audit_sec]="$(( $(date +%s) - T2 ))"
 
 # === 4. Production sanity: live DB still openable from a snapshot copy ===
+# T-36 fix: prod DB is in WAL mode, so a plain `cp ats.db` misses the WAL/SHM
+# sidecars and we get an empty snapshot. Use sqlite3's .backup which produces
+# a consistent point-in-time snapshot regardless of journaling mode.
 T3=$(date +%s)
 if [[ -f "$PROD_DB" ]]; then
-  cp "$PROD_DB" "$DR_STAGE/db/snapshot.db"
   if command -v sqlite3 >/dev/null 2>&1; then
-    SCHEMA_VER=$(sqlite3 "$DR_STAGE/db/snapshot.db" "SELECT version FROM _schema_version ORDER BY version DESC LIMIT 1;" 2>/dev/null || echo "ERR")
-    USER_COUNT=$(sqlite3 "$DR_STAGE/db/snapshot.db" "SELECT COUNT(*) FROM users;" 2>/dev/null || echo "ERR")
-    AICALL_COUNT=$(sqlite3 "$DR_STAGE/db/snapshot.db" "SELECT COUNT(*) FROM ai_calls WHERE ts > datetime('now', '-7 days');" 2>/dev/null || echo "ERR")
-    R[db_schema_version]="$SCHEMA_VER"
-    R[db_user_count]="$USER_COUNT"
-    R[db_ai_calls_7d]="$AICALL_COUNT"
-    log "db snapshot ok: schema=$SCHEMA_VER users=$USER_COUNT ai_calls_7d=$AICALL_COUNT"
+    if sqlite3 "$PROD_DB" ".backup '$DR_STAGE/db/snapshot.db'" 2>>"$DR_LOG"; then
+      SCHEMA_VER=$(sqlite3 "$DR_STAGE/db/snapshot.db" "SELECT version FROM _schema_version ORDER BY version DESC LIMIT 1;" 2>>"$DR_LOG" || echo "ERR")
+      USER_COUNT=$(sqlite3 "$DR_STAGE/db/snapshot.db" "SELECT COUNT(*) FROM users;" 2>>"$DR_LOG" || echo "ERR")
+      AICALL_COUNT=$(sqlite3 "$DR_STAGE/db/snapshot.db" "SELECT COUNT(*) FROM ai_calls WHERE ts > datetime('now', '-7 days');" 2>>"$DR_LOG" || echo "ERR")
+      R[db_schema_version]="$SCHEMA_VER"
+      R[db_user_count]="$USER_COUNT"
+      R[db_ai_calls_7d]="$AICALL_COUNT"
+      log "db snapshot ok: schema=$SCHEMA_VER users=$USER_COUNT ai_calls_7d=$AICALL_COUNT"
+    else
+      R[db_check]="backup-failed"
+      log "WARN: sqlite3 .backup failed (see log above); skipping query sanity"
+    fi
   else
     R[db_check]="sqlite3-missing"
     log "WARN: sqlite3 CLI not installed; skipping db sanity"
