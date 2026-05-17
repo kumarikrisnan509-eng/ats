@@ -297,28 +297,13 @@ const PortfolioScreen = () => {
             <div className="mono" style={{ fontSize: 22, fontWeight: 500, margin: "6px 0" }}>—</div>
             <div style={{ fontSize: 11 }} className="muted">trading pot tracker not wired</div>
             {/* Mode attribution — shows which modes fed the pot */}
-            <div style={{ marginTop: 10, padding: "8px 10px", background: "var(--bg-soft)", borderRadius: "var(--r-sm)" }}>
-              <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-3)", marginBottom: 6 }}>By mode (MTD)</div>
-              {[
-                { id: "intraday", amt: 24820 },
-                { id: "swing",    amt: 12640 },
-                { id: "options",  amt:  4880 },
-                { id: "futures",  amt:     0 },
-              ].map(row => {
-                const meta = window.MODE_META[row.id];
-                const pctRow = (row.amt / 42340) * 100;
-                return (
-                  <div key={row.id} className="row" style={{ justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
-                    <span className="row" style={{ gap: 5 }}>
-                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: meta.color }}/>
-                      <span style={{ color: "var(--text-2)" }}>{meta.label}</span>
-                    </span>
-                    <span className={"mono " + (row.amt > 0 ? "up" : "muted")}>
-                      {row.amt > 0 ? "+" : ""}{row.amt === 0 ? "—" : inrCompact(row.amt)}
-                    </span>
-                  </div>
-                );
-              })}
+            {/* T99-T89b: 'By mode (MTD)' breakdown removed. The numbers
+                (intraday ₹24,820, swing ₹12,640, options ₹4,880, futures 0)
+                with a 42340 divisor were hardcoded demo data. Same root
+                cause as T-82 — per-mode aggregation backend hasn't shipped. */}
+            <div style={{ marginTop: 10, padding: "8px 10px", background: "var(--bg-soft)", borderRadius: "var(--r-sm)", fontSize: 11, color: "var(--text-3)" }}>
+              <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>By mode (MTD)</div>
+              <div className="muted">Per-mode breakdown not wired — needs aggregation endpoint.</div>
             </div>
           </div>
           <div className="waterfall__step">
