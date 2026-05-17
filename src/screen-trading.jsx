@@ -195,8 +195,16 @@ const TradingScreen = () => {
           </div>
 
           <div className="divider" style={{ margin: "14px 0" }}/>
-          <div className="between" style={{ fontSize: 12 }}><span className="muted">Approx margin</span><span className="mono">₹1,17,940</span></div>
-          <div className="between" style={{ fontSize: 12, marginTop: 4 }}><span className="muted">Brokerage (est.)</span><span className="mono">₹20</span></div>
+          {/* T99-T87: dropped hardcoded margin ₹1,17,940 + brokerage ₹20.
+              These values must come from Kite's order-margin calc + a brokerage
+              estimator that knows the user's broker plan. Until those are
+              wired we show '—' and an explanatory sub-line. Same pattern as
+              T-77 (margin screen) and T-80 (attribution headline). */}
+          <div className="between" style={{ fontSize: 12 }}><span className="muted">Approx margin</span><span className="mono">—</span></div>
+          <div className="between" style={{ fontSize: 12, marginTop: 4 }}><span className="muted">Brokerage (est.)</span><span className="mono">—</span></div>
+          <div className="muted" style={{ fontSize: 10, marginTop: 4 }}>
+            Margin + brokerage estimate not wired yet — confirm with broker before placing.
+          </div>
 
           {(() => {
             const conn = useConnectionState();
