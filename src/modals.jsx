@@ -152,40 +152,49 @@ const PreTradeSimulator = ({ open, onClose, order, onConfirm }) => {
 
 // === 2FA confirmation modal ===
 // For destructive actions: kill switch, capital changes, override risk caps
+// T99-T68: was TwoFactorModal — pretended to be 2FA but accepted "123456" or
+// any code starting with "1". Misleading for a real-money trading system. Now
+// an honest typed-confirmation dialog. Real 2FA (TOTP verify against the
+// user's seed) is a separate larger ship. Same callsite signature so the
+// existing callers (shell kill-switch + circuits screen) keep working.
+//
+// Confirm-phrase derives from `action` (e.g. action='Halt all automated trading'
+// → 'HALT'). Falls back to 'CONFIRM' if no obvious word can be derived.
 const TwoFactorModal = ({ open, onClose, action, detail, onConfirm }) => {
-  const [code, setCode] = React.useState("");
-  const [error, setError] = React.useState(null);
-  const [loading, setLoading] = React.useState(false);
+  const [typed, setTyped] = React.useState("");
+  React.useEffect(() => { if (open) setTyped(""); }, [open]);
 
-  React.useEffect(() => { if (open) { setCode(""); setError(null); setLoading(false); } }, [open]);
+  const phrase = React.useMemo(() => {
+    if (!action) return 'CONFIRM';
+    const upper = String(action).toUpperCase();
+    if (upper.includes('HALT'))    return 'HALT';
+    if (upper.includes('KILL'))    return 'KILL';
+    if (upper.includes('STOP'))    return 'STOP';
+    if (upper.includes('CANCEL'))  return 'CANCEL';
+    if (upper.includes('DELETE'))  return 'DELETE';
+    if (upper.includes('DISCONNECT')) return 'DISCONNECT';
+    return 'CONFIRM';
+  }, [action]);
 
+  const isValid = typed === phrase;
   const submit = () => {
-    if (code.length !== 6) { setError("Enter the 6-digit code from your authenticator app"); return; }
-    setLoading(true);
-    setTimeout(() => {
-      // Demo: accept "123456" or any code starting with "1"
-      if (code === "123456" || code[0] === "1") {
-        onConfirm && onConfirm();
-        onClose();
-      } else {
-        setError("Invalid code · try 123456 in this demo");
-        setLoading(false);
-      }
-    }, 600);
+    if (!isValid) return;
+    onConfirm && onConfirm();
+    onClose();
   };
 
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title="Confirm with 2FA"
+      title="Confirm destructive action"
       sub={action}
       width={440}
       footer={
         <div className="row" style={{ gap: 10, justifyContent: "flex-end" }}>
           <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn btn--primary" onClick={submit} disabled={loading || code.length !== 6}>
-            {loading ? "Verifying…" : "Confirm action"}
+          <button className="btn btn--primary" onClick={submit} disabled={!isValid}>
+            Confirm action
           </button>
         </div>
       }
@@ -198,29 +207,23 @@ const TwoFactorModal = ({ open, onClose, action, detail, onConfirm }) => {
         </div>
       </div>
 
-      <label style={{ fontSize: 12, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Enter 6-digit code</label>
+      <label style={{ fontSize: 12, color: "var(--text-3)" }}>
+        Type <code style={{ background: 'var(--bg-soft)', padding: '2px 6px', borderRadius: 4, fontFamily: 'var(--mono)' }}>{phrase}</code> to confirm:
+      </label>
       <input
         autoFocus
-        inputMode="numeric"
-        maxLength={6}
-        value={code}
-        onChange={(e) => { setCode(e.target.value.replace(/\D/g, "").slice(0, 6)); setError(null); }}
+        value={typed}
+        onChange={(e) => setTyped(e.target.value.toUpperCase())}
         onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
-        placeholder="000000"
+        placeholder={phrase}
         style={{
-          width: "100%", marginTop: 8, padding: "14px 18px",
-          fontFamily: "var(--mono)", fontSize: 24, letterSpacing: "0.4em",
+          width: "100%", marginTop: 8, padding: "12px 14px",
+          fontFamily: "var(--mono)", fontSize: 14,
           background: "var(--bg-soft)", border: "1px solid var(--border)",
-          borderRadius: "var(--r-md)", textAlign: "center",
+          borderRadius: "var(--r-md)",
           outline: "none",
         }}
       />
-      {error && <div style={{ marginTop: 8, fontSize: 12, color: "var(--down)" }}>{error}</div>}
-
-      <div className="muted" style={{ fontSize: 11, marginTop: 16, textAlign: "center" }}>
-        Open Google Authenticator or Authy → "ATS — Rajasekar"<br/>
-        <span style={{ color: "var(--accent)" }}>Demo: enter 123456</span>
-      </div>
     </Modal>
   );
 };
