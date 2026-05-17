@@ -4067,8 +4067,12 @@ function requireInternal(req, res) {
   // Allow loopback AND docker private network IPs (10.x, 172.16-31.x, 192.168.x).
   // When the host curl 127.0.0.1:8080 → docker proxy → container, the container
   // sees the docker bridge gateway as the source (e.g. 172.18.0.1), NOT 127.0.0.1.
-  // Nginx, which proxies real public traffic, is configured upstream to STRIP the
-  // X-ATS-Internal header — so the header check is the actual security boundary.
+  //
+  // Defense-in-depth: nginx strips X-ATS-Internal from public traffic (verified
+  // in T-41 -- both rajasekarselvam.com.conf and ats.rajasekarselvam.com.conf
+  // have `proxy_set_header X-ATS-Internal ""`). So even if a public attacker
+  // somehow had a private source IP, they'd still fail the header check. The
+  // IP check is the primary boundary; the header check is the backstop.
   const ra = (req.ip || req.connection.remoteAddress || '').replace('::ffff:', '');
   const isLoopback = ra === '127.0.0.1' || ra === '::1';
   const isPrivate  = /^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)/.test(ra);
