@@ -65,7 +65,8 @@ const HarvestScreen = () => {
       <div className="grid grid-4" style={{ marginBottom: 16 }}>
         <Stat label="Eligible lots"     value={`${eligible.length}`} sub={`${lots.length - eligible.length} blocked by wash`}/>
         <Stat label="Harvestable loss"  value={`₹${Math.abs(eligible.reduce((s, l) => s + l.loss, 0)).toLocaleString("en-IN")}`} sub="across STCL + LTCL"/>
-        <Stat label="Realized gains FY" value="₹2,38,400" sub="will offset against this"/>
+        {/* T99-T94: dropped hardcoded ₹2,38,400 — needs broker realized-gains ledger */}
+        <Stat label="Realized gains FY" value="—" sub="needs broker realized-gains ledger"/>
         <Stat label="Est. tax saved"    value={`₹${Math.round(taxSaved).toLocaleString("en-IN")}`} sub={`from selected ${selectedLots.length} lots`}/>
       </div>
 
