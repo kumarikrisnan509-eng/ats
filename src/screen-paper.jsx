@@ -649,7 +649,8 @@ const PaperScreen = () => {
           <Stat label="Virtual capital" value={inrCompact(acc.cap)} delta={`${((acc.used/acc.cap)*100).toFixed(0)}% deployed`} deltaKind="muted"/>
           <Stat label="Paper P&L" value={inr(acc.pnl)} delta={pct((acc.pnl/acc.cap)*100)} deltaKind={acc.pnl >= 0 ? "up" : "down"}/>
           <Stat label="Trades" value={acc.trades} delta={`${acc.winR}% win rate`} deltaKind="muted"/>
-          <Stat label="Sharpe (ann.)" value="1.84" delta="target ≥ 1.5" deltaKind="up"/>
+          {/* T99-T90: dropped fake Sharpe 1.84 — needs daily-equity series */}
+          <Stat label="Sharpe (ann.)" value="—" sub="needs daily equity series"/>
         </div>
       </Card>
 
@@ -658,12 +659,11 @@ const PaperScreen = () => {
         <div className="grid grid-4" style={{ gap: 10 }}>
           {window.MODE_IDS.map(id => {
             const meta = window.MODE_META[id];
-            const stats = {
-              intraday: { trades: 86, winR: 64, pnl: 82340,  ready: 2, testing: 1, nextPromo: "Momentum AI in 3d" },
-              swing:    { trades: 22, winR: 68, pnl: 34120,  ready: 1, testing: 2, nextPromo: "Trend Follow ready" },
-              options:  { trades: 18, winR: 72, pnl: 24820,  ready: 1, testing: 1, nextPromo: "Iron Condor in 5d" },
-              futures:  { trades: 0,  winR: 0,  pnl: 0,      ready: 0, testing: 1, nextPromo: "NIFTY Fut started" },
-            }[id];
+            // T99-T90: per-mode paper stats were hardcoded (intraday 86 trades
+            // / 64% win / ₹82,340; swing 22/68%/₹34,120; options 18/72%/₹24,820).
+            // Same root cause as T-82 — per-mode aggregation backend not wired.
+            // Show empty values; when /api/me/paper-by-mode lands, derive here.
+            const stats = { trades: 0, winR: 0, pnl: 0, ready: 0, testing: 0, nextPromo: null };
             const active = window.isModeActive(id);
             return (
               <div key={id} style={{
