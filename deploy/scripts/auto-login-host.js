@@ -60,9 +60,51 @@ function httpRequest({ method, url, headers = {}, body = null }) {
 async function captureFailure(page, ts, label) {
   try {
     fs.mkdirSync(FAIL_DIR, { recursive: true });
-    const file = path.join(FAIL_DIR, `autologin-${ts}-${label}.png`);
-    await page.screenshot({ path: file, fullPage: true });
-    return file;
+    const pngFile = path.join(FAIL_DIR, `autologin-${ts}-${label}.png`);
+    const txtFile = path.join(FAIL_DIR, `autologin-${ts}-${label}.txt`);
+    await page.screenshot({ path: pngFile, fullPage: true });
+
+    // T99-T57: also dump page metadata + visible text so failures are
+    // grep-able without needing image transfer + OCR. Best-effort: errors
+    // here must not mask the real failure.
+    try {
+      const url   = await page.url().catch(() => '(url unavailable)');
+      const title = await page.title().catch(() => '(title unavailable)');
+      const bodyText = await page.evaluate(() => {
+        try { return (document.body && document.body.innerText || '').slice(0, 2000); }
+        catch (_) { return '(innerText unavailable)'; }
+      }).catch(() => '(evaluate failed)');
+      const inputs = await page.evaluate(() => {
+        try {
+          return Array.from(document.querySelectorAll('input,button')).map(el => ({
+            tag: el.tagName,
+            type: el.type || '',
+            name: el.name || '',
+            id: el.id || '',
+            placeholder: el.placeholder || '',
+            text: (el.innerText || '').slice(0, 40),
+            visible: !!(el.offsetWidth || el.offsetHeight),
+          })).slice(0, 30);
+        } catch (_) { return []; }
+      }).catch(() => []);
+      const dump = [
+        '=== auto-login failure dump ===',
+        'ts: ' + new Date(ts).toISOString(),
+        'label: ' + label,
+        'url: ' + url,
+        'title: ' + title,
+        'screenshot: ' + pngFile,
+        '',
+        '--- visible body text (first 2000 chars) ---',
+        bodyText,
+        '',
+        '--- input/button elements ---',
+        JSON.stringify(inputs, null, 2),
+      ].join('\n');
+      fs.writeFileSync(txtFile, dump);
+    } catch (_e) { /* don't mask main failure */ }
+
+    return pngFile;
   } catch (_) { return null; }
 }
 
