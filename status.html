@@ -90,8 +90,10 @@
     anthropic:        { label: 'Anthropic Claude',       note: 'BYOK provider status' },
     openai:           { label: 'OpenAI',                 note: 'BYOK provider status' },
     gemini:           { label: 'Google Gemini',          note: 'BYOK provider status' },
+    live_data_feed:   { label: 'Live data feed',         note: 'broker WS - streaming / stalled / frozen' },
+    backups_verified: { label: 'Backups verified',       note: 'last DR restore-test result' },
   };
-  var ORDER = ['ats_app', 'nse_surveillance', 'kite', 'nse_archive', 'anthropic', 'openai', 'gemini'];
+  var ORDER = ['ats_app', 'live_data_feed', 'backups_verified', 'nse_surveillance', 'kite', 'nse_archive', 'anthropic', 'openai', 'gemini'];
 
   function fmtRow(key, svc) {
     var m = META[key] || { label: key, note: '' };

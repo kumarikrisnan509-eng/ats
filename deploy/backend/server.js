@@ -483,7 +483,44 @@ async function _buildStatus() {
   out.services.openai    = aiProbes[1];
   out.services.gemini    = aiProbes[2];
 
-  // 6. Build summary
+  // 6. T99-T50: internal operational signals — public-safe (no counts/PII).
+  //    Lets the /status page reflect WS feed health + backup freshness without
+  //    operators needing to curl /api/health-deep.
+  try {
+    if (broker && typeof broker.health === 'function') {
+      const bh = broker.health();
+      const stalled = !!(bh && bh.stalledOnToken);
+      const frozen  = !!(bh && bh.tickStale);
+      const connected = !!(bh && bh.connected);
+      out.services.live_data_feed = {
+        ok: connected && !stalled && !frozen,
+        state: stalled ? 'stalled (token expired)'
+               : frozen ? 'frozen (no ticks while market open)'
+               : connected ? 'streaming'
+               : 'disconnected',
+      };
+    }
+  } catch (_) { out.services.live_data_feed = { ok: false, error: 'introspection_failed' }; }
+  try {
+    if (db && db._conn && typeof _ensureDrTable === 'function' && _ensureDrTable()) {
+      const row = db._conn.prepare("SELECT ts, payload FROM dr_test_history ORDER BY id DESC LIMIT 1").get();
+      if (row) {
+        const ageMs = Date.now() - new Date(row.ts).getTime();
+        const ageDays = Math.round(ageMs / 86400000);
+        let lastOk = false;
+        try { const pd = JSON.parse(row.payload || '{}'); lastOk = pd.ok === true; } catch (_) {}
+        out.services.backups_verified = {
+          ok: lastOk && ageDays <= 30,
+          state: lastOk ? (ageDays <= 30 ? 'last verified ' + ageDays + 'd ago' : 'STALE — last test ' + ageDays + 'd ago')
+                       : 'last DR test failed',
+        };
+      } else {
+        out.services.backups_verified = { ok: false, state: 'never tested (run setup-dr-cron.sh)' };
+      }
+    }
+  } catch (_) { out.services.backups_verified = { ok: false, error: 'introspection_failed' }; }
+
+  // 7. Build summary
   const hardOk = out.services.ats_app.ok;
   const softWarn = Object.entries(out.services).filter(([k, v]) => k !== 'ats_app' && !v.ok).map(([k]) => k);
   out.ok = hardOk;
