@@ -62,6 +62,70 @@ const LiveRiskCards = () => {
   );
 };
 
+// T99-T100: live Risk events table from /api/audit. Filters for risk-relevant
+// events (order.blocked.*, risk.*, circuit.*, kill.*, broker.disconnect).
+// Replaces the prior 5-row hardcoded demo array.
+const RiskEventsCard = () => {
+  const [rows, setRows] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const j = await window.fetchApi('/api/audit?limit=100');
+        if (cancelled) return;
+        if (!j || !j.ok) { setRows([]); return; }
+        const INTERESTING = /^(order\.blocked|risk\.|circuit\.|kill|broker\.(disconnect|stale))/;
+        const matched = (j.rows || [])
+          .filter(r => INTERESTING.test(String(r.event || '')))
+          .slice(0, 10)
+          .map(r => {
+            const evt = String(r.event || '');
+            const sev = /kill|critical|broker\.disconnect/.test(evt) ? 'down'
+                      : /blocked|breach|halted|stale/.test(evt) ? 'warn'
+                      : 'info';
+            const when = r.ts ? new Date(r.ts).toLocaleString('en-IN', {
+              month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+            }) : '—';
+            return {
+              t: when,
+              sev,
+              r: evt,
+              a: r.data ? JSON.stringify(r.data).slice(0, 80) : '—',
+            };
+          });
+        setRows(matched);
+      } catch { setRows([]); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  return (
+    <Card title="Risk events" sub={rows == null ? 'Loading…' : (rows.length === 0 ? 'No risk events — feed is clean' : `Last ${rows.length}`)} flush>
+      {rows == null ? (
+        <div className="muted" style={{ padding: '12px 14px', fontSize: 12 }}>Loading audit feed…</div>
+      ) : rows.length === 0 ? (
+        <div className="muted" style={{ padding: '20px 14px', fontSize: 12, textAlign: 'center' }}>
+          No risk-relevant events in the last 100 audit rows. Feed updates every 15s.
+        </div>
+      ) : (
+        <table className="table">
+          <thead><tr><th>When</th><th>Severity</th><th>Event</th><th>Detail</th></tr></thead>
+          <tbody>
+            {rows.map((e, i) => (
+              <tr key={i}>
+                <td className="mono" style={{ fontSize: 12, color: 'var(--text-3)' }}>{e.t}</td>
+                <td><Pill kind={e.sev}>{e.sev === 'down' ? 'critical' : e.sev === 'warn' ? 'warning' : 'info'}</Pill></td>
+                <td style={{ fontWeight: 500 }} className="mono">{e.r}</td>
+                <td><span className="muted mono" style={{ fontSize: 11 }}>{e.a}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Card>
+  );
+};
+
 const RiskScreen = () => {
   const [kill, setKill] = useState(false);
 
@@ -233,27 +297,7 @@ const RiskScreen = () => {
         </Card>
       </div>
 
-      <Card title="Risk events" sub="Last 10" flush>
-        <table className="table">
-          <thead><tr><th>When</th><th>Severity</th><th>Rule</th><th>Action taken</th></tr></thead>
-          <tbody>
-            {[
-              { t: "Apr 23, 14:02", sev: "warn", r: "Grid Trader daily loss 70% of cap", a: "Strategy paused for 30 min" },
-              { t: "Apr 22, 11:48", sev: "info", r: "Position size check on RELIANCE", a: "Passed" },
-              { t: "Apr 21, 09:22", sev: "warn", r: "Consecutive losses: 3 on Mean Rev.", a: "15-min cooldown engaged" },
-              { t: "Apr 18, 15:15", sev: "down", r: "Manual kill switch engaged", a: "All orders cancelled; resumed 15:45" },
-              { t: "Apr 16, 10:02", sev: "info", r: "Margin call pre-check", a: "Order size reduced 20%" },
-            ].map((e, i) => (
-              <tr key={i}>
-                <td className="mono" style={{ fontSize: 12, color: "var(--text-3)" }}>{e.t}</td>
-                <td><Pill kind={e.sev}>{e.sev === "down" ? "critical" : e.sev === "warn" ? "warning" : "info"}</Pill></td>
-                <td style={{ fontWeight: 500 }}>{e.r}</td>
-                <td><span className="muted">{e.a}</span></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
+      <RiskEventsCard/>
     </>
   );
 };
