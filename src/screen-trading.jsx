@@ -1,6 +1,43 @@
 /* eslint-disable */
 /* Trading screen */
 
+// T99-T97: chart card pulls live LTP/change from window.useLiveTick. Was
+// previously hardcoded '₹2,948.50 +1.24%' regardless of selected symbol.
+const ChartCard = ({ sym, segment, candles }) => {
+  const tick = (window.useLiveTick && window.useLiveTick(sym)) || null;
+  const ltp = tick && tick.ltp != null ? tick.ltp : null;
+  const chg = tick && tick.change != null ? tick.change : null;
+  const chgPct = tick && tick.changePct != null ? tick.changePct : null;
+  const subBits = [segment, 'Equity'];
+  if (ltp != null) {
+    const sign = chg != null && chg >= 0 ? '+' : '';
+    subBits.push(
+      '₹' + ltp.toFixed(2) + (chgPct != null ? ' ' + sign + chgPct.toFixed(2) + '%' : '')
+    );
+  }
+  const sub = subBits.join(' · ');
+  return (
+    <Card
+      title={sym}
+      sub={sub}
+      right={<Segmented value="5m" onChange={() => {}} options={["1m", "5m", "15m", "1h", "1D"]}/>}
+    >
+      <Candles data={candles} height={280}/>
+      <div className="divider"/>
+      <div className="row" style={{ gap: 18, fontSize: 12 }}>
+        <div><span className="muted">Open </span><span className="mono">—</span></div>
+        <div><span className="muted">High </span><span className="mono">—</span></div>
+        <div><span className="muted">Low </span><span className="mono">—</span></div>
+        <div><span className="muted">Vol </span><span className="mono">—</span></div>
+        <div><span className="muted">VWAP </span><span className="mono">—</span></div>
+      </div>
+      <div className="muted" style={{ fontSize: 10, marginTop: 6 }}>
+        OHLCV not in tick payload yet — LTP/change above is live.
+      </div>
+    </Card>
+  );
+};
+
 const TradingScreen = () => {
   const [sym, setSym] = useState("RELIANCE");
   const [side, setSide] = useState("BUY");
@@ -132,22 +169,11 @@ const TradingScreen = () => {
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: "1fr 340px", marginBottom: 16, gap: 16 }}>
-        {/* Chart */}
-        <Card
-          title={sym}
-          sub={segment + " · Equity · ₹2,948.50 +1.24%"}
-          right={<Segmented value="5m" onChange={() => {}} options={["1m", "5m", "15m", "1h", "1D"]}/>}
-        >
-          <Candles data={candles} height={280}/>
-          <div className="divider"/>
-          <div className="row" style={{ gap: 18, fontSize: 12 }}>
-            <div><span className="muted">Open </span><span className="mono">2,935.20</span></div>
-            <div><span className="muted">High </span><span className="mono up">2,958.10</span></div>
-            <div><span className="muted">Low </span><span className="mono down">2,928.00</span></div>
-            <div><span className="muted">Vol </span><span className="mono">12.4M</span></div>
-            <div><span className="muted">VWAP </span><span className="mono">2,944.80</span></div>
-          </div>
-        </Card>
+        {/* Chart -- T99-T97: chart sub-title is live LTP/change from
+            useLiveTick(sym). When no tick has arrived for this symbol yet,
+            shows just 'Equity'. OHLCV row dropped to '—' until tick payload
+            includes those fields. */}
+        <ChartCard sym={sym} segment={segment} candles={candles}/>
 
         {/* Order ticket */}
         <Card title="Order ticket" sub="Routes to Zerodha Kite">
@@ -275,13 +301,15 @@ const TradingScreen = () => {
             <thead><tr><th>Symbol</th><th className="num-l">LTP</th><th className="num-l">Chg%</th><th className="num-l">Vol</th></tr></thead>
             <tbody>
               {[
-                { s: "NIFTY 50", v: "—" },
+                // T99-T97: dropped hardcoded volume column. Real volume isn't
+                // in the tick payload yet — column shows '—' until then.
+                { s: "NIFTY 50",  v: "—" },
                 { s: "BANKNIFTY", v: "—" },
-                { s: "RELIANCE", v: "12.4M" },
-                { s: "TCS", v: "3.2M" },
-                { s: "HDFCBANK", v: "8.9M" },
-                { s: "INFY", v: "6.1M" },
-                { s: "ICICIBANK", v: "5.7M" },
+                { s: "RELIANCE",  v: "—" },
+                { s: "TCS",       v: "—" },
+                { s: "HDFCBANK",  v: "—" },
+                { s: "INFY",      v: "—" },
+                { s: "ICICIBANK", v: "—" },
               ].map((r, i) => {
                 const live = window.LiveTicks.state().symbols[r.s];
                 const chg = live ? ((live.ltp - live.prev) / live.prev) * 100 : 0;
