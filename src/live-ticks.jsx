@@ -38,11 +38,23 @@
   let lastTickAt = Date.now();
   let connDropAt = null;
   let reconnects = 0;
+  // T99-T44: upstream (Kite → backend) state, pushed by backend over /ws.
+  // Distinct from `connected` which tracks frontend → backend. UI can show
+  // 'data feed frozen' when stalledOnToken or tickStale is true even though
+  // our local socket to backend is fine.
+  let upstreamStalledOnToken = false;
+  let upstreamTickStale = false;
+  let upstreamConnected = true;
 
   const state = () => ({
     connected, ticking, tickCount, lastTickAt, reconnects,
     lagMs: Date.now() - lastTickAt,
     symbols: { ...SYMBOLS },
+    upstream: {
+      connected: upstreamConnected,
+      stalledOnToken: upstreamStalledOnToken,
+      tickStale: upstreamTickStale,
+    },
   });
 
   // Random walk per symbol — small ticks 60% of the time, occasional bigger moves
@@ -144,6 +156,15 @@
             try { console.warn("[live-ticks] snapshot fetch failed:", e.message); } catch {}
           }
         })();
+        return;
+      }
+      if (msg.type === "upstream_state") {
+        // T99-T44: backend pushed a change in Kite-side connection state.
+        upstreamConnected = !!msg.connected;
+        upstreamStalledOnToken = !!msg.stalledOnToken;
+        upstreamTickStale = !!msg.tickStale;
+        try { console.log("[live-ticks] upstream_state:", { connected: upstreamConnected, stalledOnToken: upstreamStalledOnToken, tickStale: upstreamTickStale }); } catch {}
+        window.dispatchEvent(new CustomEvent("upstream-state", { detail: state().upstream }));
         return;
       }
       if (msg.type === "subscribed") {

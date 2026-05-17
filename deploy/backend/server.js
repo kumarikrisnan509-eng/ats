@@ -4206,6 +4206,39 @@ async function startBrokerFanout() {
   });
 }
 
+// T99-T44: upstream-state broadcaster. Polls broker.health() every 10s and
+// broadcasts {type:'upstream_state', ...} to all /ws clients when any of the
+// connected/stalledOnToken/tickStale flags flip. Frontends use this to show
+// 'data feed frozen' banners without waiting for a missed tick to expose the
+// problem. Cheap: one in-process function call per 10s.
+let _lastUpstreamState = null;
+function _broadcastUpstreamStateIfChanged() {
+  try {
+    const bh = (typeof broker.health === 'function') ? broker.health() : null;
+    if (!bh) return;
+    const cur = {
+      connected: !!bh.connected,
+      stalledOnToken: !!bh.stalledOnToken,
+      tickStale: !!bh.tickStale,
+    };
+    if (!_lastUpstreamState
+        || _lastUpstreamState.connected !== cur.connected
+        || _lastUpstreamState.stalledOnToken !== cur.stalledOnToken
+        || _lastUpstreamState.tickStale !== cur.tickStale) {
+      _lastUpstreamState = cur;
+      const payload = JSON.stringify({ type: 'upstream_state', ...cur });
+      for (const ws of wsClients) {
+        if (ws.readyState === 1) {
+          try { ws.send(payload); } catch (_) {}
+        }
+      }
+      console.log('[ws] upstream_state changed:', cur, '->', wsClients.size, 'clients');
+    }
+  } catch (e) { /* never throw from the interval */ }
+}
+const _upstreamStateTimer = setInterval(_broadcastUpstreamStateIfChanged, 10_000);
+if (_upstreamStateTimer.unref) _upstreamStateTimer.unref();
+
 wss.on('connection', (ws, req) => {
   if (wsClients.size > MAX_WS_CLIENTS) { ws.close(1013, 'too many clients'); return; }
   wsClients.add(ws);
@@ -4227,6 +4260,19 @@ wss.on('connection', (ws, req) => {
       ? 'Simulated ticks for UI only. Not a real market feed.'
       : 'Live ticks via Kite Ticker. Subject to market hours.',
   }));
+
+  // T99-T44: include current upstream state in welcome so the frontend knows
+  // immediately whether to render the 'stalled' / 'frozen' banner without
+  // waiting up to 10s for the next broadcast.
+  try {
+    const bh = (typeof broker.health === 'function') ? broker.health() : {};
+    ws.send(JSON.stringify({
+      type: 'upstream_state',
+      connected: !!bh.connected,
+      stalledOnToken: !!bh.stalledOnToken,
+      tickStale: !!bh.tickStale,
+    }));
+  } catch (_) { /* welcome must not throw */ }
 
   // Auto-subscribe so this client gets ticks immediately during market hours.
   if (typeof broker.ensureSubscribed === 'function') {
