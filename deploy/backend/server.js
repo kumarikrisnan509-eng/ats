@@ -419,6 +419,24 @@ app.get('/api/admin/observability', (req, res) => {
   });
 });
 
+// T99-T78: lazy obs middleware wrappers. The observability module needs db to
+// be ready before it can prepare its insert statement. We defer first-binding
+// until the first request after db is initialised. Once bound, each request
+// gets x-request-id, latency sampling on res.finish, and errors persisted to
+// errors_log. Cheap: getObs() short-circuits on the cached singleton after the
+// first hit.
+function _obsMiddleware(req, res, next) {
+  const obs = getObs();
+  if (obs && obs.middleware) return obs.middleware(req, res, next);
+  return next();
+}
+function _obsErrorMiddleware(err, req, res, next) {
+  const obs = getObs();
+  if (obs && obs.errorMiddleware) return obs.errorMiddleware(err, req, res, next);
+  if (res.headersSent) return next(err);
+  res.status(500).json({ ok: false, reason: 'internal_error', detail: (err && err.message) || 'unknown' });
+}
+
 // T-I2: public status page endpoint. No auth. 60s server-side cache so a runaway
 // uptime monitor + curious users don't hammer upstream providers. Probes a small
 // set of external dependencies (Kite, NSE, the 3 AI providers' status pages) and
@@ -782,6 +800,10 @@ app.use((req, _res, next) => {
   console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
   next();
 });
+
+// T99-T78: observability middleware -- sets x-request-id, records per-route
+// latency on res.finish. Must run BEFORE route handlers so it sees them all.
+app.use(_obsMiddleware);
 
 // Tier 50: attach req.user to every request if a valid session cookie is present.
 // Does NOT enforce auth -- that's done per-route via auth.requireAuth.
@@ -4365,6 +4387,12 @@ app.post('/api/brokers/disconnect', async (req, res) => {
   }
   res.json({ ok: true });
 });
+
+// T99-T78: observability error middleware. Catches any thrown error from a
+// route handler, persists to errors_log with request_id/user_id/path/duration,
+// and returns a structured 500. Must come AFTER all routes but BEFORE the 404
+// fallback (which is itself a 404, not an error).
+app.use(_obsErrorMiddleware);
 
 app.use('/api', (_req, res) => res.status(404).json({ ok: false, reason: 'not_found' }));
 
