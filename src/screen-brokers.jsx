@@ -318,6 +318,30 @@ Object.assign(window, { BrokerConnectModal: BrokerWizardModal });
 
 const BrokersScreen = () => {
   const [zerodhaState, setZerodhaState] = React.useState({ connected: null, since: '--', cap: [], orders: 0, fees: 0, userId: '--', userName: '--' });
+  // T99-T35: poll /api/health-deep so the Brokers screen can show the live
+  // ticker state alongside the auth status. wsStalled = backend detected
+  // 3 consecutive 403s and stopped reconnecting; will resume on next reauth.
+  const [wsState, setWsState] = React.useState({ connected: null, stalled: null, attempts: null, loaded: false });
+  React.useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const r = await fetch('/api/health-deep', { credentials: 'include' });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (cancelled || !j || !j.checks) return;
+        setWsState({
+          connected: j.checks.brokerWsConnected === true,
+          stalled: j.checks.brokerWsStalled === true,
+          attempts: j.checks.brokerWsReconnectAttempts ?? null,
+          loaded: true,
+        });
+      } catch (_) {}
+    };
+    tick();
+    const id = setInterval(tick, 30000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
   // T82: live per-user counts for "Routing by mode" table
   const [routingCounts, setRoutingCounts] = React.useState({ intraday: 0, swing: 0, options: 0, futures: 0, total: 0, source: 'loading' });
   React.useEffect(() => {
@@ -580,6 +604,21 @@ const BrokersScreen = () => {
                 {/* T82: last-tick indicator -- shows freshness of live data feed */}
                 {zerodhaState.lastTickAt > 0 && (
                   <ChecklistRow ok={true} label="Last tick" value={_fmtRelative(new Date(zerodhaState.lastTickAt).toISOString())} />
+                )}
+                {/* T99-T35: live ticker WS state from /api/health-deep. Stalled = token expired,
+                    backend stopped reconnecting to spare Kite's rate limit; resumes on reauth. */}
+                {wsState.loaded && isZerodha && (
+                  <ChecklistRow
+                    ok={wsState.connected === true}
+                    warn={wsState.stalled === true}
+                    neutral={!wsState.connected && !wsState.stalled}
+                    label="Live data feed"
+                    value={
+                      wsState.stalled ? 'stalled · token expired (will resume after reauth)'
+                      : wsState.connected ? 'streaming'
+                      : (wsState.attempts != null && wsState.attempts > 0 ? `reconnecting · attempt ${wsState.attempts}` : 'disconnected')
+                    }
+                  />
                 )}
                 <ChecklistRow ok={true} label="Orders (30d)" value={(b.orders||0).toLocaleString()} />
                 {/* T82: Daily auto-reauth row WITH inline toggle (replaces the duplicate row below) */}
