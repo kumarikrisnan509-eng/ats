@@ -154,7 +154,8 @@ const AuditScreen = () => {
         {[
           { l: "Today's orders",  v: records.length, sub: records.length ? "across all modes" : "no orders yet" },
           { l: "Fill rate",       v: records.length ? Math.round((counts.filled / records.length) * 100) + "%" : "—",  sub: records.length ? `${counts.filled} of ${records.length} filled` : "—", kind: "up" },
-          { l: "Avg slippage",    v: "0.4 bps", sub: "vs pre-trade estimate", kind: "up" },
+          // T99-T103: dropped hardcoded '0.4 bps' — needs per-order slippage from audit events
+          { l: "Avg slippage",    v: "—", sub: "needs per-order slippage calc" },
           { l: "Risk blocks",     v: counts.rejected, sub: "auto-rejected before broker call", kind: counts.rejected > 0 ? "warn" : undefined },
         ].map((s, i) => (
           <div key={i} className="card">
