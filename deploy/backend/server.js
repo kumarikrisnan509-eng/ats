@@ -4239,6 +4239,33 @@ function _broadcastUpstreamStateIfChanged() {
 const _upstreamStateTimer = setInterval(_broadcastUpstreamStateIfChanged, 10_000);
 if (_upstreamStateTimer.unref) _upstreamStateTimer.unref();
 
+// T99-T47: session janitor. db.sessions.purgeExpired() existed but was never
+// called anywhere — expired user_sessions rows accumulated forever (every
+// login adds one + every session expiry stays as dead weight in the table +
+// in every nightly backup). Runs once an hour; logs only when something was
+// actually cleaned so quiet weeks don't pollute the log.
+const _sessionJanitorTimer = setInterval(() => {
+  try {
+    if (db && db.sessions && typeof db.sessions.purgeExpired === 'function') {
+      const removed = db.sessions.purgeExpired();
+      if (removed && removed > 0) {
+        console.log(`[sessions] janitor purged ${removed} expired session(s)`);
+      }
+    }
+  } catch (e) { console.warn('[sessions] janitor error:', e && e.message); }
+}, 60 * 60 * 1000);   // 1 hour
+if (_sessionJanitorTimer.unref) _sessionJanitorTimer.unref();
+// Also run once at boot so a server that has been down a while doesn't wait
+// an hour before its first cleanup.
+setTimeout(() => {
+  try {
+    if (db && db.sessions && typeof db.sessions.purgeExpired === 'function') {
+      const removed = db.sessions.purgeExpired();
+      console.log(`[sessions] janitor boot-sweep removed ${removed} expired session(s)`);
+    }
+  } catch (e) { console.warn('[sessions] boot janitor error:', e && e.message); }
+}, 30_000);  // wait 30s so db/init has settled
+
 wss.on('connection', (ws, req) => {
   if (wsClients.size > MAX_WS_CLIENTS) { ws.close(1013, 'too many clients'); return; }
   wsClients.add(ws);
