@@ -141,6 +141,26 @@ const BacktestScreen = () => {
         </Card>
       )}
 
+      {/* T99-T86: honest banner — the 'Last run 2h 14m ago', ₹10,00,000 capital,
+          KPI cards (CAGR / Sharpe / max DD / win rate), and the 12-row Trade
+          statistics card below are hardcoded examples. The 'Run new backtest'
+          button calls real /api/backtest, but its result populates liveBacktest
+          state — not the report cards. Same disclosure pattern as T-85. */}
+      {!liveBacktest && (
+        <div role="note" style={{
+          padding: '8px 12px', marginBottom: 12, borderRadius: 6,
+          border: '1px solid color-mix(in oklab, var(--warn, #d97706) 35%, var(--border))',
+          background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
+          fontSize: 12, color: 'var(--text-2)',
+        }}>
+          <strong>Sample backtest report shown.</strong>{' '}
+          The capital (₹10,00,000), KPI cards, and trade-statistics rows below are
+          static demo numbers. Click <b>Run live backtest</b> to execute a real
+          backtest against /api/backtest (RSI mean-reversion on RELIANCE, last
+          365 days). Use those results when evaluating strategy fitness.
+        </div>
+      )}
+
       {queueEl}
 
       {/* Config bar */}
