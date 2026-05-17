@@ -628,6 +628,18 @@ function _ensureDrTable() {
 }
 
 // POST /api/admin/dr-status — record a DR test result.
+//
+// T99-T40 defense-in-depth: the legitimate caller is always the host's cron
+// posting to http://127.0.0.1:8080 → docker NAT → container. That path does
+// NOT go through nginx, so X-Forwarded-For is absent. Any request that
+// arrives with X-Forwarded-For has been proxied by nginx (i.e. came from
+// the public internet) and must additionally have an authenticated admin
+// session. The token check stays as defense-in-depth.
+//
+// Why this matters: token alone is 256-bit so brute-force is infeasible,
+// but a future accidental log leak of the token would let any attacker
+// write garbage results to dr_test_history. The admin-session gate makes
+// the leak non-exploitable without also stealing an admin cookie.
 app.post('/api/admin/dr-status', express.json({ limit: '16kb' }), (req, res) => {
   try {
     const fs = require('fs');
@@ -635,6 +647,14 @@ app.post('/api/admin/dr-status', express.json({ limit: '16kb' }), (req, res) => 
     const provided = (req.headers['x-ats-dr-token'] || '').toString().trim();
     if (!expected || expected === 'unset' || provided !== expected) {
       return res.status(401).json({ ok: false, reason: 'dr_auth_failed' });
+    }
+    // T-40: came-through-nginx detection. XFF present = public request →
+    // require admin session in addition to token. Absent = direct loopback
+    // from host cron → token alone is sufficient (caller already has root
+    // on the host to read the token file).
+    const cameThroughProxy = !!(req.headers['x-forwarded-for'] || req.headers['x-real-ip']);
+    if (cameThroughProxy && !(req.user && req.user.is_admin)) {
+      return res.status(403).json({ ok: false, reason: 'dr_public_requires_admin' });
     }
     if (!_ensureDrTable()) return res.status(503).json({ ok: false, reason: 'db_not_ready' });
     const body = req.body || {};
@@ -656,6 +676,11 @@ app.get('/api/admin/dr-status', (req, res) => {
     const provided = (req.headers['x-ats-dr-token'] || '').toString().trim();
     if (!expected || expected === 'unset' || provided !== expected) {
       return res.status(401).json({ ok: false, reason: 'dr_auth_failed' });
+    }
+    // T-40: see POST handler — public requests require admin session too.
+    const cameThroughProxy = !!(req.headers['x-forwarded-for'] || req.headers['x-real-ip']);
+    if (cameThroughProxy && !(req.user && req.user.is_admin)) {
+      return res.status(403).json({ ok: false, reason: 'dr_public_requires_admin' });
     }
     const rows = db._conn.prepare(`SELECT id, ts, ok, rto_sec, payload FROM dr_test_history ORDER BY id DESC LIMIT 10`).all();
     res.json({ ok: true, recent: rows.map(r => ({ ...r, payload: (() => { try { return JSON.parse(r.payload); } catch (_) { return null; } })() })) });
