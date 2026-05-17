@@ -87,21 +87,39 @@ const TaxScreen = () => {
         {tabs.map(t => <button key={t} className={tab === t ? "on" : ""} onClick={() => setTab(t)}>{t}</button>)}
       </div>
 
+      {/* T99-T74: honest banner — none of the planning data has a backing store yet.
+          The comment at the top of this file admits 'production users see an empty
+          state' but no empty-state UI existed. This banner is the empty state until
+          the planning-data service ships. */}
+      {!_isDemo && (
+        <div role="note" style={{
+          padding: '8px 12px', marginBottom: 12, borderRadius: 6,
+          border: '1px solid color-mix(in oklab, var(--warn, #d97706) 35%, var(--border))',
+          background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
+          fontSize: 12, color: 'var(--text-2)',
+        }}>
+          <strong>Tax planning module — empty state.</strong>{' '}
+          Tax buckets, harvest candidates, goals, and rebalance targets need their own
+          backend storage (Kite doesn't expose any of these). Numbers shown below come from
+          /api/tax/* endpoints when wired; demo data only appears in Demo Mode.
+        </div>
+      )}
+
       {tab === "Tax" && (
         <>
           {/* Tax KPIs */}
           <div className="grid grid-4" style={{ marginBottom: 16 }}>
             <Card>
-              <Stat label="Realized gains FY26" value={inr(totalGain)} delta="5 tax buckets" deltaKind="up"/>
+              <Stat label="Realized gains FY26" value={inr(totalGain)} delta={taxBuckets.length ? `${taxBuckets.length} tax buckets` : '—'} deltaKind="up"/>
             </Card>
             <Card>
-              <Stat label="Estimated tax" value={inr(totalTax)} delta={pct((totalTax/totalGain)*100,1) + " effective"} deltaKind="muted"/>
+              <Stat label="Estimated tax" value={inr(totalTax)} delta={totalGain > 0 ? pct((totalTax/totalGain)*100,1) + " effective" : '—'} deltaKind="muted"/>
             </Card>
             <Card>
-              <Stat label="After-tax P&L" value={inr(totalGain - totalTax)} delta="net of estimated tax" deltaKind="up"/>
+              <Stat label="After-tax P&L" value={inr(totalGain - totalTax)} delta={totalGain > 0 ? "net of estimated tax" : '—'} deltaKind="up"/>
             </Card>
             <Card>
-              <Stat label="Harvest available" value={inr(12750)} delta="4 lots with losses" deltaKind="warn"/>
+              <Stat label="Harvest available" value={harvestCandidates.length ? inr(Math.abs(harvestCandidates.reduce((s,h) => s + (h.loss || 0), 0))) : inr(0)} delta={harvestCandidates.length ? `${harvestCandidates.length} lots with losses` : '—'} deltaKind="warn"/>
             </Card>
           </div>
 
