@@ -99,4 +99,21 @@ sudo rm -rf "${STATIC_DIR}.old" || true
 echo "==> Cleanup dangling images (keep last 3)"
 docker image prune -f --filter "until=168h" >/dev/null || true
 
+echo "==> Ensure host-side auto-login cron is 7 days/week"
+# Idempotent: rewrite the file every deploy so it self-heals if anyone fiddled with it.
+# 20 3 * * * = 03:20 UTC = 08:50 IST. Mon-Fri restriction (1-5) dropped — Kite tokens
+# expire daily regardless of trading day, and weekend re-auth keeps holdings + paper
+# trades + Brokers card all green. ~30s of Playwright per day; no Kite rate-limit
+# concern at once-per-day from a stable IP.
+sudo tee /etc/cron.d/ats-auto-login >/dev/null <<EOF
+# ATS daily Zerodha auto-login (managed by deploy/scripts/deploy-on-vm.sh)
+# Schedule: 03:20 UTC = 08:50 IST, daily. The Mon-Fri filter was dropped in May 2026
+# so weekend logins keep the access token fresh — useful for portfolio review,
+# paper trading, and reconciliation on non-trading days.
+20 3 * * * root /usr/local/bin/ats-morning-check.sh >> /var/log/ats-morning-check.log 2>&1
+EOF
+sudo chmod 0644 /etc/cron.d/ats-auto-login
+sudo touch /var/log/ats-morning-check.log
+sudo chmod 0644 /var/log/ats-morning-check.log
+
 echo "==> Deploy OK: ${IMAGE}:${NEW_TAG}"

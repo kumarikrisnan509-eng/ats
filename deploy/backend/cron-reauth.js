@@ -1,6 +1,6 @@
 // cron-reauth.js -- Tier 80: daily per-user auto-reauth scheduler.
 //
-// Runs once at 05:45 AM IST on weekdays (well before Kite tokens expire at 07:30 IST).
+// Runs once at 05:45 AM IST every day (7 days/week — tokens expire daily regardless).
 // Iterates over every broker_account row that has totp_seed + feed_token + auto_reauth_enabled,
 // calls runAutoReauth (same code path as the manual "Auto reauth" button), with a 5-second
 // inter-user delay to stay under Kite's IP-based rate limit (~3 req/sec).
@@ -85,8 +85,11 @@ function createCronReauth({ db, vault, audit, postTelegram }) {
 
   function checkAndMaybeRun() {
     const t = nowIst();
-    // Skip weekends entirely (no NSE trading) but allow Monday catch-up.
-    if (t.dayOfWeek === 0 || t.dayOfWeek === 6) return;
+    // Run 7 days/week: Zerodha invalidates the access token daily at ~06:00 IST regardless
+    // of whether it's a trading day. Reauth on weekends too so portfolio/holdings stay
+    // viewable + paper trades work + the Brokers card never shows 'expired' from
+    // Saturday morning onwards. ~30 seconds of Playwright on the OCI VM. No Kite
+    // rate-limit concerns at once-per-day from a stable IP.
     // Hit the window 05:45-05:50 IST exactly once per day.
     const inWindow = (t.hour === TARGET_HOUR_IST && t.minute >= TARGET_MINUTE_IST && t.minute < TARGET_MINUTE_IST + 5);
     if (!inWindow) return;
@@ -99,7 +102,7 @@ function createCronReauth({ db, vault, audit, postTelegram }) {
     start() {
       if (_timer) return;
       _timer = setInterval(checkAndMaybeRun, CHECK_INTERVAL_MS);
-      console.log(`[cron-reauth] scheduler started -- daily 05:45 IST weekdays`);
+      console.log(`[cron-reauth] scheduler started -- daily 05:45 IST (7 days/week)`);
     },
     stop() { if (_timer) { clearInterval(_timer); _timer = null; } },
     runNow: () => runForAllEligible('manual'),
