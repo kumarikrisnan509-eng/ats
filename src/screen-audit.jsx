@@ -99,7 +99,11 @@ const AuditScreen = () => {
         live: true,
       }));
     }
-    return __mock_records;
+    // T99-T75: production users with no audit data see an empty list (and
+    // empty-state UI below), not 5 fake orders with fake P&L that would
+    // look like their own trade history. Demo mode keeps the rich mocks.
+    const _isDemo = window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn();
+    return _isDemo ? __mock_records : [];
   }, [liveAudit]);
 
 
@@ -148,8 +152,8 @@ const AuditScreen = () => {
 
       <div className="grid grid-4" style={{ marginBottom: 18 }}>
         {[
-          { l: "Today's orders",  v: records.length, sub: "across 4 modes" },
-          { l: "Fill rate",       v: "78%",  sub: `${counts.filled} of ${records.length} filled`, kind: "up" },
+          { l: "Today's orders",  v: records.length, sub: records.length ? "across all modes" : "no orders yet" },
+          { l: "Fill rate",       v: records.length ? Math.round((counts.filled / records.length) * 100) + "%" : "—",  sub: records.length ? `${counts.filled} of ${records.length} filled` : "—", kind: "up" },
           { l: "Avg slippage",    v: "0.4 bps", sub: "vs pre-trade estimate", kind: "up" },
           { l: "Risk blocks",     v: counts.rejected, sub: "auto-rejected before broker call", kind: counts.rejected > 0 ? "warn" : undefined },
         ].map((s, i) => (
@@ -203,6 +207,18 @@ const AuditScreen = () => {
             </tr>
           </thead>
           <tbody>
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={9} style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>
+                  <div style={{ fontSize: 24, marginBottom: 8 }}>📋</div>
+                  <div style={{ fontWeight: 500, marginBottom: 4, color: 'var(--text-2)' }}>No audit records yet</div>
+                  <div style={{ fontSize: 12 }}>
+                    Trades, fills, rejections, and signals will appear here as they happen.
+                    Audit data comes from /api/audit (append-only signed log).
+                  </div>
+                </td>
+              </tr>
+            )}
             {filtered.map(r => {
               const mode = window.MODE_META[r.mode];
               return (
