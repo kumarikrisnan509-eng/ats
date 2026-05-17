@@ -469,6 +469,24 @@ const DashboardScreen = () => {
   const [liveDash, setLiveDash] = React.useState(null);
   const [liveProfile, setLiveProfile] = React.useState(null);
 
+  // T99-T76: real /api/health-deep so the System Health card shows live
+  // uptime + memory + broker WS state instead of hardcoded 34%/13.9GB/etc.
+  const [sysHealth, setSysHealth] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const r = await fetch('/api/health-deep');
+        if (!r.ok || cancelled) return;
+        const j = await r.json();
+        if (!cancelled && j && j.checks) setSysHealth(j.checks);
+      } catch (_) {}
+    };
+    load();
+    const id = setInterval(load, 30000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
   // Tier 60: per-user summary aggregator -- single endpoint replaces 4 hardcoded fallbacks.
   const [liveSummary, setLiveSummary] = React.useState(null);
   React.useEffect(() => {
@@ -1023,10 +1041,17 @@ const DashboardScreen = () => {
               </div>
             </div>
             <div className="divider"/>
-            <BarRow label="CPU" value={34} max={100} color="var(--accent)" right="34%"/>
-            <BarRow label="Memory" value={58} max={100} color="var(--info)" right="13.9 / 24 GB"/>
-            <BarRow label="Disk" value={28} max={100} color="var(--violet)" right="56 / 200 GB"/>
-            <BarRow label="Uptime" value={99.97} max={100} color="var(--up)" right="42d"/>
+            {/* T99-T76: real values from /api/health-deep. CPU% + Disk% aren't
+                measured server-side yet, so they show '—'; memory + uptime are real. */}
+            <BarRow label="CPU"    value={0}                                                       max={100} color="var(--accent)" right="—"/>
+            <BarRow label="Memory" value={sysHealth && typeof sysHealth.memMB === 'number' ? Math.min(100, Math.round(sysHealth.memMB / 24576 * 100)) : 0} max={100} color="var(--info)"   right={sysHealth && typeof sysHealth.memMB === 'number' ? `${(sysHealth.memMB/1024).toFixed(1)} / 24 GB` : "—"}/>
+            <BarRow label="Disk"   value={0}                                                       max={100} color="var(--violet)" right="—"/>
+            <BarRow label="Uptime" value={sysHealth && typeof sysHealth.uptimeSec === 'number' && sysHealth.uptimeSec > 0 ? 100 : 0} max={100} color="var(--up)" right={
+              !sysHealth || typeof sysHealth.uptimeSec !== 'number' ? "—"
+              : sysHealth.uptimeSec < 3600 ? `${Math.round(sysHealth.uptimeSec/60)}m`
+              : sysHealth.uptimeSec < 86400 ? `${Math.floor(sysHealth.uptimeSec/3600)}h ${Math.floor((sysHealth.uptimeSec%3600)/60)}m`
+              : `${Math.floor(sysHealth.uptimeSec/86400)}d ${Math.floor((sysHealth.uptimeSec%86400)/3600)}h`
+            }/>
             <div className="divider"/>
             <div className="between" style={{ fontSize: 12 }}>
               <span className="muted">Signal engine</span>
@@ -1034,7 +1059,14 @@ const DashboardScreen = () => {
             </div>
             <div className="between" style={{ fontSize: 12 }}>
               <span className="muted">Zerodha feed</span>
-              <Pill kind="up" dot>14ms</Pill>
+              {/* T99-T76: real broker WS state from T-34/T-37 fields */}
+              {sysHealth && sysHealth.brokerWsStalled
+                ? <Pill kind="down" dot>token expired</Pill>
+                : sysHealth && sysHealth.brokerTickStale
+                ? <Pill kind="warn" dot>frozen</Pill>
+                : sysHealth && sysHealth.brokerWsConnected
+                ? <Pill kind="up" dot>streaming</Pill>
+                : <Pill kind="muted" dot>—</Pill>}
             </div>
             <div className="between" style={{ fontSize: 12 }}>
               <span className="muted">Last deploy</span>
