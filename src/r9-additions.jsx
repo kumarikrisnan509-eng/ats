@@ -235,23 +235,33 @@ const MultiBrokerPnL = () => {
 // We don't have a real auth/session backend yet. Rather than show 6 fake IP addresses,
 // surface the ONE truth we know: current session uptime + Kite session validity.
 const LoginHistory = () => {
+  // T99-T69: switched the profile source from /api/profile (broker) to
+  // /api/me/identity (user row, added in T-67). Surfaces T-34/T-55 fields
+  // (stalledOnToken + tokenAge) so status string is accurate.
   const [info, setInfo] = React.useState(null);
   React.useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
-        const [health, profile] = await Promise.all([
+        const [health, me] = await Promise.all([
           window.fetchApi('/api/health').catch(() => null),
-          window.fetchApi('/api/profile').catch(() => null),
+          window.fetchApi('/api/me/identity').catch(() => null),
         ]);
         if (cancelled) return;
+        const b = (health && health.broker) || {};
         setInfo({
-          uptimeSec: health ? (health.uptimeSec || 0) : 0,
-          brokerConnected: !!(health && health.broker && health.broker.connected),
-          hasAccessToken: !!(health && health.broker && health.broker.hasAccessToken),
-          profileOk: !!(profile && profile.ok),
-          userName: profile && profile.user_name,
-          email: profile && profile.email,
+          uptimeSec:      health ? (health.uptimeSec || 0) : 0,
+          brokerConnected: !!b.connected,
+          hasAccessToken:  !!b.hasAccessToken,
+          stalledOnToken:  !!b.stalledOnToken,                // T-34
+          tickStale:       !!b.tickStale,                     // T-37
+          tokenAgeMin: typeof b.lastAccessTokenSetAt === 'number' && b.lastAccessTokenSetAt > 0
+            ? Math.round((Date.now() - b.lastAccessTokenSetAt) / 60000)
+            : null,                                            // T-55
+          meOk:    !!(me && me.ok),
+          userName: me && me.user && me.user.name,
+          email:    me && me.user && me.user.email,
+          lastLoginAt: me && me.user && me.user.last_login_at,
         });
       } catch (_e) {}
     };
@@ -266,10 +276,14 @@ const LoginHistory = () => {
     if (s < 86400) return Math.floor(s/3600) + 'h ' + Math.floor((s%3600)/60) + 'm';
     return Math.floor(s/86400) + 'd ' + Math.floor((s%86400)/3600) + 'h';
   };
-  const status = !info ? 'loading' :
-                  info.profileOk ? 'authenticated' :
-                  info.hasAccessToken && !info.brokerConnected ? 'reconnecting' :
-                  'kite token expired';
+  // T-34/T-37: accurate status string built from real broker.health fields.
+  const status = !info ? 'loading'
+    : info.stalledOnToken ? 'token expired (reconnect)'
+    : info.tickStale ? 'frozen (no ticks)'
+    : info.brokerConnected ? 'streaming'
+    : info.hasAccessToken ? 'reconnecting'
+    : 'no token';
+  const statusTone = !info ? '' : (info.stalledOnToken ? 'down' : (info.brokerConnected && !info.tickStale ? 'up' : ''));
   return (
     <div className="card">
       <div className="card__head">
@@ -282,8 +296,12 @@ const LoginHistory = () => {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 8 }}>
         <div className="stat">
           <div className="stat__label">Kite session</div>
-          <div className={"stat__value " + (info && info.profileOk ? 'up' : 'down')} style={{ fontSize: 16 }}>{status}</div>
-          <div className="stat__delta muted">{info && info.userName ? info.userName : 'auto-relogin daily 06:10 IST'}</div>
+          <div className={"stat__value " + statusTone} style={{ fontSize: 16 }}>{status}</div>
+          <div className="stat__delta muted">
+            {info && info.tokenAgeMin != null
+              ? `token refreshed ${info.tokenAgeMin}m ago`
+              : 'auto-relogin daily 05:45 IST'}
+          </div>
         </div>
         <div className="stat">
           <div className="stat__label">Backend uptime</div>
