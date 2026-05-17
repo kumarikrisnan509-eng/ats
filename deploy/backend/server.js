@@ -585,6 +585,18 @@ app.get('/api/health-deep', async (_req, res) => {
     }
   } catch (e) { checks.drLastTestAgo = 'error:' + (e.message || 'unknown').slice(0, 40); }
 
+  // T99-T34: surface ticker WS state. brokerWsStalled flips true when the daily
+  // access_token has expired and we've stopped reconnecting until next auth refresh.
+  try {
+    if (broker) {
+      checks.brokerWsConnected = broker._connected === true;
+      checks.brokerWsStalled = broker._stalledOnToken === true;
+      if (typeof broker._reconnectAttempts === 'number') {
+        checks.brokerWsReconnectAttempts = broker._reconnectAttempts;
+      }
+    }
+  } catch (_e) { /* don't fail health on introspection */ }
+
   checks.uptimeSec = Math.round(process.uptime());
   checks.memMB = Math.round(process.memoryUsage().rss / 1024 / 1024);
   // Surveillance + DR are "soft" — they don't block the top-level ok flag.

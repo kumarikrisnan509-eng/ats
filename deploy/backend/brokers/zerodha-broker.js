@@ -77,6 +77,14 @@ class ZerodhaBroker extends BrokerGateway {
     this._reconnectAttempts = 0;
     /** Heartbeat — if no tick within HEARTBEAT_MS while market open, mark stale */
     this._lastTickAt = 0;
+
+    /** T99-T34: stale-token detection — when the daily access_token expires the
+        Kite WS endpoint replies 403 to every reconnect. If we let autoReconnect
+        keep firing for 20 attempts we spam Kite + fill our logs with the same
+        line 60+ times. Track consecutive 403s and pause the ticker once we're
+        sure the token is dead; the next setAccessToken() resumes it. */
+    this._consecutive403s = 0;
+    this._stalledOnToken = false;
   }
 
   get name() { return 'zerodha'; }
@@ -106,6 +114,23 @@ class ZerodhaBroker extends BrokerGateway {
   setAccessToken(accessToken) {
     this.accessToken = accessToken;
     this.kc.setAccessToken(accessToken);
+
+    // T99-T34: a fresh token clears the stale-token stall. Reset counters and
+    // give the ticker an immediate connect attempt instead of waiting for the
+    // next subscribe call. If the ticker was never created (first auth) this
+    // is a no-op — the start() call below handles that path.
+    if (this._stalledOnToken) {
+      console.log('[zerodha] fresh token sealed — resuming ticker from stalled state');
+      this._stalledOnToken = false;
+      this._consecutive403s = 0;
+      if (this.ticker) {
+        try { this.ticker.connect(); } catch (e) {
+          console.warn('[zerodha] ticker resume failed:', e && e.message);
+        }
+      }
+    } else {
+      this._consecutive403s = 0;
+    }
 
     // Kick off instrument-master refresh in the background (don't await — slow on first run).
     // After this resolves, future symbol->token lookups work for all of NSE+NFO+BFO+MCX.
@@ -201,7 +226,30 @@ class ZerodhaBroker extends BrokerGateway {
     });
 
     this.ticker.on('error', (err) => {
-      console.error('[zerodha] ticker error:', err && err.message);
+      const msg = (err && err.message) || String(err || '');
+      // T99-T34: collapse the 403 storm. Three consecutive 403s = dead token,
+      // not a transient blip — kill autoReconnect until a fresh token arrives.
+      if (/\b403\b/.test(msg)) {
+        this._consecutive403s++;
+        if (this._consecutive403s >= 3 && !this._stalledOnToken) {
+          this._stalledOnToken = true;
+          this._connected = false;
+          console.error('[zerodha] stale access_token (3x HTTP 403 from Kite WS) — pausing ticker until next auto-reauth or manual reconnect');
+          try {
+            if (typeof this.ticker.autoReconnect === 'function') this.ticker.autoReconnect(false, 0, 60);
+            this.ticker.disconnect();
+          } catch (_e) { /* ignore */ }
+          return;
+        }
+        // Only log first two 403s loudly; suppress the rest until we trip the gate.
+        if (this._consecutive403s <= 2) {
+          console.error('[zerodha] ticker error:', msg);
+        }
+        return;
+      }
+      // Any non-403 resets the counter.
+      this._consecutive403s = 0;
+      console.error('[zerodha] ticker error:', msg);
     });
 
     this.ticker.connect();
