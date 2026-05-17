@@ -59,13 +59,21 @@ else
   log "WARN: sqlite3 CLI not installed; skipping db backup"
 fi
 
-# === 3. Sealed per-user tokens ===
+# === 3. Sealed per-user tokens + small state JSON ===
+# Includes:
+#   *.enc                       sealed Zerodha access tokens
+#   _alerts.json _watchlist.json _scanner.json   small persistent state
+# Excludes:
+#   ats.db*                     has its own /db/ path above
+#   _instruments-cache.json     large (~20MB) + regenerable from Kite every morning
 if [ -d "$TOKENS_SRC" ]; then
-  log "step: sealed tokens -> $REMOTE/tokens"
+  log "step: sealed tokens + state -> $REMOTE/tokens"
   /usr/bin/rclone copy "$TOKENS_SRC" "$REMOTE/tokens" \
+    --include "*.enc" \
+    --include "_alerts.json" \
+    --include "_watchlist.json" \
+    --include "_scanner.json" \
     --log-file "$RCLONE_LOG" --log-level INFO \
-    --exclude "ats.db*" \
-    --exclude "_*" \
     || log "WARN: tokens rclone failed (non-fatal)"
 else
   log "WARN: TOKENS_SRC=$TOKENS_SRC not found; skipping tokens backup"
