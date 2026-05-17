@@ -636,6 +636,14 @@ app.get('/api/health-deep', async (_req, res) => {
       if (typeof broker._lastTickAt === 'number' && broker._lastTickAt > 0) {
         checks.brokerTickLagSec = Math.round((Date.now() - broker._lastTickAt) / 1000);
       }
+      // T99-T55: how long since the last setAccessToken? Helps operators tell
+      // whether the morning cron successfully refreshed today's token.
+      if (typeof broker._lastAccessTokenSetAt === 'number' && broker._lastAccessTokenSetAt > 0) {
+        const ageMs = Date.now() - broker._lastAccessTokenSetAt;
+        checks.brokerAccessTokenAgeMin = Math.round(ageMs / 60000);
+      } else {
+        checks.brokerAccessTokenAgeMin = null;
+      }
     }
   } catch (_e) { /* don't fail health on introspection */ }
 

@@ -93,6 +93,11 @@ class ZerodhaBroker extends BrokerGateway {
         no tick has arrived for HEARTBEAT_STALE_MS, flip _tickStale=true. */
     this._tickStale = false;
     this._heartbeatTimer = null;
+    /** T99-T55: timestamp of the last successful setAccessToken() call.
+        Lets operators tell whether the morning cron actually refreshed the
+        global broker today — answers 'is brokerWsStalled because the cron
+        failed, or because something else is wrong'. */
+    this._lastAccessTokenSetAt = 0;
   }
 
   // 9:15–15:30 IST on weekdays. We deliberately ignore holidays for the
@@ -173,6 +178,7 @@ class ZerodhaBroker extends BrokerGateway {
   setAccessToken(accessToken) {
     this.accessToken = accessToken;
     this.kc.setAccessToken(accessToken);
+    this._lastAccessTokenSetAt = Date.now();
 
     // T99-T34: a fresh token clears the stale-token stall. Reset counters and
     // give the ticker an immediate connect attempt instead of waiting for the
@@ -675,6 +681,11 @@ class ZerodhaBroker extends BrokerGateway {
       // true, the LTP is stale and orders should be rejected, not filled.
       stalledOnToken: this._stalledOnToken === true,
       tickStale: this._tickStale === true,
+      // T99-T55: when was setAccessToken last called? Operators read this to
+      // tell whether today's morning cron fired (= recent timestamp) or not
+      // (= timestamp from yesterday or container-start time).
+      lastAccessTokenSetAt: this._lastAccessTokenSetAt || 0,
+      accessTokenAgeMs: this._lastAccessTokenSetAt ? Date.now() - this._lastAccessTokenSetAt : null,
       instruments: this.instruments.stats(),
     };
   }
