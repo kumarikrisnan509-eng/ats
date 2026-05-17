@@ -2529,6 +2529,27 @@ app.get('/api/profile', async (req, res) => {
   }
 });
 
+// T99-T70: per-user preferences from user_preferences table. Used by the
+// Profile screen 'Preferences' card so it shows REAL user choices (theme,
+// density, currency format, etc.) instead of static defaults.
+app.get('/api/me/prefs', (req, res) => {
+  if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
+  try {
+    const row = db && db.prefs && typeof db.prefs.get === 'function'
+      ? db.prefs.get(req.user.id) : null;
+    res.json({
+      ok: true,
+      prefs: row || {
+        theme: 'auto', density: 'comfortable', currency_format: 'abbrev',
+        round_rupees: 0, show_pnl_in_header: 1, daily_ai_cap_inr: 50,
+        ai_mode: 'balanced', redact_pii: 1,
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
 // T99-T67: per-user identity from the users table. /api/profile returns the
 // BROKER profile (Kite). This returns OUR user record so the Profile screen
 // can show the logged-in user's actual email/name/created_at instead of

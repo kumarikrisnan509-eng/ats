@@ -5,6 +5,7 @@ const ProfileScreen = () => {
   // ---- live broker profile + user identity ----
   const [liveProfile, setLiveProfile] = React.useState(null);
   const [me, setMe] = React.useState(null);  // T99-T67: per-user identity row
+  const [prefs, setPrefs] = React.useState(null);  // T99-T70: per-user preferences
   React.useEffect(() => {
     if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
     let cancelled = false;
@@ -16,6 +17,10 @@ const ProfileScreen = () => {
       try {
         const d2 = await window.fetchApi('/api/me/identity');
         if (!cancelled && d2 && d2.ok) setMe(d2.user || null);
+      } catch (e) {}
+      try {
+        const d3 = await window.fetchApi('/api/me/prefs');
+        if (!cancelled && d3 && d3.ok) setPrefs(d3.prefs || null);
       } catch (e) {}
     })();
     return () => { cancelled = true; };
@@ -85,7 +90,7 @@ const ProfileScreen = () => {
         ))}
       </div>
 
-      {tab === "overview" && (() => { window._me = me; return <OverviewTab/>; })()}
+      {tab === "overview" && (() => { window._me = me; window._prefs = prefs; return <OverviewTab/>; })()}
       {tab === "kyc"       && <KYCTab/>}
       {tab === "security"  && <SecurityTab/>}
       {tab === "api"       && <ApiTab/>}
@@ -105,18 +110,26 @@ const OverviewTab = () => (
       <KV label="Address"        value="Not set"/>
     </Card>
     <Card title="Account limits">
-      <KV label="Starting capital"   value="₹45,00,000"/>
-      <KV label="Max daily drawdown" value="-₹15,000" tone="down"/>
-      <KV label="Max risk/trade"     value="1.0%"/>
-      <KV label="Paper observation"  value="14 days"/>
-      <KV label="Auto-sweep"         value="Enabled · 30% retention"/>
+      <KV label="Starting capital"   value="Not set"/>
+      <KV label="Max daily drawdown" value="Not set"/>
+      <KV label="Max risk/trade"     value="Not set"/>
+      <KV label="Paper observation"  value="Not set"/>
+      <KV label="Auto-sweep"         value="Not set"/>
     </Card>
     <Card title="Preferences">
       <KV label="Primary timezone"  value="Asia/Kolkata (IST)"/>
-      <KV label="Currency display"  value="₹ (INR)"/>
+      <KV label="Currency display"  value={(window._prefs && window._prefs.currency_format === 'full') ? "₹ full (₹4,82,340)" : "₹ abbrev (₹4.8L)"}/>
       <KV label="Date format"       value="DD Mon YYYY"/>
       <KV label="Default route"     value="Dashboard"/>
-      <KV label="Theme"             value="Auto (system)"/>
+      <KV label="Theme"             value={
+        window._prefs && window._prefs.theme === 'light' ? "Light"
+        : window._prefs && window._prefs.theme === 'dark' ? "Dark"
+        : "Auto (system)"
+      }/>
+      <KV label="Density"           value={(window._prefs && window._prefs.density === 'compact') ? "Compact" : "Comfortable"}/>
+      <KV label="Round to rupees"   value={(window._prefs && window._prefs.round_rupees) ? "On" : "Off"}/>
+      <KV label="P&L in header"     value={(window._prefs && window._prefs.show_pnl_in_header !== 0) ? "Shown" : "Hidden"}/>
+      <KV label="Redact PII to AI"  value={(window._prefs && window._prefs.redact_pii !== 0) ? "On (recommended)" : "Off"}/>
     </Card>
     <Card title="Tax identifiers">
       <KV label="PAN"               value="Not set" mono/>
