@@ -78,8 +78,66 @@ window.MockData = MockData;
 // ---------- Tiny fetch helper for screens migrating off hardcoded arrays ----------
 // Returns parsed JSON or throws. Screens typically wrap with try/catch and fall back
 // to MockData.* when isDemoOn().
+//
+// T99-T79: when the request fails we now attach the server's x-request-id
+// header (set by deploy/backend/observability.js middleware) onto the thrown
+// Error AND stash it on window._lastRequestId. Callers that catch the error
+// can show it in a toast so end-users can paste it for support to grep
+// errors_log by request_id.
 window.fetchApi = async (path, init = {}) => {
   const res = await fetch(path, { credentials: 'include', ...init });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  // Always remember the latest request id, success or failure -- helps
+  // operators correlate a screen state to a backend log entry.
+  try {
+    const rid = res.headers.get('x-request-id');
+    if (rid) window._lastRequestId = rid;
+  } catch (_) {}
+  if (!res.ok) {
+    const err = new Error(`${res.status} ${res.statusText}`);
+    err.status = res.status;
+    err.requestId = (() => { try { return res.headers.get('x-request-id') || null; } catch (_) { return null; } })();
+    // Best-effort parse JSON error body for richer messages (the backend's
+    // _obsErrorMiddleware returns { ok:false, reason, requestId, detail }).
+    try {
+      const body = await res.json();
+      if (body && body.reason) err.reason = body.reason;
+      if (body && body.detail) err.detail = body.detail;
+      if (body && body.requestId && !err.requestId) err.requestId = body.requestId;
+    } catch (_) {}
+    throw err;
+  }
   return await res.json();
+};
+
+// T99-T79: convenience for showing an error toast that includes the server
+// request-id (if we have one) so users can quote it when filing support
+// reports. Safe to call from anywhere; no-op if window.toast isn't loaded yet.
+window.toastError = (title, errOrMsg) => {
+  if (!window.toast) return;
+  let sub = '';
+  let rid = null;
+  if (errOrMsg && typeof errOrMsg === 'object') {
+    rid = errOrMsg.requestId || errOrMsg.request_id || null;
+    sub = errOrMsg.detail || errOrMsg.reason || errOrMsg.message || '';
+  } else if (typeof errOrMsg === 'string') {
+    sub = errOrMsg;
+  }
+  if (rid) sub = (sub ? sub + ' · ' : '') + 'req ' + rid.slice(0, 8);
+  window.toast({ kind: 'down', title: title || 'Something went wrong', sub: sub || undefined });
+};
+
+// T99-T79: format a thrown Error into a string suitable for inline display
+// (e.g. setError(formatErr(ex))). Includes the request-id when fetchApi
+// attached one so the user can paste it for support.
+window.formatErr = (err) => {
+  if (!err) return '';
+  if (typeof err === 'string') return err;
+  const parts = [];
+  if (err.detail) parts.push(err.detail);
+  else if (err.reason) parts.push(err.reason);
+  else if (err.message) parts.push(err.message);
+  else parts.push(String(err));
+  const rid = err.requestId || err.request_id;
+  if (rid) parts.push('(req ' + String(rid).slice(0, 8) + ')');
+  return parts.join(' ');
 };

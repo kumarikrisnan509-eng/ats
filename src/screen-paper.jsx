@@ -56,7 +56,7 @@ const ReplayPanel = () => {
       });
       setResult(r);
     } catch (e) {
-      setError(String(e.message || e));
+      setError((window.formatErr && window.formatErr(e)) || String(e.message || e));
     } finally {
       setRunning(false);
     }
@@ -197,7 +197,7 @@ const BracketOrderPanel = () => {
       });
       setResult(r);
     } catch (ex) {
-      setError(String(ex.message || ex));
+      setError((window.formatErr && window.formatErr(ex)) || String(ex.message || ex));
     } finally {
       setSubmitting(false);
     }
@@ -380,7 +380,7 @@ const SpanMarginPanel = () => {
       });
       setResult(r);
     } catch (e) {
-      setError(String(e.message || e));
+      setError((window.formatErr && window.formatErr(e)) || String(e.message || e));
     } finally {
       setRunning(false);
     }
