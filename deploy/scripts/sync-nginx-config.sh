@@ -41,9 +41,17 @@ for src in "$STAGED_DIR"/*.conf; do
     echo "    backed up $base"
   fi
   install -m 0644 -o root -g root "$src" "$dst"
-  # Ensure it's enabled (idempotent symlink).
-  ln -sf "$dst" "$SITES_ENABLED/$base"
-  echo "    installed: $base"
+  # T99-T41 v3: ONLY symlink into sites-enabled if it already had a symlink
+  # there. v2 auto-enabled every config and broke nginx -t because both site
+  # files in this repo declare the same limit_req_zone — fine when only one
+  # is enabled, fatal when both are. Operator decides what's enabled; we
+  # only push the bytes.
+  if [[ -L "$SITES_ENABLED/$base" ]]; then
+    ln -sf "$dst" "$SITES_ENABLED/$base"
+    echo "    installed + kept enabled: $base"
+  else
+    echo "    installed (NOT enabled — staged only): $base"
+  fi
 done
 
 echo "==> [2/3] nginx -t"
