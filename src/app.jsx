@@ -259,6 +259,7 @@ function App() {
         </div>
       </div>
       {window.ToastHost && <window.ToastHost/>}
+      {window.OrderToastBridge && <window.OrderToastBridge/>}
       {window.AIAssistant && <window.AIAssistant/>}
       {window.ReplayMode && <window.ReplayMode/>}
       {window.ModeSwitchOverlay && <window.ModeSwitchOverlay/>}
