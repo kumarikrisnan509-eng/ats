@@ -125,6 +125,24 @@ function open(opts = {}) {
   // H4: verdict captured from the LLM response so backtest can join verdict -> outcome
   try { conn.exec("ALTER TABLE ai_calls ADD COLUMN verdict TEXT"); }
   catch (e) { /* already migrated */ }
+  // H8: A/B experiment + variant on each AI call
+  try { conn.exec("ALTER TABLE ai_calls ADD COLUMN experiment_id INTEGER"); }
+  catch (e) { /* already migrated */ }
+  try { conn.exec("ALTER TABLE ai_calls ADD COLUMN variant TEXT"); }
+  catch (e) { /* already migrated */ }
+  // H8: experiment registry
+  conn.exec(`CREATE TABLE IF NOT EXISTS ai_experiments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    variant_a_key TEXT NOT NULL,
+    variant_b_key TEXT NOT NULL,
+    workflow TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    ended_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_ai_experiments_user_active ON ai_experiments(user_id, active);`);
 
 
   // T99-C1: daily AI spend cap (INR/day). Default 50; clamped 0-5000 in prefs.upsert.
@@ -291,19 +309,22 @@ function makeRepo(conn) {
     // T99-A3 / C1: AI call log + daily-cap helpers
     ai: {
       logCall: (row) => {
-        const result = stmts.aiCallInsert.run({
-          user_id: row.user_id,
-          workflow: row.workflow || null,
-          provider: row.provider,
-          model: row.model || null,
-          prompt_tokens: row.prompt_tokens || 0,
-          completion_tokens: row.completion_tokens || 0,
-          cost_inr: row.cost_inr || 0,
-          status: row.status || 'ok',
-          error: row.error || null,
-          context_tag: row.context_tag || null,
-          verdict: row.verdict || null,
-        });
+        // Direct stmt instead of prepared (need to include experiment_id + variant columns)
+        const result = conn.prepare(`INSERT INTO ai_calls (user_id, workflow, provider, model, prompt_tokens, completion_tokens, cost_inr, status, error, context_tag, verdict, experiment_id, variant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+          row.user_id,
+          row.workflow || null,
+          row.provider,
+          row.model || null,
+          row.prompt_tokens || 0,
+          row.completion_tokens || 0,
+          row.cost_inr || 0,
+          row.status || 'ok',
+          row.error || null,
+          row.context_tag || null,
+          row.verdict || null,
+          row.experiment_id || null,
+          row.variant || null,
+        );
         return result.lastInsertRowid;
       },
       dailySpend: (uid) => Number(stmts.aiCallsDailySpend.get(uid).spent || 0),
@@ -334,6 +355,32 @@ function makeRepo(conn) {
       getCall: (uid, callId) => stmts.aiGetCall.get(callId, uid),
       recentDown: (uid, limit) => stmts.aiRecentDown.all(uid, Math.min(50, Math.max(1, limit || 10))),
       feedbackCounts: (uid, window) => stmts.aiFeedbackCounts.all(uid, window || '-30 days'),
+      // H8: experiment registry helpers
+      experimentCreate: (uid, name, workflow, varA, varB) => conn.prepare("INSERT INTO ai_experiments (user_id, name, workflow, variant_a_key, variant_b_key) VALUES (?, ?, ?, ?, ?)").run(uid, name, workflow, varA, varB).lastInsertRowid,
+      experimentEnd: (uid, id) => conn.prepare("UPDATE ai_experiments SET active = 0, ended_at = datetime('now') WHERE id = ? AND user_id = ?").run(id, uid),
+      experimentListActive: (uid) => conn.prepare("SELECT * FROM ai_experiments WHERE user_id = ? AND active = 1 ORDER BY created_at DESC").all(uid),
+      experimentActiveForWorkflow: (uid, workflow) => conn.prepare("SELECT * FROM ai_experiments WHERE user_id = ? AND workflow = ? AND active = 1 ORDER BY created_at DESC LIMIT 1").get(uid, workflow),
+      experimentGet: (uid, id) => conn.prepare("SELECT * FROM ai_experiments WHERE id = ? AND user_id = ?").get(id, uid),
+      experimentList: (uid) => conn.prepare("SELECT * FROM ai_experiments WHERE user_id = ? ORDER BY created_at DESC LIMIT 50").all(uid),
+      experimentResults: (uid, id, days) => {
+        const dayWindow = `-${Math.max(1, Math.min(365, days || 30))} days`;
+        return conn.prepare(`
+          SELECT ai.variant AS variant, ai.context_tag AS symbol, ai.verdict AS verdict,
+                 ai.ts AS ai_ts, pt.pnl AS trade_pnl
+          FROM ai_calls ai
+          LEFT JOIN paper_closed_trades pt
+            ON pt.user_id = ai.user_id
+           AND UPPER(pt.symbol) = UPPER(ai.context_tag)
+           AND pt.entered_at >= ai.ts
+           AND julianday(pt.entered_at) - julianday(ai.ts) <= 30
+          WHERE ai.user_id = ?
+            AND ai.experiment_id = ?
+            AND ai.status = 'ok'
+            AND ai.ts > datetime('now', ?)
+          ORDER BY ai.ts DESC
+        `).all(uid, id, dayWindow);
+      },
+
       // H4: join AI critique calls (with context_tag=symbol + verdict) to subsequent paper trades
       verdictBacktest: (uid, days) => {
         const dayWindow = `-${Math.max(1, Math.min(365, days || 30))} days`;

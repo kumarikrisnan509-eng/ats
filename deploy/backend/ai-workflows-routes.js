@@ -342,9 +342,20 @@ Return JSON review only.`,
       } catch (e) { /* non-fatal */ }
 
       // 3c. Bulk/block deals for this symbol today (E8)
+      // H8: if an active experiment toggles bulk-deals on/off, honor it deterministically.
+      const _exp = (() => { try { return db.ai.experimentActiveForWorkflow(req.user.id, 'intraday_critic'); } catch (_) { return null; } })();
+      let _variant = null;
+      let _includeBulkDeals = true;
+      if (_exp) {
+        // Deterministic per-(user,symbol,today) bucket — same call replays into the same variant
+        const h = _hashPrompt([req.user.id, _exp.id, symbol, today]);
+        _variant = (parseInt(h.slice(0, 8), 16) % 2) === 0 ? 'a' : 'b';
+        // Convention for the first built-in experiment: 'with-bulk-deals' (a) vs 'without-bulk-deals' (b)
+        if (_exp.name === 'with-vs-without-bulk-deals' && _variant === 'b') _includeBulkDeals = false;
+      }
       let bulkDealsContext = null;
       try {
-        if (bulkDeals) {
+        if (bulkDeals && _includeBulkDeals) {
           const deals = await bulkDeals.forSymbol(symbol);
           if (deals && deals.length) {
             const buyCr = deals.filter(d => d.side === 'BUY').reduce((s, d) => s + (d.inr_value || 0), 0) / 1e7;
@@ -447,7 +458,7 @@ Return JSON verdict only.`;
       const cost_inr = estimateCost({ provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens });
 
       let call_id = null;
-      try { call_id = db.ai.logCall({ user_id: req.user.id, workflow: 'intraday_critic', provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null, context_tag: symbol, verdict: norm && norm.verdict }); } catch (e) { console.warn('[ai-workflows] critique-rich log:', e.message); }
+      try { call_id = db.ai.logCall({ user_id: req.user.id, workflow: 'intraday_critic', provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null, context_tag: symbol, verdict: norm && norm.verdict, experiment_id: _exp ? _exp.id : null, variant: _variant }); } catch (e) { console.warn('[ai-workflows] critique-rich log:', e.message); }
 
       const norm = {
         verdict: ['agree','caution','reject'].includes(String(advice && advice.verdict).toLowerCase()) ? String(advice.verdict).toLowerCase() : 'caution',
@@ -905,6 +916,85 @@ Rules:
     } catch (e) {
       try { db.ai.logCall({ user_id: req.user.id, workflow: 'vision', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e.message || 'vision_failed').slice(0, 200), context_tag: null, verdict: null }); } catch (_) {}
       res.status(500).json({ ok: false, reason: 'vision_failed', detail: e.message });
+    }
+  });
+
+  // --- H8: A/B experiments registry + results ---
+  router.get('/experiments', (req, res) => {
+    try { res.json({ ok: true, experiments: db.ai.experimentList(req.user.id) }); }
+    catch (e) { res.status(500).json({ ok: false, reason: 'list_failed', detail: e.message }); }
+  });
+
+  router.post('/experiments', (req, res) => {
+    const b = req.body || {};
+    const name = (b.name || '').toString().trim();
+    const workflow = (b.workflow || 'intraday_critic').toString();
+    const varA = (b.variant_a_key || 'a').toString().slice(0, 32);
+    const varB = (b.variant_b_key || 'b').toString().slice(0, 32);
+    if (!name) return res.status(400).json({ ok: false, reason: 'bad_request', detail: 'name required' });
+    try {
+      // End any existing active experiment for the same workflow so we don't double up
+      const existing = db.ai.experimentActiveForWorkflow(req.user.id, workflow);
+      if (existing) db.ai.experimentEnd(req.user.id, existing.id);
+      const id = db.ai.experimentCreate(req.user.id, name, workflow, varA, varB);
+      res.json({ ok: true, id, name, workflow, variant_a_key: varA, variant_b_key: varB });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: 'create_failed', detail: e.message });
+    }
+  });
+
+  router.put('/experiments/:id/end', (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const r = db.ai.experimentEnd(req.user.id, id);
+      if (!r.changes) return res.status(404).json({ ok: false, reason: 'not_found_or_already_ended' });
+      res.json({ ok: true, id });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: 'end_failed', detail: e.message });
+    }
+  });
+
+  router.get('/experiments/:id/results', (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const meta = db.ai.experimentGet(req.user.id, id);
+      if (!meta) return res.status(404).json({ ok: false, reason: 'not_found' });
+      const days = Math.max(7, Math.min(365, parseInt(req.query.days || '30', 10)));
+      const rows = db.ai.experimentResults(req.user.id, id, days);
+      const buckets = { a: { calls: 0, matched: 0, wins: 0, losses: 0, total_pnl: 0 },
+                        b: { calls: 0, matched: 0, wins: 0, losses: 0, total_pnl: 0 } };
+      const seen = new Set();
+      for (const r of rows) {
+        const v = r.variant;
+        if (!buckets[v]) continue;
+        const callKey = `${r.ai_ts}|${r.symbol}|${v}`;
+        if (!seen.has(callKey)) { buckets[v].calls += 1; seen.add(callKey); }
+        if (r.trade_pnl != null) {
+          buckets[v].matched += 1;
+          if (r.trade_pnl > 0) buckets[v].wins += 1; else buckets[v].losses += 1;
+          buckets[v].total_pnl += Number(r.trade_pnl);
+        }
+      }
+      const out = {};
+      for (const [k, b] of Object.entries(buckets)) {
+        out[k] = {
+          calls: b.calls, trades_in_window: b.matched, wins: b.wins, losses: b.losses,
+          win_rate: b.matched > 0 ? +(b.wins / b.matched).toFixed(4) : null,
+          avg_pnl_inr: b.matched > 0 ? +(b.total_pnl / b.matched).toFixed(2) : null,
+          total_pnl_inr: +b.total_pnl.toFixed(2),
+        };
+      }
+      // Headline: simple lift, mark significant only when both sides have enough samples
+      let headline = 'Not enough data yet — keep running the experiment.';
+      const enough = out.a.matched >= 10 && out.b.matched >= 10;
+      if (enough) {
+        const lift = (out.a.avg_pnl_inr ?? 0) - (out.b.avg_pnl_inr ?? 0);
+        const winner = lift > 0 ? meta.variant_a_key : (lift < 0 ? meta.variant_b_key : 'tie');
+        headline = `${winner} leads by Rs ${Math.abs(lift).toFixed(2)} per trade after ${out.a.matched + out.b.matched} trades`;
+      }
+      res.json({ ok: true, experiment: meta, window_days: days, buckets: out, headline, sample_threshold: 10 });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: 'results_failed', detail: e.message });
     }
   });
 
