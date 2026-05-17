@@ -459,10 +459,25 @@ const CountUp = ({ value, format = (v) => v.toFixed(0), duration = 400 }) => {
   return <span>{format(shown)}</span>;
 };
 
-// Stale indicator — small badge near a price showing "now" / "3s ago" / "stale"
+// Stale indicator — small badge near a price showing "now" / "3s ago" / "stale".
+// T99-T51: respects upstream stall state too — when the backend's Kite WS is
+// stalled on an expired token (T-34) or frozen mid-day (T-37), the local
+// socket might still be fine, but the prices we're displaying are stale
+// because the backend has no new data to send us. Override the local "now"
+// reading in that case.
 const StaleIndicator = ({ compact = false }) => {
   const { connected, lastTickAt } = useConnectionState();
   const age = Math.floor((Date.now() - lastTickAt) / 1000);
+  // Read upstream state directly from LiveTicks — useConnectionState only
+  // exposes the local socket fields. Cheap (one object access per render).
+  let upstream = null;
+  try { upstream = window.LiveTicks && window.LiveTicks.state && window.LiveTicks.state().upstream; } catch (_) {}
+  if (upstream && upstream.stalledOnToken) {
+    return <span style={{ fontSize: 9, color: "var(--down)", marginLeft: 4 }} title="Broker token expired — reconnect from Brokers screen">⚠ feed offline</span>;
+  }
+  if (upstream && upstream.tickStale) {
+    return <span style={{ fontSize: 9, color: "var(--warn, #d97706)", marginLeft: 4 }} title="Backend received no ticks for 90+s while market open">⚠ frozen</span>;
+  }
   if (connected && age < 2) {
     return <span style={{ fontSize: 9, color: "var(--up)", marginLeft: 4 }}>● now</span>;
   }
