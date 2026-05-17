@@ -346,6 +346,17 @@ function readSessionCookie(req) {
 const app = express();
 app.use(express.json({ limit: '64kb' }));
 
+// T99-T78: observability + request-logging MUST run before route handlers, so
+// they live right after express.json. Early routes (health-deep, status, admin
+// observability) are registered immediately after this block. Without this,
+// the x-request-id header is missing on those endpoints and they never appear
+// in stdout request logs.
+app.use(_obsMiddleware);
+app.use((req, _res, next) => {
+  console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
+  next();
+});
+
 // ---------- Tier 71: market metadata cache (holidays from Kite) ----------
 let _marketMeta = null;
 try {
@@ -795,15 +806,6 @@ app.get('/api/admin/dr-status', (req, res) => {
 
 app.disable('x-powered-by');
 app.set('trust proxy', 'loopback');
-
-app.use((req, _res, next) => {
-  console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
-  next();
-});
-
-// T99-T78: observability middleware -- sets x-request-id, records per-route
-// latency on res.finish. Must run BEFORE route handlers so it sees them all.
-app.use(_obsMiddleware);
 
 // Tier 50: attach req.user to every request if a valid session cookie is present.
 // Does NOT enforce auth -- that's done per-route via auth.requireAuth.
