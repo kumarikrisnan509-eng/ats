@@ -10,7 +10,7 @@
 
 const crypto = require('crypto');
 const aiRouter = require('./ai-router');
-const { callLLM, estimateCost, redactRupees, redactPayload } = require('./ai-advisor');
+const { callLLM, callLLMVision, estimateCost, redactRupees, redactPayload } = require('./ai-advisor');
 
 const CACHE_MAX = 500;
 const _cache = new Map();
@@ -820,6 +820,91 @@ Return JSON verdict only.`,
     } catch (e) {
       try { db.ai.logCall({ user_id: req.user.id, workflow: 'strategy_autotune', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e.message || 'autotune_failed').slice(0,200), context_tag: strategy_id, verdict: null }); } catch (_) {}
       res.status(500).json({ ok: false, reason: 'autotune_failed', detail: e.message });
+    }
+  });
+
+  // --- D3: vision — chart image upload + AI extraction ---
+  // Body: { image_data_url: 'data:image/png;base64,...', context?: 'free text' }
+  // The body limit is bumped to 10mb just for this route (default for the router is 32kb).
+  router.post('/vision', express.json({ limit: '10mb' }), async (req, res) => {
+    const b = req.body || {};
+    const dataUrl = (b.image_data_url || '').toString();
+    if (!dataUrl) return res.status(400).json({ ok: false, reason: 'bad_request', detail: 'image_data_url required (data:image/png;base64,XXXX)' });
+
+    const m = dataUrl.match(/^data:(image\/(?:png|jpeg|jpg|webp));base64,(.+)$/);
+    if (!m) return res.status(400).json({ ok: false, reason: 'bad_image_format', detail: 'expecting data:image/png|jpeg|webp;base64,...' });
+
+    const imageMime = m[1] === 'image/jpg' ? 'image/jpeg' : m[1];
+    const imageBase64 = m[2];
+
+    // Hard cap: 7.5MB base64 (~5MB raw). Anthropic accepts up to ~20MB; we cap lower.
+    if (imageBase64.length > 7_500_000) {
+      return res.status(413).json({ ok: false, reason: 'image_too_large', detail: 'max ~5MB raw' });
+    }
+
+    try {
+      const mode = b.mode || db.ai.userMode(req.user.id);
+
+      // Cache key — full base64 hash so identical re-uploads are free
+      const cacheKey = _hashPrompt([req.user.id, 'vision', mode, imageBase64.length, imageBase64.slice(0, 64), imageBase64.slice(-64), b.context || '']);
+      const cached = _cacheGet(cacheKey);
+      if (cached) return res.json({ ok: true, cached: true, ...cached.response, provider: cached.provider, model: cached.model, cost_inr: 0, call_id: cached.call_id || null });
+
+      // Route — workflow 'vision' resolves to STRONG family. Force a vision-capable
+      // model: Claude Sonnet + Opus + GPT-5 + Gemini Pro/Flash all support inline image.
+      const routed = await aiRouter.route({ db, vault, userId: req.user.id, workflow: 'vision', mode });
+      if (!routed.ok) return res.status(routed.reason === 'no_ai_key' ? 412 : 404).json(routed);
+
+      // Vision is more expensive (image tokens add up). Use 2x budget.
+      const capCheck = _capCheck(db, req.user.id, 'vision', routed.provider, routed.model, routed.est_cost_inr * 2);
+      if (capCheck.blocked) return res.status(429).json({ ok: false, reason: 'spend_cap_exceeded', ...capCheck });
+
+      const prompt = {
+        system: `You are a chart-reading analyst for Indian equities. Extract structured info from a screenshot of a price chart. Output STRICTLY this JSON:
+{
+  "chart_type": "candlestick" | "line" | "bar" | "area" | "unknown",
+  "symbol_guess": "<ticker if visible, else null>",
+  "exchange_guess": "NSE" | "BSE" | "other" | null,
+  "date_range": "<text from the chart, e.g. '1 Jan - 31 Mar 2026'>",
+  "trend": "uptrend" | "downtrend" | "range" | "unclear",
+  "key_levels": [
+    {"price": <number>, "kind": "support" | "resistance" | "psychological" | "moving_average"}
+  ],
+  "annotations": ["text user has drawn on the chart, e.g. 'breakout', 'buy here'"],
+  "plain_summary": "1-2 sentences describing what the chart shows, in plain Hindi-English",
+  "advisory_note": "1 sentence reminding the user this is pattern reading, not predictions"
+}
+Rules:
+- Never invent a ticker — if not visible, set symbol_guess: null.
+- key_levels max 5 entries; pick the most prominent.
+- Reading a chart is pattern recognition, not forecasting. Always include advisory_note.`,
+        user: b.context ? `Additional context from user: ${String(b.context).slice(0, 500)}\n\nNow analyse the attached chart.` : 'Analyse the attached chart.',
+      };
+
+      const llmResult = await callLLMVision({ provider: routed.provider, apiKey: routed.apiKey, model: routed.model, prompt, imageBase64, imageMime });
+      const advice = (llmResult && llmResult.advice) ?? llmResult;
+      const usage = (llmResult && llmResult.usage) || { prompt_tokens: 0, completion_tokens: 0 };
+      const cost_inr = estimateCost({ provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens });
+
+      let call_id = null;
+      try { call_id = db.ai.logCall({ user_id: req.user.id, workflow: 'vision', provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null, context_tag: advice && advice.symbol_guess ? String(advice.symbol_guess).toUpperCase() : null, verdict: advice && advice.trend ? String(advice.trend) : null }); } catch (e) { console.warn('[ai-workflows] vision log:', e.message); }
+
+      const norm = {
+        chart_type: String(advice && advice.chart_type || 'unknown'),
+        symbol_guess: advice && advice.symbol_guess ? String(advice.symbol_guess).slice(0, 24).toUpperCase() : null,
+        exchange_guess: advice && advice.exchange_guess ? String(advice.exchange_guess).slice(0, 10) : null,
+        date_range: String(advice && advice.date_range || '').slice(0, 100),
+        trend: String(advice && advice.trend || 'unclear'),
+        key_levels: Array.isArray(advice && advice.key_levels) ? advice.key_levels.slice(0, 5).map(k => ({ price: Number(k.price), kind: String(k.kind || 'support').slice(0, 24) })) : [],
+        annotations: Array.isArray(advice && advice.annotations) ? advice.annotations.slice(0, 6).map(a => String(a).slice(0, 200)) : [],
+        plain_summary: String(advice && advice.plain_summary || '').slice(0, 500),
+        advisory_note: String(advice && advice.advisory_note || '').slice(0, 200),
+      };
+      _cachePut(cacheKey, { ts: Date.now(), response: norm, cost_inr, provider: routed.provider, model: routed.model, call_id });
+      res.json({ ok: true, cached: false, ...norm, provider: routed.provider, model: routed.model, cost_inr, usage, call_id });
+    } catch (e) {
+      try { db.ai.logCall({ user_id: req.user.id, workflow: 'vision', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e.message || 'vision_failed').slice(0, 200), context_tag: null, verdict: null }); } catch (_) {}
+      res.status(500).json({ ok: false, reason: 'vision_failed', detail: e.message });
     }
   });
 

@@ -373,6 +373,92 @@ function normalizeAdvice(advice) {
   };
 }
 
+/**
+ * D3: vision variant of callLLM. Same return shape ({advice, usage}) but the
+ * user prompt is paired with a base64-encoded image. Anthropic supports this
+ * via content blocks of type 'image' + source.type='base64'; OpenAI via
+ * image_url with a data: URI; Gemini via inlineData with mimeType + data.
+ */
+async function callLLMVision({ provider, apiKey, model, prompt, imageBase64, imageMime = 'image/png', fetchImpl }) {
+  const fetchFn = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
+  if (!fetchFn) throw new Error('global fetch unavailable');
+  if (!imageBase64) throw new Error('imageBase64 required');
+
+  if (provider === 'anthropic') {
+    const resp = await fetchFn('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({
+        model: resolveModel('anthropic', model),
+        max_tokens: 1500,
+        system: prompt.system,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: imageMime, data: imageBase64 } },
+            { type: 'text', text: prompt.user },
+          ],
+        }],
+      }),
+    });
+    if (!resp.ok) throw new Error(`anthropic ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+    const j = await resp.json();
+    const text = (j.content && j.content[0] && j.content[0].text) || '';
+    const usage = { prompt_tokens: (j.usage && j.usage.input_tokens) || 0, completion_tokens: (j.usage && j.usage.output_tokens) || 0 };
+    return { advice: _parseJsonResponse(text), usage };
+  }
+
+  if (provider === 'openai') {
+    const resolved = resolveModel('openai', model);
+    const isNewer = /^(gpt-5|o[0-9])/i.test(resolved);
+    const body = {
+      model: resolved,
+      messages: [
+        { role: 'system', content: prompt.system },
+        { role: 'user', content: [
+          { type: 'image_url', image_url: { url: `data:${imageMime};base64,${imageBase64}` } },
+          { type: 'text', text: prompt.user },
+        ]},
+      ],
+      response_format: { type: 'json_object' },
+    };
+    if (isNewer) body.max_completion_tokens = 1500; else body.max_tokens = 1500;
+    const resp = await fetchFn('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) throw new Error(`openai ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+    const j = await resp.json();
+    const text = (j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '';
+    const usage = { prompt_tokens: (j.usage && j.usage.prompt_tokens) || 0, completion_tokens: (j.usage && j.usage.completion_tokens) || 0 };
+    return { advice: _parseJsonResponse(text), usage };
+  }
+
+  if (provider === 'gemini') {
+    const m = resolveModel('gemini', model);
+    const resp = await fetchFn(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [
+          { inlineData: { mimeType: imageMime, data: imageBase64 } },
+          { text: prompt.user },
+        ]}],
+        systemInstruction: { parts: [{ text: prompt.system }] },
+        generationConfig: { maxOutputTokens: 1500, responseMimeType: 'application/json' },
+      }),
+    });
+    if (!resp.ok) throw new Error(`gemini ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+    const j = await resp.json();
+    const text = (j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts && j.candidates[0].content.parts[0] && j.candidates[0].content.parts[0].text) || '';
+    const usage = { prompt_tokens: (j.usageMetadata && j.usageMetadata.promptTokenCount) || 0, completion_tokens: (j.usageMetadata && j.usageMetadata.candidatesTokenCount) || 0 };
+    return { advice: _parseJsonResponse(text), usage };
+  }
+
+  throw new Error(`unsupported provider: ${provider}`);
+}
+
 module.exports = {
   SUPPORTED_PROVIDERS,
   DEFAULT_MODEL_BY_PROVIDER,
@@ -380,6 +466,7 @@ module.exports = {
   resolveModel,
   buildPrompt,
   callLLM,
+  callLLMVision,
   normalizeAdvice,
   // T99-A3
   estimateCost,
