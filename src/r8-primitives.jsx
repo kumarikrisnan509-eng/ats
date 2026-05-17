@@ -155,36 +155,31 @@ const Tooltip = ({ content, children, side = "top", maxW = 240 }) => {
 };
 
 // ============ NetworkStatus banner ============
-// Listens to online/offline + simulated broker WS heartbeat. Renders a sticky top banner
-// when degraded so users know data is stale before they place an order.
+// Renders a sticky top banner ONLY when the browser is offline. T99-T52
+// removed the simulated broker-lag panel (Math.random()*30, threshold 80 -
+// never triggered, just decorative code). Real broker stall states (token
+// expired / ticks frozen) are handled by TickerStallBanner from T-45 which
+// reads window.LiveTicks.state().upstream pushed by the backend over /ws.
+// Two banners showing different views of broker health would just confuse
+// the user. NetworkStatus stays scoped to BROWSER connectivity.
 const NetworkStatus = () => {
   const [online, setOnline] = React.useState(typeof navigator !== "undefined" ? navigator.onLine : true);
-  const [brokerLag, setBrokerLag] = React.useState(14);
-  const [degraded, setDegraded] = React.useState(false);
   React.useEffect(() => {
     const on = () => setOnline(true), off = () => setOnline(false);
     window.addEventListener("online", on);
     window.addEventListener("offline", off);
-    const id = setInterval(() => {
-      const lag = Math.floor(8 + Math.random() * 30);
-      setBrokerLag(lag);
-      setDegraded(lag > 80);
-    }, 8000);
-    return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); clearInterval(id); };
+    return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
   }, []);
-  if (online && !degraded) return null;
-  const off = !online;
+  if (online) return null;
   return (
-    <div style={{
+    <div role="status" aria-live="polite" style={{
       position: "sticky", top: "var(--top-h)", zIndex: 19,
-      background: off ? "var(--down)" : "var(--warn)",
+      background: "var(--down)",
       color: "white", padding: "8px 24px",
       display: "flex", alignItems: "center", gap: 12, fontSize: 12, fontWeight: 500,
     }}>
       <span style={{ width: 8, height: 8, borderRadius: "50%", background: "white", animation: "pulse 1.4s infinite" }}/>
-      {off
-        ? <>Offline — data is frozen. New orders disabled until connection restores.</>
-        : <>Broker feed lag {brokerLag}ms — quotes may be stale. Pre-trade simulator will warn before submit.</>}
+      <span>Your browser is offline — data is frozen. New orders disabled until connection restores.</span>
       <button className="btn btn--sm" style={{ marginLeft: "auto", background: "rgba(255,255,255,0.2)", color: "white", border: "1px solid rgba(255,255,255,0.3)" }}
         onClick={() => location.reload()}>Retry</button>
     </div>
