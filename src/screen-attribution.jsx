@@ -2,11 +2,17 @@
 /* PnL attribution — decompose total PnL by strategy / mode / symbol / alpha source */
 
 const AttributionScreen = () => {
-  // ---- live /api/pnl/by-strategy + /api/pnl/daily ----
+  // ---- live /api/pnl/by-strategy + /api/pnl/daily + /api/me/pnl ----
   const [liveByStrat, setLiveByStrat] = React.useState(null);
   const [liveDaily, setLiveDaily] = React.useState(null);
+  // T99-T80: per-user pnl (real, from db.pnl_daily) — replaces the hardcoded
+  // +₹1,24,800 / 11.2% / 654 trades headline. Shape: { rows: [{date, realized_pnl, unrealized_pnl, equity, trades}] }
+  const [mePnl, setMePnl] = React.useState({ loading: true, rows: null, error: null });
   React.useEffect(() => {
-    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
+    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) {
+      setMePnl({ loading: false, rows: null, error: null });
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -17,9 +23,34 @@ const AttributionScreen = () => {
         if (!cancelled && a && a.ok) setLiveByStrat(a.strategies || []);
         if (!cancelled && b && b.ok) setLiveDaily({ rows: b.rows || [], stats: b.stats });
       } catch (e) {}
+      try {
+        const me = await window.fetchApi('/api/me/pnl?n=30');
+        if (!cancelled) setMePnl({ loading: false, rows: (me && me.rows) || [], error: null });
+      } catch (e) {
+        if (!cancelled) setMePnl({ loading: false, rows: null, error: e });
+      }
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // T99-T80: derive real headline numbers from /api/me/pnl rows.
+  // Rows: [{ date, realized_pnl, unrealized_pnl, equity, trades }]
+  // - netPnl  = sum(realized_pnl)
+  // - trades  = sum(trades)
+  // - capital = most recent row's equity, falls back to null
+  // We don't compute win rate here -- that requires per-trade ledger, which lives
+  // in /api/pnl/by-strategy. Leave the sub-line bare when missing.
+  const realPnl = React.useMemo(() => {
+    if (!mePnl.rows || mePnl.rows.length === 0) return null;
+    let net = 0, tr = 0;
+    for (const r of mePnl.rows) {
+      net += Number(r.realized_pnl) || 0;
+      tr  += Number(r.trades) || 0;
+    }
+    const lastEquity = Number(mePnl.rows[0] && mePnl.rows[0].equity) || null;
+    const pct = lastEquity && lastEquity > 0 ? (net / lastEquity) * 100 : null;
+    return { net, trades: tr, equity: lastEquity, pct };
+  }, [mePnl.rows]);
   const [lens, setLens] = React.useState("strategy");
 
   const __mock_byStrategy = [
@@ -108,20 +139,30 @@ const AttributionScreen = () => {
         ignore those numbers when reviewing your actual performance.
       </div>
 
-      {/* Net PnL headline */}
+      {/* Net PnL headline -- T99-T80: real /api/me/pnl, no hardcoded values */}
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
-            <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.4 }}>Net PnL · March 2026</div>
-            <div className="mono" style={{ fontSize: 40, fontWeight: 700, marginTop: 8, color: "var(--up)", letterSpacing: -0.5 }}>+₹1,24,800</div>
-            <div style={{ fontSize: 12, color: "var(--text-2)", marginTop: 4 }}>+11.2% of deployed capital · 654 trades · win rate 58.4%</div>
+            <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.4 }}>Net PnL · last 30 days</div>
+            <div className="mono" style={{ fontSize: 40, fontWeight: 700, marginTop: 8, color: realPnl && realPnl.net < 0 ? "var(--down)" : "var(--up)", letterSpacing: -0.5 }}>
+              {mePnl.loading ? '…' : (realPnl == null ? '—' : (realPnl.net >= 0 ? '+' : '') + '₹' + Math.round(realPnl.net).toLocaleString('en-IN'))}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-2)", marginTop: 4 }}>
+              {mePnl.loading
+                ? 'Loading per-user PnL…'
+                : (realPnl == null
+                    ? (mePnl.error ? 'PnL unavailable — sign in to see your numbers' : 'No closed trades yet')
+                    : `${realPnl.pct != null ? (realPnl.pct >= 0 ? '+' : '') + realPnl.pct.toFixed(1) + '% of equity · ' : ''}${realPnl.trades} trades`)}
+            </div>
           </div>
           <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Gross</div>
-            <div className="mono" style={{ fontSize: 16, fontWeight: 600 }}>+₹1,48,600</div>
-            <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase", marginTop: 6 }}>- Costs</div>
-            <div className="mono" style={{ fontSize: 16, fontWeight: 600, color: "var(--down)" }}>-₹23,800</div>
-            <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 4 }}>fees + slippage + AI</div>
+            <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Equity (latest)</div>
+            <div className="mono" style={{ fontSize: 16, fontWeight: 600 }}>
+              {realPnl && realPnl.equity != null ? '₹' + Math.round(realPnl.equity).toLocaleString('en-IN') : '—'}
+            </div>
+            <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 6 }}>
+              Source: /api/me/pnl (sum of realized_pnl over last 30 daily snapshots)
+            </div>
           </div>
         </div>
       </Card>
