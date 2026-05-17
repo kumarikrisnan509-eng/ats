@@ -120,6 +120,26 @@ const CircuitsScreen = () => {
         </div>
       </div>
 
+      {/* T99-T93: honest banner — each circuit's `current` value (daily loss
+          -₹8,240, vega 1,840, margin 42%, etc.) is hardcoded. They drive
+          the armed/triggered/near-trigger counters above and the progress
+          bars in the cards below. The thresholds COULD be a real user
+          config one day, but the current metric ingestion isn't wired —
+          there's no per-user circuit state or live metric stream behind
+          this screen. Same disclosure pattern as T-91 (Risk). */}
+      <div role="note" style={{
+        padding: '8px 12px', marginBottom: 12, borderRadius: 6,
+        border: '1px solid color-mix(in oklab, var(--warn, #d97706) 35%, var(--border))',
+        background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
+        fontSize: 12, color: 'var(--text-2)',
+      }}>
+        <strong>Circuit-breaker dashboard is demo data.</strong>{' '}
+        The current values driving the progress bars and the 'armed /
+        triggered / approaching limit' counts are hardcoded examples.
+        Per-user circuit state and live metric ingestion haven't shipped
+        yet. The 'Run halt drill' button is a UI placeholder.
+      </div>
+
       {/* Status overview */}
       <div className="grid grid-4" style={{ marginBottom: 18 }}>
         <div className="card" style={{ background: "var(--up-soft)", borderColor: "transparent" }}>
