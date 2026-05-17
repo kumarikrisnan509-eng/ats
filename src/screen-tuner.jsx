@@ -124,12 +124,15 @@ const TunerScreen = () => {
           {liveTuneBusy ? "Running..." : "Run live tune (RELIANCE rsi_mean_revert 27-combo)"}
         </button>
       </div>
-      {/* Job stats */}
+      {/* Job stats — T99-T92: dropped fake 1/42/+0.61/84hr+₹680.
+          These need a tuning-jobs ledger (current/queued/finished count,
+          accumulated compute spend, baseline-vs-tuned Sharpe). Job-history
+          backend not wired. Same pattern as T-81/T-88. */}
       <div className="grid grid-4" style={{ marginBottom: 16 }}>
-        <Stat label="Active jobs"     value="1"    sub="2 queued"/>
-        <Stat label="Total jobs (90d)" value="42"   sub="38 completed"/>
-        <Stat label="Avg Sharpe lift" value="+0.61" sub="vs default params"/>
-        <Stat label="Compute used"    value="84 hr" sub="₹680 LLM/CPU cost"/>
+        <Stat label="Active jobs"      value="—" sub="needs tuning-jobs ledger"/>
+        <Stat label="Total jobs (90d)" value="—" sub="needs tuning-jobs ledger"/>
+        <Stat label="Avg Sharpe lift"  value="—" sub="needs baseline vs tuned compare"/>
+        <Stat label="Compute used"     value="—" sub="needs compute-cost meter"/>
       </div>
 
       {/* Job picker */}
