@@ -2521,6 +2521,11 @@ app.get('/api/reconcile', async (_req, res) => {
     liveTrading: LIVE_TRADING,
     brokerName: broker.name,
     brokerConnected: !!(broker.health && broker.health().connected),
+    // T99-T49: mirror T-42's broker.health stall fields so the dashboard knows
+    // when the 'Current' portfolio values are computed from stale ticks. Both
+    // default to false when broker.health() is absent (mock broker etc.).
+    brokerStalledOnToken: !!(broker.health && broker.health().stalledOnToken),
+    brokerTickStale:      !!(broker.health && broker.health().tickStale),
     cash: {
       paper:    paperStats.cash,
       broker:   brokerCash,
