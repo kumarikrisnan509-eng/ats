@@ -66,23 +66,104 @@ const ReconScreen = () => {
         </div>
       </div>
 
-      {/* T99-T95: honest banner — the 4-card 'Match summary' KPIs, 8 trade
-          rows (OUR-8842..8849), and the '2 mismatches' action panel are
-          all hardcoded demo data. The screen fetches /api/reconcile on
-          mount but never consumes the response. Same disclosure pattern
-          as T-91 (Risk) / T-93 (Circuits). */}
-      <div role="note" style={{
-        padding: '8px 12px', marginBottom: 12, borderRadius: 6,
-        border: '1px solid color-mix(in oklab, var(--warn, #d97706) 35%, var(--border))',
-        background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
-        fontSize: 12, color: 'var(--text-2)',
-      }}>
-        <strong>Reconciliation dashboard is demo data.</strong>{' '}
-        The summary cards, 8 trade rows, and mismatch banner below are
-        hardcoded examples — the screen fetches /api/reconcile but does not
-        yet render the response. Per-user broker-vs-book reconciliation
-        ingestion hasn't shipped.
-      </div>
+      {/* T99-T95 banner — partially obsolete now that T-102 renders the
+          live snapshot below. We keep the banner narrowed: it only fires
+          when liveRecon is null (fetch failed / not loaded yet). */}
+      {!liveRecon && (
+        <div role="note" style={{
+          padding: '8px 12px', marginBottom: 12, borderRadius: 6,
+          border: '1px solid color-mix(in oklab, var(--warn, #d97706) 35%, var(--border))',
+          background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
+          fontSize: 12, color: 'var(--text-2)',
+        }}>
+          <strong>Reconciliation snapshot loading…</strong>{' '}
+          The summary cards, trade rows, and mismatch banner shown below are
+          demo data until /api/reconcile responds. Per-trade contract-note
+          reconciliation hasn't shipped — what loads is a paper-vs-broker
+          state snapshot (cash drift, holdings drift, pending orders).
+        </div>
+      )}
+
+      {/* T99-T102: live /api/reconcile snapshot. Replaces the static
+          demo cards as the primary view when the endpoint is reachable. */}
+      {liveRecon && (
+        <Card style={{ marginBottom: 16, borderColor: 'var(--accent)', borderWidth: 1 }}>
+          <div className="row between" style={{ marginBottom: 12 }}>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                Live reconciliation · {liveRecon.brokerName || 'broker'}
+              </div>
+              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                as of {liveRecon.asOf ? new Date(liveRecon.asOf).toLocaleString('en-IN') : '—'}
+                {liveRecon.killSwitch ? ' · kill switch ENGAGED' : ''}
+                {liveRecon.brokerStalledOnToken ? ' · broker token stale' : ''}
+              </div>
+            </div>
+            <Pill kind={liveRecon.summary && liveRecon.summary.holdingsDrifts > 0 ? 'warn' : 'up'} dot>
+              {liveRecon.summary && liveRecon.summary.holdingsDrifts > 0 ? `${liveRecon.summary.holdingsDrifts} drift` : 'aligned'}
+            </Pill>
+          </div>
+          <div className="grid grid-4" style={{ gap: 12 }}>
+            <div>
+              <div className="muted" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.4 }}>Cash · paper</div>
+              <div className="mono" style={{ fontSize: 16, fontWeight: 700, marginTop: 4 }}>
+                {liveRecon.cash && liveRecon.cash.paper != null ? '₹' + Math.round(liveRecon.cash.paper).toLocaleString('en-IN') : '—'}
+              </div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>simulator</div>
+            </div>
+            <div>
+              <div className="muted" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.4 }}>Cash · broker</div>
+              <div className="mono" style={{ fontSize: 16, fontWeight: 700, marginTop: 4 }}>
+                {liveRecon.cash && liveRecon.cash.brokerOk && liveRecon.cash.broker != null
+                  ? '₹' + Math.round(liveRecon.cash.broker).toLocaleString('en-IN')
+                  : '—'}
+              </div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                {liveRecon.cash && !liveRecon.cash.brokerOk ? 'broker unreachable' : 'live'}
+              </div>
+            </div>
+            <div>
+              <div className="muted" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.4 }}>Drift</div>
+              <div className="mono" style={{ fontSize: 16, fontWeight: 700, marginTop: 4, color: liveRecon.summary && liveRecon.summary.cashDrift !== 0 ? 'var(--warn)' : 'var(--up)' }}>
+                {liveRecon.summary && liveRecon.summary.cashDrift != null
+                  ? (liveRecon.summary.cashDrift >= 0 ? '+' : '') + '₹' + Math.round(liveRecon.summary.cashDrift).toLocaleString('en-IN')
+                  : '—'}
+              </div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>paper − broker</div>
+            </div>
+            <div>
+              <div className="muted" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.4 }}>Pending orders</div>
+              <div className="mono" style={{ fontSize: 16, fontWeight: 700, marginTop: 4 }}>
+                {liveRecon.summary && liveRecon.summary.paperPendingCnt != null
+                  ? `${liveRecon.summary.paperPendingCnt} / ${liveRecon.summary.brokerPendingCnt || 0}`
+                  : '—'}
+              </div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>paper / broker</div>
+            </div>
+          </div>
+          {Array.isArray(liveRecon.holdings) && liveRecon.holdings.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <div className="muted" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>
+                Holdings ({liveRecon.holdings.length})
+              </div>
+              <table className="table">
+                <thead><tr><th>Symbol</th><th className="num-l">Paper qty</th><th className="num-l">Broker qty</th><th className="num-l">Avg</th><th className="num-l">LTP</th></tr></thead>
+                <tbody>
+                  {liveRecon.holdings.slice(0, 10).map((h, i) => (
+                    <tr key={i}>
+                      <td style={{ fontWeight: 500 }}>{h.symbol}</td>
+                      <td className="num mono">{h.paperQty || 0}</td>
+                      <td className="num mono">{h.brokerQty || 0}</td>
+                      <td className="num mono">{h.brokerAvg ? '₹' + h.brokerAvg.toFixed(2) : '—'}</td>
+                      <td className="num mono">{h.brokerLtp ? '₹' + h.brokerLtp.toFixed(2) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* Match summary */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
