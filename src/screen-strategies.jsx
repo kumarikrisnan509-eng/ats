@@ -323,11 +323,16 @@ const StrategiesScreen = () => {
         </div>
       </div>
 
+      {/* T99-T88: replaced hardcoded 62.1% / 1.82 / -3.8% with '—'.
+          Combined 30d P&L IS derived from the strats array (sums pnl30 across
+          visible rows), so it stays live. The other three need a per-trade
+          performance ledger which isn't aggregated per-user yet. Same pattern
+          as T-81 (Signals KPIs). */}
       <div className="grid grid-4" style={{ marginBottom: 16 }}>
-        <Card><Stat label="Combined 30d P&L" value={(combinedPnl >= 0 ? "+" : "") + inr(combinedPnl)} delta={pct(2.84)} deltaKind="up" sub="after fees · visible"/></Card>
-        <Card><Stat label="Avg win rate" value="62.1%" delta="+1.4pp" deltaKind="up" sub="30d"/></Card>
-        <Card><Stat label="Sharpe (30d)" value="1.82" delta="+0.12" deltaKind="up" sub="combined"/></Card>
-        <Card><Stat label="Max drawdown" value={pct(-3.8, 1)} delta="peak Mar 12" deltaKind="muted" sub="within limits"/></Card>
+        <Card><Stat label="Combined 30d P&L" value={(combinedPnl >= 0 ? "+" : "") + inr(combinedPnl)} sub="sum of visible strategies"/></Card>
+        <Card><Stat label="Avg win rate" value="—" sub="needs per-trade ledger"/></Card>
+        <Card><Stat label="Sharpe (30d)" value="—" sub="needs daily-equity series"/></Card>
+        <Card><Stat label="Max drawdown" value="—" sub="needs equity peak/trough"/></Card>
       </div>
 
       {/* Filter bar — mode filter is primary */}
