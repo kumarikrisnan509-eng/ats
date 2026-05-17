@@ -67,6 +67,13 @@ function open(opts = {}) {
   // Auto-trim cron_reauth_history to last 500 entries (cheap, runs on insert).
   conn.exec("CREATE TRIGGER IF NOT EXISTS trim_cron_reauth_history AFTER INSERT ON cron_reauth_history BEGIN DELETE FROM cron_reauth_history WHERE id < (SELECT MAX(id)-500 FROM cron_reauth_history); END;");
 
+  // T99-T46: autorun_history is written every autorun fire (per-user). An
+  // active strategy running every minute during market hours = ~390 rows/day
+  // per user = 142k/year. Trim per-user to the latest 5000 rows (matches the
+  // ai_calls cap below). Same idempotent IF NOT EXISTS pattern so existing
+  // DBs pick it up on next startup without migration.
+  conn.exec(`CREATE TRIGGER IF NOT EXISTS trim_autorun_history AFTER INSERT ON autorun_history BEGIN DELETE FROM autorun_history WHERE id IN (SELECT id FROM autorun_history WHERE user_id = NEW.user_id ORDER BY id DESC LIMIT -1 OFFSET 5000); END;`);
+
   // Tier 84: per-user display preferences (theme, density, currency, etc.)
   conn.exec(`
     CREATE TABLE IF NOT EXISTS user_preferences (
