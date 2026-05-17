@@ -39,6 +39,13 @@ services:
         source: /etc/ats/master.key
         target: /run/secrets/master.key
         read_only: true
+      # T99-T36: read the full /etc/ats dir so the backend can verify the DR
+      # auth token (/etc/ats/.dr-token) for POST /api/admin/dr-status. The token
+      # is written by setup-dr-cron.sh on the host; we read-only here.
+      - type: bind
+        source: /etc/ats
+        target: /etc/ats
+        read_only: true
       # Tier 79: bind-mount the host auto-login daemon socket directory.
       - type: bind
         source: /var/run/ats

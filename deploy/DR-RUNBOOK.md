@@ -29,10 +29,32 @@ steps to follow when production data is actually lost.
 | `/var/lib/ats/tokens/` | Per-user sealed Zerodha access tokens + auto-login vault | Add to wrapper |
 | `/etc/ats/master.key` | libsodium key — without this, nothing decrypts | Off-site copy already exists locally (Windows BACKUP-CREDENTIALS.cmd) |
 
-## Monthly test procedure
+## One-time setup (T99-T36)
+
+Run this ONCE after first deploy or after a fresh VM rebuild. It installs the
+script, generates the auth token, writes the monthly cron, and runs the test
+once so `/api/health-deep` stops reporting `drStale:true`.
 
 ```bash
 ssh ubuntu@141.148.192.4
+sudo /opt/ats/scripts/setup-dr-cron.sh
+```
+
+Idempotent — safe to re-run. The deploy workflow keeps both
+`dr-restore-test.sh` and `setup-dr-cron.sh` synced to `/opt/ats/scripts/` on
+every push, so future code changes to the test logic land automatically.
+
+## Monthly test procedure (automated)
+
+After the one-time setup, the test runs on its own:
+
+```
+30 3 1 * *   /opt/ats/scripts/dr-restore-test.sh --notify
+```
+
+= 03:30 UTC on the 1st of every month = 09:00 IST. To run it manually any time:
+
+```bash
 sudo /opt/ats/scripts/dr-restore-test.sh --notify
 ```
 
