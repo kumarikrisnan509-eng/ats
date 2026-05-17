@@ -275,11 +275,18 @@ const PortfolioScreen = () => {
 
       {window.MultiBrokerPnL && <div style={{ marginBottom: 16 }}><window.MultiBrokerPnL/></div>}
 
+      {/* T99-T89: 'Invested' / 'Unrealized gain' / 'XIRR' all relied on a
+          hardcoded cost-basis ₹24,80,000. Real implementation needs the
+          per-user holdings' cost basis (broker getHoldings() returns
+          average_price which we already use in 'Long-term value'). Until
+          unrealized-gain derives from real avg_price × qty for the user's
+          actual holdings (and XIRR has a cashflow ledger), show '—' with
+          honest sub-text. Same pattern as T-77/T-87/T-88. */}
       <div className="grid grid-4" style={{ marginBottom: 16 }}>
-        <Card><Stat label="Long-term value" value={inrCompact(totalEquity + totalMF + totalETF)} delta={pct(1.12)} deltaKind="up" sub="today"/></Card>
-        <Card><Stat label="Invested" value={inrCompact(24_80_000)} delta="cost basis" deltaKind="muted"/></Card>
-        <Card><Stat label="Unrealized gain" value={inrCompact((totalEquity + totalMF + totalETF) - 2480000)} delta={pct(38.4)} deltaKind="up" sub="absolute"/></Card>
-        <Card><Stat label="XIRR" value="16.8%" delta="+0.6pp MoM" deltaKind="up" sub="weighted"/></Card>
+        <Card><Stat label="Long-term value" value={inrCompact(totalEquity + totalMF + totalETF)} sub="today"/></Card>
+        <Card><Stat label="Invested" value="—" sub="needs per-user cost basis"/></Card>
+        <Card><Stat label="Unrealized gain" value="—" sub="needs cost basis"/></Card>
+        <Card><Stat label="XIRR" value="—" sub="needs cashflow ledger"/></Card>
       </div>
 
       {/* Profit sweep waterfall */}
@@ -287,8 +294,8 @@ const PortfolioScreen = () => {
         <div className="waterfall">
           <div className="waterfall__step">
             <div className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>1 · Trading pot</div>
-            <div className="mono" style={{ fontSize: 22, fontWeight: 500, margin: "6px 0" }}>{inr(284000)}</div>
-            <div style={{ fontSize: 12 }} className="up">+{inr(42340)} <span className="muted">this month</span></div>
+            <div className="mono" style={{ fontSize: 22, fontWeight: 500, margin: "6px 0" }}>—</div>
+            <div style={{ fontSize: 11 }} className="muted">trading pot tracker not wired</div>
             {/* Mode attribution — shows which modes fed the pot */}
             <div style={{ marginTop: 10, padding: "8px 10px", background: "var(--bg-soft)", borderRadius: "var(--r-sm)" }}>
               <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-3)", marginBottom: 6 }}>By mode (MTD)</div>
