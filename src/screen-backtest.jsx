@@ -161,6 +161,65 @@ const BacktestScreen = () => {
         </div>
       )}
 
+      {/* T99-T101: live backtest result card. Rendered when the user has
+          clicked 'Run live backtest' and /api/backtest returned ok. Shows
+          the real stats (trades, win rate, total PnL, max drawdown, vs
+          buy-and-hold) so users have a real reference alongside the demo
+          report above. */}
+      {liveBacktest && liveBacktest.stats && (
+        <Card style={{ marginBottom: 16, borderColor: 'var(--up)', borderWidth: 1 }}>
+          <div className="row between" style={{ marginBottom: 12 }}>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                Live backtest · {liveBacktest.symbol} {liveBacktest.strategy}
+              </div>
+              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                {liveBacktest.from} → {liveBacktest.to} · {liveBacktest.bars} bars · qty {liveBacktest.qty}
+              </div>
+            </div>
+            <Pill kind="up" dot>live data</Pill>
+          </div>
+          <div className="grid grid-4" style={{ gap: 12 }}>
+            <div>
+              <div className="muted" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.4 }}>Trades</div>
+              <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>
+                {liveBacktest.stats.trades}
+              </div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                {liveBacktest.stats.wins}W / {liveBacktest.stats.losses}L
+              </div>
+            </div>
+            <div>
+              <div className="muted" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.4 }}>Win rate</div>
+              <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>
+                {Number(liveBacktest.stats.winRate).toFixed(1)}%
+              </div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                avg win ₹{Math.round(liveBacktest.stats.avgWin)}
+              </div>
+            </div>
+            <div>
+              <div className="muted" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.4 }}>Total PnL</div>
+              <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: liveBacktest.stats.totalPnl >= 0 ? 'var(--up)' : 'var(--down)' }}>
+                {liveBacktest.stats.totalPnl >= 0 ? '+' : ''}₹{Math.round(liveBacktest.stats.totalPnl)}
+              </div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                vs B&H {liveBacktest.stats.vsBuyAndHold >= 0 ? '+' : ''}₹{Math.round(liveBacktest.stats.vsBuyAndHold)}
+              </div>
+            </div>
+            <div>
+              <div className="muted" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.4 }}>Max drawdown</div>
+              <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: 'var(--down)' }}>
+                -₹{Math.round(liveBacktest.stats.maxDrawdown)}
+              </div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                {Number(liveBacktest.stats.maxDrawdownPct).toFixed(1)}% of entry
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {queueEl}
 
       {/* Config bar */}
