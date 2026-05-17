@@ -3456,6 +3456,36 @@ const _zerodhaCallback = async (req, res) => {
   const rt = req.query.request_token;
   const state = req.query.state;
   if (!rt) return res.status(400).send('Missing request_token.');
+
+  // T99-T58: when state is absent, this is the GLOBAL-broker auto-login flow
+  // (host-side morning-check.sh → auto-login-host.js → Kite redirects with
+  // no state). Delegate to the same logic as /api/brokers/zerodha/callback's
+  // legacy path so all three callback URLs handle both per-user AND global
+  // flows. Previously this handler unconditionally required state, so if
+  // Kite's dashboard Redirect URL was set to /api/me/broker-callback or
+  // /api/v1/oauth/zerodha/callback, the global broker silently failed to
+  // reauth every morning with 'Invalid or expired state token'.
+  if (!state) {
+    if (BROKER_NAME !== 'zerodha') return res.status(400).send('Not configured for Zerodha.');
+    try {
+      const session = await broker.exchangeRequestToken(rt);
+      broker.setAccessToken(session.accessToken);
+      await sessions.saveTokens(session.userId, {
+        accessToken: session.accessToken,
+        publicToken: session.publicToken,
+        userId: session.userId,
+        issuedAt: new Date().toISOString(),
+      });
+      const sid = sessions.newSession(session.userId);
+      setSessionCookie(res, sid);
+      audit('zerodha.connected.global-via-stateless-callback', { userId: session.userId });
+      return res.redirect('/?connected=zerodha');
+    } catch (err) {
+      audit('zerodha.callback.global.error', { msg: err.message });
+      return res.status(500).send(`Zerodha exchange failed: ${err.message}`);
+    }
+  }
+
   const userId = _verifyState(state);
   if (!userId) return res.status(400).send('Invalid or expired state token. Please retry from the Brokers screen.');
   try {
