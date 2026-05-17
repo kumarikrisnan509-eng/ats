@@ -594,6 +594,11 @@ app.get('/api/health-deep', async (_req, res) => {
       if (typeof broker._reconnectAttempts === 'number') {
         checks.brokerWsReconnectAttempts = broker._reconnectAttempts;
       }
+      // T99-T37: heartbeat / frozen-feed detection
+      checks.brokerTickStale = broker._tickStale === true;
+      if (typeof broker._lastTickAt === 'number' && broker._lastTickAt > 0) {
+        checks.brokerTickLagSec = Math.round((Date.now() - broker._lastTickAt) / 1000);
+      }
     }
   } catch (_e) { /* don't fail health on introspection */ }
 

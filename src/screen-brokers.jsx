@@ -321,7 +321,7 @@ const BrokersScreen = () => {
   // T99-T35: poll /api/health-deep so the Brokers screen can show the live
   // ticker state alongside the auth status. wsStalled = backend detected
   // 3 consecutive 403s and stopped reconnecting; will resume on next reauth.
-  const [wsState, setWsState] = React.useState({ connected: null, stalled: null, attempts: null, loaded: false });
+  const [wsState, setWsState] = React.useState({ connected: null, stalled: null, attempts: null, tickStale: null, tickLagSec: null, loaded: false });
   React.useEffect(() => {
     let cancelled = false;
     const tick = async () => {
@@ -334,6 +334,8 @@ const BrokersScreen = () => {
           connected: j.checks.brokerWsConnected === true,
           stalled: j.checks.brokerWsStalled === true,
           attempts: j.checks.brokerWsReconnectAttempts ?? null,
+          tickStale: j.checks.brokerTickStale === true,
+          tickLagSec: j.checks.brokerTickLagSec ?? null,
           loaded: true,
         });
       } catch (_) {}
@@ -609,12 +611,13 @@ const BrokersScreen = () => {
                     backend stopped reconnecting to spare Kite's rate limit; resumes on reauth. */}
                 {wsState.loaded && isZerodha && (
                   <ChecklistRow
-                    ok={wsState.connected === true}
-                    warn={wsState.stalled === true}
-                    neutral={!wsState.connected && !wsState.stalled}
+                    ok={wsState.connected === true && !wsState.tickStale}
+                    warn={wsState.stalled === true || wsState.tickStale === true}
+                    neutral={!wsState.connected && !wsState.stalled && !wsState.tickStale}
                     label="Live data feed"
                     value={
                       wsState.stalled ? 'stalled · token expired (will resume after reauth)'
+                      : wsState.connected && wsState.tickStale ? `frozen · no ticks for ${wsState.tickLagSec ?? '?'}s while market open`
                       : wsState.connected ? 'streaming'
                       : (wsState.attempts != null && wsState.attempts > 0 ? `reconnecting · attempt ${wsState.attempts}` : 'disconnected')
                     }

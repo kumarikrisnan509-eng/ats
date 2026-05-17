@@ -85,6 +85,65 @@ class ZerodhaBroker extends BrokerGateway {
         sure the token is dead; the next setAccessToken() resumes it. */
     this._consecutive403s = 0;
     this._stalledOnToken = false;
+
+    /** T99-T37: heartbeat / tick-stale detection. The WS may stay 'connected'
+        while Kite stops sending ticks (server hiccup, NATs eating frames).
+        Without this check the UI shows 'streaming' while prices are frozen.
+        We sample _lastTickAt every 30s; if market is open + we're connected +
+        no tick has arrived for HEARTBEAT_STALE_MS, flip _tickStale=true. */
+    this._tickStale = false;
+    this._heartbeatTimer = null;
+  }
+
+  // 9:15–15:30 IST on weekdays. We deliberately ignore holidays for the
+  // heartbeat — on a holiday the WS won't be sending ticks anyway and the
+  // false-positive cost is zero (just a UI flag that resolves itself on the
+  // next trading day). The opposite mistake (suppressing the heartbeat on a
+  // day that's actually trading) is much worse.
+  _isMarketOpen(now = new Date()) {
+    // Convert to IST. IST = UTC+5:30, no DST. Use the offset directly so this
+    // works regardless of the server's TZ.
+    const istMs = now.getTime() + (5 * 60 + 30) * 60 * 1000;
+    const ist = new Date(istMs);
+    const dow = ist.getUTCDay(); // 0 = Sunday
+    if (dow === 0 || dow === 6) return false;
+    const mins = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+    return mins >= (9 * 60 + 15) && mins <= (15 * 60 + 30);
+  }
+
+  _startHeartbeat() {
+    if (this._heartbeatTimer) return;
+    const HEARTBEAT_CHECK_MS = 30_000;
+    const HEARTBEAT_STALE_MS = 90_000;
+    this._heartbeatTimer = setInterval(() => {
+      try {
+        if (!this._connected || this._stalledOnToken) {
+          // Not connected at all — the ws-stalled/disconnected indicators
+          // already cover this case; don't double-flag.
+          if (this._tickStale) this._tickStale = false;
+          return;
+        }
+        if (!this._isMarketOpen()) {
+          if (this._tickStale) this._tickStale = false;
+          return;
+        }
+        const lag = this._lastTickAt ? Date.now() - this._lastTickAt : Infinity;
+        const stale = lag > HEARTBEAT_STALE_MS;
+        if (stale !== this._tickStale) {
+          this._tickStale = stale;
+          if (stale) {
+            console.warn(`[zerodha] tick heartbeat STALE — no ticks for ${Math.round(lag/1000)}s while market open`);
+          } else {
+            console.log('[zerodha] tick heartbeat recovered');
+          }
+        }
+      } catch (e) {
+        // Heartbeat must never throw — it would cancel its own interval.
+        console.warn('[zerodha] heartbeat check error:', e && e.message);
+      }
+    }, HEARTBEAT_CHECK_MS);
+    // Don't keep the event loop alive for this alone.
+    if (this._heartbeatTimer.unref) this._heartbeatTimer.unref();
   }
 
   get name() { return 'zerodha'; }
@@ -253,6 +312,7 @@ class ZerodhaBroker extends BrokerGateway {
     });
 
     this.ticker.connect();
+    this._startHeartbeat();
   }
 
   async stop() {
@@ -260,9 +320,14 @@ class ZerodhaBroker extends BrokerGateway {
       try { this.ticker.disconnect(); } catch {}
       this.ticker = null;
     }
+    if (this._heartbeatTimer) {
+      clearInterval(this._heartbeatTimer);
+      this._heartbeatTimer = null;
+    }
     this._subs.clear();
     this._subscribedTokens.clear();
     this._connected = false;
+    this._tickStale = false;
   }
 
   /**
