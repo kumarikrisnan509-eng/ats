@@ -119,6 +119,12 @@ function open(opts = {}) {
   catch (e) { /* already migrated */ }
   try { conn.exec("ALTER TABLE ai_calls ADD COLUMN feedback_ts TEXT"); }
   catch (e) { /* already migrated */ }
+  // H4: context tag (typically the symbol or strategy this call was about)
+  try { conn.exec("ALTER TABLE ai_calls ADD COLUMN context_tag TEXT"); }
+  catch (e) { /* already migrated */ }
+  // H4: verdict captured from the LLM response so backtest can join verdict -> outcome
+  try { conn.exec("ALTER TABLE ai_calls ADD COLUMN verdict TEXT"); }
+  catch (e) { /* already migrated */ }
 
 
   // T99-C1: daily AI spend cap (INR/day). Default 50; clamped 0-5000 in prefs.upsert.
@@ -176,7 +182,7 @@ function makeRepo(conn) {
     wlList:   conn.prepare('SELECT symbol, exchange, added_at FROM watchlist WHERE user_id = ? ORDER BY added_at DESC'),
 
     // T99-A3 / C1: ai_calls audit log + spend rollups + daily-cap getter
-    aiCallInsert: conn.prepare("INSERT INTO ai_calls (user_id, workflow, provider, model, prompt_tokens, completion_tokens, cost_inr, status, error) VALUES (@user_id, @workflow, @provider, @model, @prompt_tokens, @completion_tokens, @cost_inr, @status, @error)"),
+    aiCallInsert: conn.prepare("INSERT INTO ai_calls (user_id, workflow, provider, model, prompt_tokens, completion_tokens, cost_inr, status, error, context_tag, verdict) VALUES (@user_id, @workflow, @provider, @model, @prompt_tokens, @completion_tokens, @cost_inr, @status, @error, @context_tag, @verdict)"),
     aiCallsDailySpend: conn.prepare("SELECT COALESCE(SUM(cost_inr), 0) AS spent FROM ai_calls WHERE user_id = ? AND status = 'ok' AND date(ts) = date('now')"),
     aiCallsByPeriod: conn.prepare("SELECT provider, COUNT(*) AS calls, COALESCE(SUM(cost_inr),0) AS cost, COALESCE(SUM(prompt_tokens),0) AS prompt_tokens, COALESCE(SUM(completion_tokens),0) AS completion_tokens FROM ai_calls WHERE user_id = ? AND ts > datetime('now', ?) AND status = 'ok' GROUP BY provider"),
     aiDailyCap: conn.prepare("SELECT COALESCE(daily_ai_cap_inr, 50) AS cap FROM user_preferences WHERE user_id = ?"),
@@ -295,6 +301,8 @@ function makeRepo(conn) {
           cost_inr: row.cost_inr || 0,
           status: row.status || 'ok',
           error: row.error || null,
+          context_tag: row.context_tag || null,
+          verdict: row.verdict || null,
         });
         return result.lastInsertRowid;
       },
@@ -326,6 +334,32 @@ function makeRepo(conn) {
       getCall: (uid, callId) => stmts.aiGetCall.get(callId, uid),
       recentDown: (uid, limit) => stmts.aiRecentDown.all(uid, Math.min(50, Math.max(1, limit || 10))),
       feedbackCounts: (uid, window) => stmts.aiFeedbackCounts.all(uid, window || '-30 days'),
+      // H4: join AI critique calls (with context_tag=symbol + verdict) to subsequent paper trades
+      verdictBacktest: (uid, days) => {
+        const dayWindow = `-${Math.max(1, Math.min(365, days || 30))} days`;
+        const stmt = conn.prepare(`
+          SELECT
+            ai.verdict AS verdict,
+            ai.context_tag AS symbol,
+            ai.ts AS ai_ts,
+            pt.pnl AS trade_pnl,
+            pt.exited_at AS trade_ts
+          FROM ai_calls ai
+          LEFT JOIN paper_closed_trades pt
+            ON pt.user_id = ai.user_id
+           AND UPPER(pt.symbol) = UPPER(ai.context_tag)
+           AND pt.entered_at >= ai.ts
+           AND julianday(pt.entered_at) - julianday(ai.ts) <= 30
+          WHERE ai.user_id = ?
+            AND ai.workflow IN ('intraday_critic','signal_critique','analyze')
+            AND ai.status = 'ok'
+            AND ai.verdict IS NOT NULL
+            AND ai.context_tag IS NOT NULL
+            AND ai.ts > datetime('now', ?)
+          ORDER BY ai.ts DESC
+        `);
+        return stmt.all(uid, dayWindow);
+      },
     },
 
     users: {

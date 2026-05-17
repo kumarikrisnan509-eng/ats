@@ -109,7 +109,7 @@ function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES, brokerRes
       const usage = (llmResult && llmResult.usage) || { prompt_tokens: 0, completion_tokens: 0 };
       const cost_inr = estimateCost({ provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens });
 
-      let call_id = null; try { call_id = db.ai.logCall({ user_id: req.user.id, workflow: 'intraday_critic', provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null }); } catch (e) { console.warn('[ai-workflows] critique log:', e.message); }
+      let call_id = null; try { call_id = db.ai.logCall({ user_id: req.user.id, workflow: 'intraday_critic', provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null, context_tag: symbol, verdict: norm && norm.verdict }); } catch (e) { console.warn('[ai-workflows] critique log:', e.message); }
 
       const norm = {
         verdict: ['agree','caution','reject'].includes(String(advice && advice.verdict).toLowerCase()) ? String(advice.verdict).toLowerCase() : 'caution',
@@ -151,7 +151,7 @@ function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES, brokerRes
       const usage = (llmResult && llmResult.usage) || { prompt_tokens: 0, completion_tokens: 0 };
       const cost_inr = estimateCost({ provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens });
 
-      let call_id = null; try { call_id = db.ai.logCall({ user_id: req.user.id, workflow: 'strategy_explain', provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null }); } catch (e) { console.warn('[ai-workflows] explain log:', e.message); }
+      let call_id = null; try { call_id = db.ai.logCall({ user_id: req.user.id, workflow: 'strategy_explain', provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null, context_tag: strategy_id, verdict: null }); } catch (e) { console.warn('[ai-workflows] explain log:', e.message); }
 
       const norm = {
         what_it_does: String(advice && advice.what_it_does || '').slice(0, 400),
@@ -447,7 +447,7 @@ Return JSON verdict only.`;
       const cost_inr = estimateCost({ provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens });
 
       let call_id = null;
-      try { call_id = db.ai.logCall({ user_id: req.user.id, workflow: 'intraday_critic', provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null }); } catch (e) { console.warn('[ai-workflows] critique-rich log:', e.message); }
+      try { call_id = db.ai.logCall({ user_id: req.user.id, workflow: 'intraday_critic', provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null, context_tag: symbol, verdict: norm && norm.verdict }); } catch (e) { console.warn('[ai-workflows] critique-rich log:', e.message); }
 
       const norm = {
         verdict: ['agree','caution','reject'].includes(String(advice && advice.verdict).toLowerCase()) ? String(advice.verdict).toLowerCase() : 'caution',
@@ -635,6 +635,61 @@ Return JSON only.`,
       res.json({ ok: true, recent_down: rows, counts_30d: sum });
     } catch (e) {
       res.status(500).json({ ok: false, reason: 'feedback_recent_failed', detail: e.message });
+    }
+  });
+
+  // --- H4: AI verdict backtest — did past critiques predict actual P&L? ---
+  router.get('/verdict-backtest', (req, res) => {
+    try {
+      const days = Math.max(7, Math.min(365, parseInt(req.query.days || '30', 10)));
+      const rows = db.ai.verdictBacktest(req.user.id, days);
+
+      // Aggregate by verdict bucket
+      const buckets = { agree: { calls: 0, matched: 0, wins: 0, losses: 0, total_pnl: 0 },
+                        caution: { calls: 0, matched: 0, wins: 0, losses: 0, total_pnl: 0 },
+                        reject: { calls: 0, matched: 0, wins: 0, losses: 0, total_pnl: 0 } };
+      // Unique calls (an AI call may join to multiple subsequent trades; dedupe by ts+symbol+verdict)
+      const seenCalls = new Set();
+      for (const r of rows) {
+        const v = r.verdict;
+        if (!buckets[v]) continue;
+        const callKey = `${r.ai_ts}|${r.symbol}|${v}`;
+        if (!seenCalls.has(callKey)) { buckets[v].calls += 1; seenCalls.add(callKey); }
+        if (r.trade_pnl != null) {
+          buckets[v].matched += 1;
+          if (r.trade_pnl > 0) buckets[v].wins += 1;
+          else buckets[v].losses += 1;
+          buckets[v].total_pnl += Number(r.trade_pnl);
+        }
+      }
+
+      // Compute derived stats
+      const out = {};
+      for (const [k, b] of Object.entries(buckets)) {
+        out[k] = {
+          calls: b.calls,
+          trades_in_window: b.matched,
+          wins: b.wins,
+          losses: b.losses,
+          win_rate: b.matched > 0 ? +(b.wins / b.matched).toFixed(4) : null,
+          avg_pnl_inr: b.matched > 0 ? +(b.total_pnl / b.matched).toFixed(2) : null,
+          total_pnl_inr: +b.total_pnl.toFixed(2),
+        };
+      }
+
+      // Headline answer: did following AI advice make money?
+      const followed = out.agree;
+      const ignored = out.reject;
+      const headline =
+        followed.matched === 0 && ignored.matched === 0
+          ? 'Not enough data yet — need critiques + matching paper trades to measure'
+          : followed.matched > 0 && followed.avg_pnl_inr > 0
+              ? `Trades AI agreed with: avg Rs ${followed.avg_pnl_inr} per trade (${followed.wins}W/${followed.losses}L)`
+              : `Trades AI agreed with: avg Rs ${followed.avg_pnl_inr} per trade — review prompt + verdicts`;
+
+      res.json({ ok: true, window_days: days, total_critique_calls: rows.length, buckets: out, headline });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: 'verdict_backtest_failed', detail: e.message });
     }
   });
 
