@@ -6,6 +6,9 @@ function SignalRow({ sig, isFirst }) {
   const [open, setOpen] = React.useState(false);
   const [crit, setCrit] = React.useState(null);
   const [error, setError] = React.useState(null);
+  const [consensusBusy, setConsensusBusy] = React.useState(false);
+  const [consensus, setConsensus] = React.useState(null);
+  const [consensusError, setConsensusError] = React.useState(null);
 
   const sigColor = (sig.signal && (sig.signal.indexOf('OVERSOLD') >= 0 || sig.signal.indexOf('CROSS_UP') >= 0))
     ? 'var(--up)'
@@ -25,6 +28,21 @@ function SignalRow({ sig, isFirst }) {
       else setError(r.detail || r.reason || 'failed');
     } catch (e) { setError(e.message); }
     finally { setBusy(false); }
+  };
+
+  const askConsensus = async () => {
+    if (consensus) { /* toggle expand */ return; }
+    setConsensusBusy(true); setConsensusError(null);
+    try {
+      const r = await fetch('/api/me/ai-workflows/consensus', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: sig.symbol, signal: sig.signal, value: sig.value, message: sig.message }),
+      }).then(r => r.json());
+      if (r.ok) setConsensus(r);
+      else setConsensusError(r.detail || r.reason || 'failed');
+    } catch (e) { setConsensusError(e.message); }
+    finally { setConsensusBusy(false); }
   };
 
   const verdictColor = crit && crit.verdict === 'agree' ? 'var(--up)' :
@@ -52,6 +70,19 @@ function SignalRow({ sig, isFirst }) {
           }}
           title={crit ? (open ? 'Hide critique' : 'Show critique') : 'Ask AI to critique this signal'}
         >{busy ? '...' : (crit ? crit.verdict : 'critique')}</button>
+        <button
+          onClick={askConsensus}
+          disabled={consensusBusy}
+          style={{
+            padding: '3px 10px', fontSize: 11, borderRadius: 6,
+            border: '1px solid var(--border)',
+            background: consensus ? 'var(--surface-2)' : 'var(--surface, transparent)',
+            color: 'var(--text-2)',
+            cursor: consensusBusy ? 'wait' : 'pointer', opacity: consensusBusy ? 0.6 : 1,
+            textTransform: 'uppercase', fontWeight: 600, letterSpacing: 0.4,
+          }}
+          title="Get a 2nd opinion across all configured providers"
+        >{consensusBusy ? '...' : (consensus ? consensus.majority : '2nd op')}</button>
       </div>
 
       {error && (
@@ -60,6 +91,43 @@ function SignalRow({ sig, isFirst }) {
         </div>
       )}
 
+      {consensusError && (
+        <div style={{ fontSize: 11, color: 'var(--danger, #c53030)', padding: '4px 0' }}>consensus: {consensusError}</div>
+      )}
+      {consensus && (
+        <div style={{
+          padding: 10, marginBottom: 8, borderRadius: 8,
+          border: '1px solid var(--border)',
+          background: 'var(--surface-2, rgba(0,0,0,0.02))',
+          fontSize: 12,
+        }}>
+          <div style={{ marginBottom: 6 }}>
+            <strong>2nd opinion · {consensus.providers_succeeded}/{consensus.providers_consulted} providers</strong>{' '}
+            · majority: <span style={{ fontWeight: 600 }}>{consensus.majority}</span>{' '}
+            · {consensus.verdict_note}{' '}
+            · ₹{Number(consensus.total_cost_inr || 0).toFixed(4)}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {(consensus.per_provider || []).map((p, i) => (
+              <div key={i} style={{
+                padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)',
+                fontSize: 11, background: 'var(--surface)',
+              }}>
+                <div style={{ fontWeight: 600 }}>{p.provider}</div>
+                {p.error ? (
+                  <div style={{ color: 'var(--danger)' }}>{p.error}</div>
+                ) : (
+                  <div>
+                    <span style={{ padding: '1px 6px', borderRadius: 4, background: p.verdict === 'agree' ? 'var(--up)' : p.verdict === 'reject' ? 'var(--danger)' : 'var(--warn, #d97706)', color: 'white', fontWeight: 600, textTransform: 'uppercase' }}>{p.verdict}</span>{' '}
+                    <span style={{ color: 'var(--text-3)' }}>{p.confidence}/100</span>
+                    <div style={{ marginTop: 2, color: 'var(--text-2)', fontSize: 11 }}>{p.summary}</div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {open && crit && (
         <div style={{
           padding: 10, marginBottom: 8, borderRadius: 8,
