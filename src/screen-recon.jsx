@@ -66,6 +66,24 @@ const ReconScreen = () => {
         </div>
       </div>
 
+      {/* T99-T95: honest banner — the 4-card 'Match summary' KPIs, 8 trade
+          rows (OUR-8842..8849), and the '2 mismatches' action panel are
+          all hardcoded demo data. The screen fetches /api/reconcile on
+          mount but never consumes the response. Same disclosure pattern
+          as T-91 (Risk) / T-93 (Circuits). */}
+      <div role="note" style={{
+        padding: '8px 12px', marginBottom: 12, borderRadius: 6,
+        border: '1px solid color-mix(in oklab, var(--warn, #d97706) 35%, var(--border))',
+        background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
+        fontSize: 12, color: 'var(--text-2)',
+      }}>
+        <strong>Reconciliation dashboard is demo data.</strong>{' '}
+        The summary cards, 8 trade rows, and mismatch banner below are
+        hardcoded examples — the screen fetches /api/reconcile but does not
+        yet render the response. Per-user broker-vs-book reconciliation
+        ingestion hasn't shipped.
+      </div>
+
       {/* Match summary */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
         <Card>
