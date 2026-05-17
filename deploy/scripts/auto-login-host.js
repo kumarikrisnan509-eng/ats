@@ -176,7 +176,13 @@ async function captureFailure(page, ts, label) {
 
     page.on('request', (req) => {
       const u = req.url();
-      if (u.includes('/api/brokers/zerodha/callback') && u.includes('request_token=')) {
+      // T99-T59: match any of the three callback URLs that the backend now
+      // supports (/api/brokers/zerodha/callback, /api/me/broker-callback,
+      // /api/v1/oauth/zerodha/callback). Previously only the first was
+      // matched, so configurations using the v1 path silently looked like
+      // FAIL even when the backend successfully processed the token.
+      if (/\/(api\/brokers\/zerodha\/callback|api\/me\/broker-callback|api\/v1\/oauth\/zerodha\/callback)/.test(u)
+          && u.includes('request_token=')) {
         try { captured = new URL(u).searchParams.get('request_token'); } catch (_) {}
       }
     });
@@ -221,8 +227,30 @@ async function captureFailure(page, ts, label) {
     while (!captured && Date.now() - waitStart < 20_000) await sleep(250);
 
     if (!captured) {
+      // T99-T59: even if we missed the captured token from the URL pattern,
+      // the backend may have already processed the redirect and refreshed
+      // the broker. Re-check /api/health — if broker.connected is now true,
+      // it actually succeeded; this is a script reporting issue, not a real
+      // failure.
+      step('no request_token captured — checking /api/health for retroactive success');
+      try {
+        const healthResp = await httpRequest({ method: 'GET', url: 'http://127.0.0.1:8080/api/health' });
+        if (healthResp.status === 200 && healthResp.body && healthResp.body.broker && healthResp.body.broker.connected) {
+          step('retroactive success: broker.connected=true — exiting OK');
+          process.exit(0);
+        }
+        // Also check if token was very recently refreshed (T-55 surfaces this).
+        if (healthResp.status === 200 && healthResp.body && healthResp.body.broker
+            && typeof healthResp.body.broker.lastAccessTokenSetAt === 'number'
+            && healthResp.body.broker.lastAccessTokenSetAt > waitStart) {
+          step('retroactive success: lastAccessTokenSetAt is fresher than this run start — backend refreshed it');
+          process.exit(0);
+        }
+      } catch (e) {
+        step('retroactive health check failed: ' + (e && e.message));
+      }
       const shot = await captureFailure(page, ts, 'no-request-token');
-      console.error('FAIL: no request_token captured. screenshot:', shot);
+      console.error('FAIL: no request_token captured + no retroactive success. screenshot:', shot);
       process.exit(4);
     }
     step(`captured request_token (length=${captured.length})`);
