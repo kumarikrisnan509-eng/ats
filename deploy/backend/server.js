@@ -4305,6 +4305,7 @@ function _broadcastUpstreamStateIfChanged() {
         || _lastUpstreamState.connected !== cur.connected
         || _lastUpstreamState.stalledOnToken !== cur.stalledOnToken
         || _lastUpstreamState.tickStale !== cur.tickStale) {
+      const prev = _lastUpstreamState;
       _lastUpstreamState = cur;
       const payload = JSON.stringify({ type: 'upstream_state', ...cur });
       for (const ws of wsClients) {
@@ -4313,6 +4314,28 @@ function _broadcastUpstreamStateIfChanged() {
         }
       }
       console.log('[ws] upstream_state changed:', cur, '->', wsClients.size, 'clients');
+
+      // T99-T64: Telegram notification on stall/recovery transitions. We
+      // only alert on the binary stalledOnToken flip — tickStale alone is
+      // less urgent (often resolves in seconds) and would be noisy. Skip
+      // the very first poll where `prev` is null (boot-time state isn't
+      // a transition, just an initial read).
+      try {
+        if (prev !== null && prev.stalledOnToken !== cur.stalledOnToken) {
+          if (cur.stalledOnToken) {
+            notify('error', 'ATS broker stalled on token', {
+              body: 'Kite WS rejected 3 consecutive reconnects (HTTP 403). Live data feed is OFFLINE. Reconnect from the Brokers screen or run sudo bash /opt/ats/scripts/morning-check.sh on the VM.',
+              fields: { time: new Date().toISOString() },
+              url: 'https://ats.rajasekarselvam.com/#brokers',
+            }).catch(() => {});
+          } else {
+            notify('success', 'ATS broker recovered', {
+              body: 'Live data feed is back online. Ticker reconnecting + subscribing.',
+              fields: { time: new Date().toISOString() },
+            }).catch(() => {});
+          }
+        }
+      } catch (_) { /* notify must never throw from the broadcaster */ }
     }
   } catch (e) { /* never throw from the interval */ }
 }
