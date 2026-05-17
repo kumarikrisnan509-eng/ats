@@ -60,19 +60,34 @@ if [[ ! -s "$TOKEN_PATH" ]] || [[ "$(cat "$TOKEN_PATH" 2>/dev/null)" == "unset" 
   echo "" >> "$TOKEN_PATH"
   echo "    generated new 32-byte token"
 fi
-# Always normalize perms (idempotent — also fixes T-36 v1 tokens written as
-# root:root 0440 that the container's non-root process couldn't read).
-# Group 'ats' (GID 987) matches backend.env's existing pattern.
-if getent group ats >/dev/null 2>&1; then
-  chown root:ats "$TOKEN_PATH"
-  chmod 0440 "$TOKEN_PATH"
-  echo "    perms set: root:ats 0440 (readable by container)"
-else
-  # No 'ats' group — make world-readable. The token is a shared secret, not a
-  # private key; this matches how master.key is mode 0444 in this deploy.
-  chown root:root "$TOKEN_PATH"
-  chmod 0444 "$TOKEN_PATH"
-  echo "    perms set: root:root 0444 (no ats group on host)"
+# T-36 v3: always 0444 world-readable. v2 tried 0440 root:ats but the backend
+# container's process isn't necessarily in group 987 (compose env_file reads
+# backend.env from the host, the container process never directly reads it).
+# The token is a single-purpose shared secret, not a key — world-readable on a
+# single-user VM matches master.key's existing 0444 pattern. Reset every run
+# so v1/v2 tokens get normalized.
+chown root:root "$TOKEN_PATH"
+chmod 0444 "$TOKEN_PATH"
+echo "    perms set: root:root 0444 (world-readable, container can read)"
+
+# Verify the backend container can actually open it now. If this fails we'll
+# know before the test POST hits 401.
+if command -v docker >/dev/null 2>&1; then
+  if docker exec ats-backend test -r /etc/ats/.dr-token 2>/dev/null; then
+    echo "    verified: ats-backend can read the token"
+  else
+    echo "    WARN: ats-backend cannot read the token (mount or perms issue)" >&2
+  fi
+fi
+
+# Ensure sqlite3 CLI is installed so the DR test's DB sanity check actually
+# runs (was silently skipping before with 'sqlite3-missing').
+if ! command -v sqlite3 >/dev/null 2>&1; then
+  echo "    installing sqlite3 CLI (for DR DB sanity check)..."
+  DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sqlite3 >/dev/null 2>&1 \
+    && echo "    sqlite3 installed" \
+    || echo "    WARN: sqlite3 install failed — DB check will be skipped"
 fi
 
 # The backend container mounts /etc/ats:/etc/ats:ro (per T99-T36 compose change)
