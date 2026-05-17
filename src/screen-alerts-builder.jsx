@@ -148,7 +148,7 @@ const AlertsBuilderScreen = () => {
           <Card title="Rule builder" sub="Describe when to trigger and what to do">
             <div style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase", marginBottom: 6 }}>Alert name</div>
-              <input className="input" placeholder="e.g., NIFTY breakout watch" defaultValue="NIFTY overbought signal"/>
+              <input className="input" placeholder="e.g., NIFTY breakout watch"/>
             </div>
 
             <div style={{ marginBottom: 14 }}>
