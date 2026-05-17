@@ -697,6 +697,24 @@ const PaperScreen = () => {
         </div>
       </Card>
 
+      {/* T99-T96: honest banner — the 'Paper equity curve' AreaChart below
+          uses seriesRandom() (fake), the 'Fill quality' card uses a 4-row
+          hardcoded paperVsLive array (slippage / fill time / rejection
+          rate / partial fills), and the 'Paper order book' table reads
+          paperOrders (also hardcoded). The 'Live paper account' strip at
+          the top IS real (from /api/me/paper). Same pattern as T-91. */}
+      <div role="note" style={{
+        padding: '8px 12px', marginBottom: 12, borderRadius: 6,
+        border: '1px solid color-mix(in oklab, var(--warn, #d97706) 35%, var(--border))',
+        background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
+        fontSize: 12, color: 'var(--text-2)',
+      }}>
+        <strong>Equity curve + Fill quality + Paper order book are demo data.</strong>{' '}
+        The chart uses random series and the fill/order tables are
+        hardcoded. The 'Live paper account' card at the very top of this
+        screen IS real (per-user state from /api/me/paper).
+      </div>
+
       {/* P&L chart */}
       <div className="grid grid-2-1" style={{ marginBottom: 16 }}>
         <Card title="Paper equity curve" sub="₹ vs virtual capital baseline" right={<Segmented value="30d" onChange={()=>{}} options={["7d","30d","All"]}/>}>
