@@ -343,9 +343,10 @@ const BrokersScreen = () => {
   const myZerodha = myBrokers.find(b => b.broker === 'zerodha');
 
   const testConnection = async () => {
+    if (!myZerodha) { setTestResult({ ok: false, msg: 'No Zerodha account connected yet.' }); return; }
     setBusy('test'); setTestResult(null);
     try {
-      const res = await fetch(`/api/v1/me/brokers/${myRow.id}/actions/test`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' } });
+      const res = await fetch(`/api/v1/me/brokers/${myZerodha.id}/actions/test`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' } });
       const j = await res.json().catch(() => ({}));
       if (res.ok && j.ok) setTestResult({ ok: true, msg: `Connected as ${j.profile.user_id}${j.profile.email ? ' (' + j.profile.email + ')' : ''}.` });
       else setTestResult({ ok: false, msg: j.detail || j.reason || `HTTP ${res.status}`, reason: j.reason });
@@ -354,9 +355,10 @@ const BrokersScreen = () => {
   };
 
   const autoReauth = async () => {
+    if (!myZerodha) { setTestResult({ ok: false, msg: 'No Zerodha account connected yet.' }); return; }
     setBusy('auto'); setTestResult({ ok: null, msg: 'Running headless Kite login (~10s)...' });
     try {
-      const res = await fetch(`/api/v1/me/brokers/${myRow.id}/actions/reauth`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' } });
+      const res = await fetch(`/api/v1/me/brokers/${myZerodha.id}/actions/reauth`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' } });
       const j = await res.json().catch(() => ({}));
       if (res.ok && j.ok) setTestResult({ ok: true, msg: `Token refreshed. Valid until ${new Date(j.expiresAt).toLocaleString()}.` });
       else {
