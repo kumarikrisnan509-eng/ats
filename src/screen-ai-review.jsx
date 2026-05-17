@@ -94,6 +94,25 @@ const AIReviewScreen = () => {
 
       {window.AICostCard && <div style={{ marginBottom: 16 }}><window.AICostCard/></div>}
 
+      {/* T99-T85: honest banner — the KPI band (Net PnL ₹1,24,800, 654 trades,
+          58.4% win, 1.72 Sharpe, -₹18,400 max DD), 6-strategy verdict table,
+          AI cost-by-provider breakdown, and 'highlights' bullets below are
+          all static demo data. The 'Generate review' button further down
+          DOES make a real Claude call against /api/ai/monthly-review. Same
+          disclosure pattern as T-73/T-82/T-83/T-84. */}
+      <div role="note" style={{
+        padding: '8px 12px', marginBottom: 12, borderRadius: 6,
+        border: '1px solid color-mix(in oklab, var(--warn, #d97706) 35%, var(--border))',
+        background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
+        fontSize: 12, color: 'var(--text-2)',
+      }}>
+        <strong>Static report below is demo data.</strong>{' '}
+        The KPI band, per-strategy verdicts, AI cost breakdown, and highlights
+        bullets are hardcoded examples until the monthly-review aggregation
+        backend ships. Use the <b>Generate review</b> button further down to
+        run a real Claude narrative against your actual paper-trading history.
+      </div>
+
       {/* Report header */}
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
