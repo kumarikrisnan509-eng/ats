@@ -45,7 +45,7 @@ function FiiDiiTile() {
   return (
     <div style={{
       padding: 14, marginBottom: 16, borderRadius: 10, border: '1px solid var(--border)',
-      display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1.5fr', gap: 16, alignItems: 'center',
+      display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, alignItems: 'center',
     }}>
       <div>
         <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5 }}>FII / FPI net (cash)</div>

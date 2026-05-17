@@ -236,3 +236,16 @@ html[data-density] .btn {
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* H6: tighten new tiles on narrow viewports (Dashboard FII/DII, AI providers ROI). */
+@media (max-width: 480px) {
+  /* Anchor rows wrap by default; nothing extra needed for FII/DII since we switched
+     to auto-fit minmax. ROI + transparency tables still scroll horizontally via
+     their parent overflowX:auto wrappers. */
+  /* Hide non-essential 'Refresh now' caption text in the status footer if any */
+  .page-header__sub { font-size: 11px; }
+  /* Slightly tighter row padding for the per-row tables */
+  table { font-size: 11px; }
+  /* Provider card grid (was 3 cols) should stack on phones */
+  .grid.grid-3 { grid-template-columns: 1fr !important; }
+}
