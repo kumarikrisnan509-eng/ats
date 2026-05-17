@@ -47,6 +47,7 @@ const AiKeysScreen = () => {
   const [routerPreview, setRouterPreview] = React.useState({ workflows: [], availableProviders: [], mode: 'balanced' });
   const [reviewBusy, setReviewBusy] = React.useState(false);
   const [reviewResult, setReviewResult] = React.useState(null);
+  const [roi, setRoi] = React.useState(null);     // H4 AI verdict-backtest
   const [drafts, setDrafts] = React.useState({});          // {anthropic: {key:'', model:''}, ...}
   const [busy, setBusy] = React.useState({});              // {anthropic: 'save'|'test'|'remove'|null}
   const [results, setResults] = React.useState({});        // {anthropic: {ok, msg}, ...}
@@ -98,6 +99,11 @@ const AiKeysScreen = () => {
       try {
         const rp = await fetch('/api/me/ai-keys/router-preview', { credentials: 'include' }).then(r => r.json()).catch(() => null);
         if (rp && rp.ok) setRouterPreview({ workflows: rp.workflows || [], availableProviders: rp.availableProviders || [], mode: rp.mode || 'balanced' });
+      } catch (_) {}
+      // H4: AI verdict-backtest (does following the critic make money?)
+      try {
+        const bt = await fetch('/api/me/ai-workflows/verdict-backtest?days=30', { credentials: 'include' }).then(r => r.json()).catch(() => null);
+        if (bt && bt.ok) setRoi(bt);
       } catch (_) {}
     } catch (e) { console.warn('[ai-keys] refresh failed:', e.message); }
   }, []);
@@ -422,6 +428,51 @@ const AiKeysScreen = () => {
             </table>
           </div>
         </details>
+      )}
+
+      {/* H4: AI verdict ROI (does following the critic make money?) */}
+      {roi && (roi.buckets || {}).agree && (
+        <div style={{ padding: 12, marginBottom: 16, borderRadius: 8, border: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
+            AI ROI · last {roi.window_days}d
+          </div>
+          <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 10 }}>{roi.headline}</div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ textAlign: 'left', color: 'var(--text-3)', borderBottom: '1px solid var(--border)' }}>
+                  <th style={{ padding: '4px 8px' }}>Verdict</th>
+                  <th style={{ padding: '4px 8px', textAlign: 'right' }}>Calls</th>
+                  <th style={{ padding: '4px 8px', textAlign: 'right' }}>Trades</th>
+                  <th style={{ padding: '4px 8px', textAlign: 'right' }}>Win rate</th>
+                  <th style={{ padding: '4px 8px', textAlign: 'right' }}>Avg ₹/trade</th>
+                  <th style={{ padding: '4px 8px', textAlign: 'right' }}>Total ₹</th>
+                </tr>
+              </thead>
+              <tbody>
+                {['agree', 'caution', 'reject'].map(v => {
+                  const b = roi.buckets[v] || { calls: 0, trades_in_window: 0, wins: 0, losses: 0, win_rate: null, avg_pnl_inr: null, total_pnl_inr: 0 };
+                  const color = v === 'agree' ? 'var(--up)' : v === 'reject' ? 'var(--danger)' : 'var(--warn, #d97706)';
+                  return (
+                    <tr key={v} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={{ padding: '4px 8px' }}>
+                        <span style={{ padding: '2px 8px', borderRadius: 4, background: color, color: 'white', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' }}>{v}</span>
+                      </td>
+                      <td style={{ padding: '4px 8px', textAlign: 'right' }}>{b.calls}</td>
+                      <td style={{ padding: '4px 8px', textAlign: 'right' }}>{b.trades_in_window}</td>
+                      <td style={{ padding: '4px 8px', textAlign: 'right' }}>{b.win_rate == null ? '—' : (b.win_rate * 100).toFixed(0) + '%'}</td>
+                      <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'var(--mono)', color: (b.avg_pnl_inr || 0) >= 0 ? 'var(--up)' : 'var(--down)' }}>{b.avg_pnl_inr == null ? '—' : (b.avg_pnl_inr >= 0 ? '+' : '') + '₹' + b.avg_pnl_inr.toFixed(0)}</td>
+                      <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'var(--mono)', color: b.total_pnl_inr >= 0 ? 'var(--up)' : 'var(--down)' }}>{b.total_pnl_inr ? (b.total_pnl_inr >= 0 ? '+' : '') + '₹' + b.total_pnl_inr.toFixed(0) : '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-3)' }}>
+            Joins per-signal AI critique verdicts to paper trades that opened within 30 days. {roi.total_critique_calls} critique row(s) in window.
+          </div>
+        </div>
       )}
 
       {/* T99-F3 + A2: workflow cost breakdown + run-now button */}
