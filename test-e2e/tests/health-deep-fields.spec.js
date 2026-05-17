@@ -54,6 +54,18 @@ test('/api/health-deep returns DR backup status fields (T-36)', async ({ request
   expect(typeof c.drLastTestOk).toBe('boolean');
 });
 
+test('/api/health exposes broker.stalledOnToken + tickStale (T-42)', async ({ request }) => {
+  const r = await request.get('/api/health');
+  expect(r.ok()).toBeTruthy();
+  const j = await r.json();
+  // /api/health returns the broker block when a broker is configured. Skip the
+  // check if the deployment is BROKER=mock or there's no broker field at all.
+  if (j && j.broker && typeof j.broker === 'object' && j.broker.name) {
+    expect(typeof j.broker.stalledOnToken).toBe('boolean');
+    expect(typeof j.broker.tickStale).toBe('boolean');
+  }
+});
+
 test('/api/health-deep top-level shape', async ({ request }) => {
   const r = await request.get('/api/health-deep');
   expect(r.ok()).toBeTruthy();

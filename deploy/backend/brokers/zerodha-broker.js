@@ -668,6 +668,13 @@ class ZerodhaBroker extends BrokerGateway {
       lagMs: this._lastTickAt ? Date.now() - this._lastTickAt : null,
       hasAccessToken: !!this.accessToken,
       tickerInitialized: !!this.ticker,
+      // T99-T42: mirror the T-34/T-37 signals so /api/health, /api/preflight,
+      // and the dashboard can distinguish 'live and streaming' from 'connected
+      // but stalled/frozen'. Critical for paper-trade order placement which
+      // uses last LTP from the ticker — if tickStale or stalledOnToken is
+      // true, the LTP is stale and orders should be rejected, not filled.
+      stalledOnToken: this._stalledOnToken === true,
+      tickStale: this._tickStale === true,
       instruments: this.instruments.stats(),
     };
   }

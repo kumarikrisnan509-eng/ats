@@ -2865,6 +2865,27 @@ app.post('/api/me/paper/order', withAuth(async (req, res) => {
     if (!symbol || !['BUY','SELL'].includes(side) || qty <= 0) {
       return res.status(400).json({ ok:false, reason:'bad_input', detail:'symbol/side/qty required' });
     }
+    // T99-T42: reject paper orders when LTPs are known stale. Otherwise the
+    // fill would be at yesterday's price (or worse, a price from before the
+    // last Kite outage), which is misleading for the user and pollutes their
+    // paper-trade stats. Without this check we'd silently accept the order.
+    try {
+      if (broker && typeof broker.health === 'function') {
+        const bh = broker.health();
+        if (bh && bh.stalledOnToken) {
+          return res.status(503).json({
+            ok: false, reason: 'broker_stalled_on_token',
+            detail: 'Live data feed is stalled — Zerodha access token expired. Reconnect from the Brokers screen first.',
+          });
+        }
+        if (bh && bh.tickStale) {
+          return res.status(503).json({
+            ok: false, reason: 'tick_stale',
+            detail: 'Live data feed is frozen — no ticks received for >90s while market is open. Wait for recovery or check Brokers screen.',
+          });
+        }
+      }
+    } catch (_) { /* health check failures shouldn't block orders */ }
     // Get current LTP from the global ticker (market data, not user-specific).
     let ltp = null;
     try {
