@@ -48,6 +48,9 @@ const AiKeysScreen = () => {
   const [reviewBusy, setReviewBusy] = React.useState(false);
   const [reviewResult, setReviewResult] = React.useState(null);
   const [roi, setRoi] = React.useState(null);     // H4 AI verdict-backtest
+  const [vision, setVision] = React.useState(null);   // D3 last vision result
+  const [visionBusy, setVisionBusy] = React.useState(false);
+  const [visionError, setVisionError] = React.useState(null);
   const [drafts, setDrafts] = React.useState({});          // {anthropic: {key:'', model:''}, ...}
   const [busy, setBusy] = React.useState({});              // {anthropic: 'save'|'test'|'remove'|null}
   const [results, setResults] = React.useState({});        // {anthropic: {ok, msg}, ...}
@@ -148,6 +151,30 @@ const AiKeysScreen = () => {
       else flash(r.detail || r.reason || 'review_failed', false);
     } catch (e) { flash('review_failed: ' + e.message, false); }
     finally { setReviewBusy(false); }
+  };
+
+  // D3: read file -> data URL -> POST to /vision
+  const onVisionPick = async (file) => {
+    if (!file) return;
+    if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) { setVisionError('Use a PNG, JPG, or WebP image'); return; }
+    if (file.size > 5 * 1024 * 1024) { setVisionError('Max 5 MB'); return; }
+    setVisionBusy(true); setVisionError(null); setVision(null);
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result);
+        fr.onerror = () => reject(fr.error);
+        fr.readAsDataURL(file);
+      });
+      const r = await fetch('/api/me/ai-workflows/vision', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_data_url: dataUrl }),
+      }).then(r => r.json());
+      if (r.ok) { setVision(r); flash(`Chart analysed in ${r.cached ? 'cache' : 'fresh'}`); refresh(); }
+      else setVisionError(r.detail || r.reason || 'vision_failed');
+    } catch (e) { setVisionError(e.message); }
+    finally { setVisionBusy(false); }
   };
 
   // T99-C1: save daily spend cap. PUT /api/me/preferences merges with existing prefs.
@@ -474,6 +501,65 @@ const AiKeysScreen = () => {
           </div>
         </div>
       )}
+
+      {/* D3: chart screenshot upload */}
+      <div style={{
+        padding: 12, marginBottom: 16, borderRadius: 8, border: '1px solid var(--border)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <div style={{ fontWeight: 500, fontSize: 13 }}>Chart screenshot → AI analysis</div>
+          <label style={{
+            padding: '6px 12px', fontSize: 12, borderRadius: 6,
+            border: '1px solid var(--accent, #3b82f6)',
+            background: visionBusy ? 'var(--surface-2)' : 'var(--accent, #3b82f6)',
+            color: visionBusy ? 'var(--text-2)' : 'white',
+            cursor: visionBusy ? 'wait' : 'pointer',
+          }}>
+            {visionBusy ? 'Analysing…' : 'Upload chart'}
+            <input
+              type="file" accept="image/png,image/jpeg,image/webp"
+              disabled={visionBusy}
+              onChange={e => onVisionPick(e.target.files && e.target.files[0])}
+              style={{ display: 'none' }}
+            />
+          </label>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
+          PNG / JPG / WebP, max 5MB. Pattern reading is not a forecast — always include the advisory.
+        </div>
+        {visionError && (
+          <div style={{ marginTop: 8, padding: 8, borderRadius: 6, fontSize: 12, color: 'var(--danger, #c53030)', border: '1px solid currentColor' }}>{visionError}</div>
+        )}
+        {vision && vision.ok && (
+          <div style={{ marginTop: 12, padding: 10, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface-2, rgba(0,0,0,0.02))', fontSize: 12 }}>
+            <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
+              {vision.chart_type} · {vision.symbol_guess || 'unknown symbol'} · trend: {vision.trend} · {vision.provider}/{vision.model} · ₹{Number(vision.cost_inr || 0).toFixed(4)}
+            </div>
+            <div style={{ marginBottom: 6 }}>{vision.plain_summary}</div>
+            {vision.key_levels && vision.key_levels.length > 0 && (
+              <div style={{ marginBottom: 6 }}>
+                <strong>Key levels:</strong>{' '}
+                {vision.key_levels.map((k, i) => (
+                  <span key={i} style={{ marginRight: 8, fontFamily: 'var(--mono)' }}>₹{k.price} ({k.kind})</span>
+                ))}
+              </div>
+            )}
+            {vision.annotations && vision.annotations.length > 0 && (
+              <div style={{ marginBottom: 6 }}>
+                <strong>Annotations:</strong> {vision.annotations.join(' · ')}
+              </div>
+            )}
+            {vision.date_range && <div style={{ fontSize: 11, color: 'var(--text-3)' }}>Range: {vision.date_range}</div>}
+            {vision.advisory_note && <div style={{ marginTop: 8, fontSize: 11, fontStyle: 'italic', color: 'var(--text-3)' }}>{vision.advisory_note}</div>}
+            {vision.call_id && window.AiFeedback && (
+              <div style={{ marginTop: 8 }}>
+                <window.AiFeedback callId={vision.call_id} workflow="vision" compact={true}/>
+              </div>
+            )}
+            {window.SebiDisclaimer && <window.SebiDisclaimer compact={true}/>}
+          </div>
+        )}
+      </div>
 
       {/* T99-F3 + A2: workflow cost breakdown + run-now button */}
       <div style={{ padding: 12, marginBottom: 16, borderRadius: 8, border: '1px solid var(--border)' }}>
