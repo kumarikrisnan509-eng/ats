@@ -54,7 +54,7 @@ cat > "$WRAPPER" <<EOF
 set -euo pipefail
 
 REMOTE="${REMOTE_NAME}:${REMOTE_DIR}"
-SQLITE_SRC="${SQLITE_SRC:-/data/ats/ats.db}"
+SQLITE_SRC="${SQLITE_SRC:-/var/lib/ats/tokens/ats.db}"  # T-39 fix: actual prod path
 TOKENS_SRC="${TOKENS_SRC:-/var/lib/ats/tokens}"
 SQLITE_STAGE="/var/tmp/ats-db-snapshot.db"
 

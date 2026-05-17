@@ -15,19 +15,33 @@ steps to follow when production data is actually lost.
 | RPO (recovery point objective) | < 24 hours (nightly rclone runs at 02:30 UTC = 08:00 IST) |
 | DR test cadence | Monthly (1st of each month) until Tier 3, then quarterly |
 
-## What gets backed up today
+## What gets backed up today (T99-T39)
 
 | Source | Target | Cron |
 |---|---|---|
-| `/var/log/ats/audit.log-*.gz` | `ats-archive:ats-audit-archive/` | `/etc/cron.d/ats-audit-rclone` daily 02:30 UTC |
+| `/var/log/ats/audit.log-*.gz` | `ats-archive:ats-audit-archive/audit/` | `/etc/cron.d/ats-audit-rclone` daily 02:30 UTC |
+| `/var/lib/ats/tokens/ats.db` (WAL-safe `.backup`) | `ats-archive:ats-audit-archive/db/ats.db` | same cron |
+| `/var/lib/ats/tokens/*` (sealed Zerodha tokens, ats.db excluded) | `ats-archive:ats-audit-archive/tokens/` | same cron |
 
-## What is NOT backed up yet (gap, fix before first beta user)
+The wrapper lives at `/opt/ats/scripts/ats-archive.sh` (auto-synced via the
+deploy workflow). `/usr/local/bin/ats-archive-audit.sh` is a symlink to it
+for cron compatibility.
+
+To repair from an older deployment that was missing the DB+tokens backup
+(old wrapper had wrong SQLITE_SRC default):
+
+```bash
+ssh ubuntu@141.148.192.4
+sudo /opt/ats/scripts/repair-rclone-wrapper.sh
+```
+
+Idempotent — also runs a backup immediately so the gap is closed today.
+
+## What is NOT backed up
 
 | Source | Why it matters | Action |
 |---|---|---|
-| `/data/ats/ats.db` | SQLite DB with users, sealed AI keys, paper trades, ai_calls | Add to wrapper; test in next DR run |
-| `/var/lib/ats/tokens/` | Per-user sealed Zerodha access tokens + auto-login vault | Add to wrapper |
-| `/etc/ats/master.key` | libsodium key — without this, nothing decrypts | Off-site copy already exists locally (Windows BACKUP-CREDENTIALS.cmd) |
+| `/etc/ats/master.key` | libsodium key — without this, nothing decrypts | Off-site copy already exists locally (Windows BACKUP-CREDENTIALS.cmd). NOT backed up to GDrive deliberately — it would let anyone with GDrive access decrypt everything. |
 
 ## One-time setup (T99-T36)
 

@@ -128,18 +128,20 @@ jobs:
               -o UserKnownHostsFile=~/.ssh/known_hosts \
               "${{ secrets.OCI_SSH_USER }}@${{ secrets.OCI_SSH_HOST }}" \
               "mv /tmp/docker-compose.yml.new /opt/ats/compose/docker-compose.yml"
-          # T99-T36: sync DR test + one-time setup script so /opt/ats/scripts is self-contained.
+          # T99-T36+T39: sync DR test + backup wrapper + one-time setup scripts.
           scp -i ~/.ssh/id_ed25519 \
               -o StrictHostKeyChecking=yes \
               -o UserKnownHostsFile=~/.ssh/known_hosts \
               deploy/scripts/dr-restore-test.sh \
               deploy/scripts/setup-dr-cron.sh \
+              deploy/scripts/ats-archive.sh \
+              deploy/scripts/repair-rclone-wrapper.sh \
               "${{ secrets.OCI_SSH_USER }}@${{ secrets.OCI_SSH_HOST }}:/tmp/"
           ssh -i ~/.ssh/id_ed25519 \
               -o StrictHostKeyChecking=yes \
               -o UserKnownHostsFile=~/.ssh/known_hosts \
               "${{ secrets.OCI_SSH_USER }}@${{ secrets.OCI_SSH_HOST }}" \
-              "mv /tmp/dr-restore-test.sh /opt/ats/scripts/dr-restore-test.sh && mv /tmp/setup-dr-cron.sh /opt/ats/scripts/setup-dr-cron.sh && chmod +x /opt/ats/scripts/dr-restore-test.sh /opt/ats/scripts/setup-dr-cron.sh"
+              "for f in dr-restore-test.sh setup-dr-cron.sh ats-archive.sh repair-rclone-wrapper.sh; do mv /tmp/\$f /opt/ats/scripts/\$f && chmod +x /opt/ats/scripts/\$f; done"
 
       - name: Trigger deploy on VM
         env:
