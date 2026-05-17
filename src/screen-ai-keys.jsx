@@ -51,6 +51,11 @@ const AiKeysScreen = () => {
   const [vision, setVision] = React.useState(null);   // D3 last vision result
   const [visionBusy, setVisionBusy] = React.useState(false);
   const [visionError, setVisionError] = React.useState(null);
+  // H8 experiments
+  const [experiments, setExperiments] = React.useState([]);
+  const [expResults, setExpResults] = React.useState({});  // {id: results}
+  const [newExpName, setNewExpName] = React.useState('with-vs-without-bulk-deals');
+  const [expBusy, setExpBusy] = React.useState(false);
   const [drafts, setDrafts] = React.useState({});          // {anthropic: {key:'', model:''}, ...}
   const [busy, setBusy] = React.useState({});              // {anthropic: 'save'|'test'|'remove'|null}
   const [results, setResults] = React.useState({});        // {anthropic: {ok, msg}, ...}
@@ -107,6 +112,20 @@ const AiKeysScreen = () => {
       try {
         const bt = await fetch('/api/me/ai-workflows/verdict-backtest?days=30', { credentials: 'include' }).then(r => r.json()).catch(() => null);
         if (bt && bt.ok) setRoi(bt);
+      } catch (_) {}
+      // H8: experiments list
+      try {
+        const ex = await fetch('/api/me/ai-workflows/experiments', { credentials: 'include' }).then(r => r.json()).catch(() => null);
+        if (ex && ex.ok) {
+          setExperiments(ex.experiments || []);
+          // Auto-fetch results for any active experiment
+          for (const e of (ex.experiments || []).filter(x => x.active)) {
+            fetch(`/api/me/ai-workflows/experiments/${e.id}/results?days=30`, { credentials: 'include' })
+              .then(r => r.json())
+              .then(j => { if (j.ok) setExpResults(prev => ({ ...prev, [e.id]: j })); })
+              .catch(() => {});
+          }
+        }
       } catch (_) {}
     } catch (e) { console.warn('[ai-keys] refresh failed:', e.message); }
   }, []);
@@ -175,6 +194,31 @@ const AiKeysScreen = () => {
       else setVisionError(r.detail || r.reason || 'vision_failed');
     } catch (e) { setVisionError(e.message); }
     finally { setVisionBusy(false); }
+  };
+
+  // H8: start a new experiment (always 'with-vs-without-bulk-deals' for the first cut)
+  const startExperiment = async () => {
+    if (!newExpName.trim()) return;
+    setExpBusy(true);
+    try {
+      const r = await fetch('/api/me/ai-workflows/experiments', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newExpName, workflow: 'intraday_critic', variant_a_key: 'with-bulk-deals', variant_b_key: 'without-bulk-deals' }),
+      }).then(r => r.json());
+      if (r.ok) { flash(`Experiment '${r.name}' started`); refresh(); }
+      else flash(r.detail || r.reason || 'experiment_failed', false);
+    } catch (e) { flash(e.message, false); }
+    finally { setExpBusy(false); }
+  };
+
+  const endExperiment = async (id) => {
+    if (!confirm('End this experiment? Variant assignment stops; collected data stays in ai_calls.')) return;
+    try {
+      const r = await fetch('/api/me/ai-workflows/experiments/' + id + '/end', { method: 'PUT', credentials: 'include' }).then(r => r.json());
+      if (r.ok) { flash('Experiment ended'); refresh(); }
+      else flash(r.reason || 'end_failed', false);
+    } catch (e) { flash(e.message, false); }
   };
 
   // T99-C1: save daily spend cap. PUT /api/me/preferences merges with existing prefs.
@@ -560,6 +604,72 @@ const AiKeysScreen = () => {
           </div>
         )}
       </div>
+
+      {/* H8: A/B experiments admin */}
+      {(experiments.length > 0 || (usageMeta.byWorkflow && usageMeta.byWorkflow.length > 0)) && (
+        <div style={{ padding: 12, marginBottom: 16, borderRadius: 8, border: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div style={{ fontWeight: 500, fontSize: 13 }}>A/B experiments</div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input
+                value={newExpName}
+                onChange={e => setNewExpName(e.target.value)}
+                placeholder="experiment name"
+                style={{ padding: '5px 8px', fontSize: 11, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface, white)', minWidth: 200 }}
+              />
+              <button
+                onClick={startExperiment} disabled={!newExpName.trim() || expBusy}
+                style={{ padding: '5px 10px', fontSize: 11, borderRadius: 6, border: '1px solid var(--accent, #3b82f6)', background: 'var(--accent, #3b82f6)', color: 'white', cursor: 'pointer' }}
+              >{expBusy ? '…' : 'Start'}</button>
+            </div>
+          </div>
+          {experiments.length === 0 ? (
+            <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
+              No experiments yet. Starting one assigns each critique call to variant A (with bulk-deals context) or B (without), then compares per-variant win-rate after 10+ paper trades land in each bucket.
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {experiments.slice(0, 5).map(ex => {
+                const res = expResults[ex.id];
+                return (
+                  <div key={ex.id} style={{ padding: 8, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface, white)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 500 }}>{ex.name}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                          {ex.active ? <span style={{ color: 'var(--up)' }}>● active</span> : <span>ended</span>} · workflow: {ex.workflow} · {ex.variant_a_key} vs {ex.variant_b_key}
+                        </div>
+                      </div>
+                      {ex.active && (
+                        <button onClick={() => endExperiment(ex.id)} style={{ padding: '4px 10px', fontSize: 11, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface-2)', cursor: 'pointer' }}>End</button>
+                      )}
+                    </div>
+                    {res && res.buckets && (
+                      <div style={{ marginTop: 6, fontSize: 11 }}>
+                        <div style={{ marginBottom: 4, fontWeight: 500 }}>{res.headline}</div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          {['a', 'b'].map(v => {
+                            const b = res.buckets[v];
+                            const key = v === 'a' ? ex.variant_a_key : ex.variant_b_key;
+                            return (
+                              <div key={v} style={{ flex: 1, padding: 6, borderRadius: 4, background: 'var(--surface-2)', fontFamily: 'var(--mono)' }}>
+                                <div style={{ fontWeight: 600 }}>{key}</div>
+                                <div>{b.calls} calls · {b.trades_in_window} trades</div>
+                                <div>win rate: {b.win_rate == null ? '—' : (b.win_rate * 100).toFixed(0) + '%'}</div>
+                                <div style={{ color: (b.avg_pnl_inr || 0) >= 0 ? 'var(--up)' : 'var(--down)' }}>avg ₹{b.avg_pnl_inr == null ? '—' : b.avg_pnl_inr.toFixed(0)}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* T99-F3 + A2: workflow cost breakdown + run-now button */}
       <div style={{ padding: 12, marginBottom: 16, borderRadius: 8, border: '1px solid var(--border)' }}>
