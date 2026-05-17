@@ -297,6 +297,19 @@ async function init() {
     }
     vault = await Vault.open(MASTER_KEY_PATH);
     sessions = new SessionStore({ tokensDir: TOKENS_DIR, vault });
+
+    // Tier 80: daily auto-reauth cron — moved INSIDE init() because db+vault are
+    // populated asynchronously here; the previous module-level init at line 368
+    // ran before either was set so the guard silently no-op'd and the scheduler
+    // never started. (Caught Sat 2026-05-17 from missing [cron-reauth] line in
+    // docker logs.)
+    try {
+      const { createCronReauth } = require('./cron-reauth');
+      _cronReauth = createCronReauth({ db, vault, audit, postTelegram });
+      _cronReauth.start();
+    } catch (e) {
+      console.error('[server] cron-reauth init failed:', e && e.message);
+    }
     // Try to rehydrate any saved Zerodha access token (single-user prod use)
     const userIds = sessions.listAllUserIds();
     if (userIds.length === 1) {
@@ -365,16 +378,8 @@ app.post('/api/admin/market/refresh-holidays', async (req, res) => {
 });
 
 // ---------- Tier 80: daily auto-reauth cron (per-user headless Kite login) ----------
+// _cronReauth is initialised inside init() once db + vault are ready.
 let _cronReauth = null;
-try {
-  if (db && vault) {
-    const { createCronReauth } = require('./cron-reauth');
-    _cronReauth = createCronReauth({ db, vault, audit, postTelegram });
-    _cronReauth.start();
-  }
-} catch (e) {
-  console.error('[server] cron-reauth init failed:', e && e.message);
-}
 
 // Tier 80: admin-only manual trigger (for testing the cron without waiting until 05:45 IST)
 app.post('/api/admin/cron-reauth/run', async (req, res) => {
