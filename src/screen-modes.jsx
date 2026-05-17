@@ -54,11 +54,30 @@ const ModesScreen = () => {
       </div>
 
       {/* Banner explaining the hierarchy */}
-      <div style={{ padding: "12px 16px", background: "var(--bg-soft)", border: "1px solid var(--border)", borderRadius: "var(--r-lg)", marginBottom: 20, display: "flex", gap: 14, alignItems: "center", fontSize: 12, color: "var(--text-2)" }}>
+      <div style={{ padding: "12px 16px", background: "var(--bg-soft)", border: "1px solid var(--border)", borderRadius: "var(--r-lg)", marginBottom: 12, display: "flex", gap: 14, alignItems: "center", fontSize: 12, color: "var(--text-2)" }}>
         <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-3)" }}>HIERARCHY</div>
         <div>Modes <span style={{ color: "var(--text-4)" }}>→</span> Strategies <span style={{ color: "var(--text-4)" }}>→</span> Signals <span style={{ color: "var(--text-4)" }}>→</span> Orders</div>
         <div style={{ flex: 1 }}/>
         <div style={{ fontSize: 11, color: "var(--text-3)" }}>Disabling a mode <strong>hard-gates</strong> both signal pipeline and broker adapter</div>
+      </div>
+
+      {/* T99-T82: honest banner — per-mode runtime numbers (open positions,
+          utilized, today's PnL, strategies running) and TOTAL_CAPITAL ₹45L
+          are still demo until per-mode position aggregation backend ships.
+          Mode-enable toggles and capital-percent sliders ARE live and
+          persisted to user prefs. Same disclosure pattern as T-73 attribution
+          banner / T-74 tax banner / T-75 audit banner. */}
+      <div role="note" style={{
+        padding: '8px 12px', marginBottom: 20, borderRadius: 6,
+        border: '1px solid color-mix(in oklab, var(--warn, #d97706) 35%, var(--border))',
+        background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
+        fontSize: 12, color: 'var(--text-2)',
+      }}>
+        <strong>Mode toggles and capital sliders are live;</strong>{' '}
+        per-mode runtime numbers (open positions, utilized, today's PnL,
+        strategies running) and total capital ₹45L are demo data — pending the
+        per-mode position aggregation endpoint. Ignore those numbers when
+        making allocation decisions.
       </div>
 
       {/* Mode cards — 4 wide */}
