@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # morning-check.sh
 #
-# Runs at 08:50 IST (03:20 UTC) on weekdays via /etc/cron.d/ats-auto-login.
+# Runs at 08:50 IST (03:20 UTC) every day via /etc/cron.d/ats-auto-login (T-31).
 # 1. Adds 0-60s jitter
 # 2. Checks if already connected (skips if yes)
 # 3. Runs auto-login-host.js (which drives Kite UI via host-side Playwright)

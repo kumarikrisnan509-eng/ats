@@ -99,7 +99,7 @@ sudo rm -rf "${STATIC_DIR}.old" || true
 echo "==> Cleanup dangling images (keep last 3)"
 docker image prune -f --filter "until=168h" >/dev/null || true
 
-# Note: the older /etc/cron.d/ats-auto-login still fires at 08:50 IST Mon-Fri.
+# Note: /etc/cron.d/ats-auto-login fires morning-check.sh at 08:50 IST 7 days/week (T-31).
 # The backend cron-reauth.js scheduler (now 7-day) handles the weekend reauths
 # that the host-side cron skips. Both writing to cron_history is harmless — the
 # scheduler dedupes by date_key so we never double-fire on the same day.

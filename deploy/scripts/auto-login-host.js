@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // auto-login-host.js (Tier 30.1) -- runs on the VM HOST (not in container).
-// Driven by /etc/cron.d/ats-auto-login at 06:10 IST.
+// Driven by /etc/cron.d/ats-auto-login at 08:50 IST 7 days/week (T-31).
 //
 // Hardened for Oracle Cloud Ampere A1 (ARM64). Adds:
 //   - per-step logging so a hang reveals which await is stuck
