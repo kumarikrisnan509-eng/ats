@@ -697,6 +697,132 @@ Return JSON only.`,
     }
   });
 
+  // --- D2: strategy auto-tuner — run grid search over last 90d + ask AI to summarise ---
+  router.post('/auto-tune', async (req, res) => {
+    const b = req.body || {};
+    const strategy_id = (b.strategy_id || '').toString();
+    const symbol = (b.symbol || 'NIFTY 50').toString().toUpperCase();
+    if (!strategy_id) return res.status(400).json({ ok: false, reason: 'bad_request', detail: 'strategy_id required' });
+
+    const strategy = (STRATEGIES || []).find(x => x.id === strategy_id);
+    if (!strategy) return res.status(404).json({ ok: false, reason: 'strategy_not_found' });
+    if (!brokerResolver) return res.status(503).json({ ok: false, reason: 'broker_resolver_not_ready' });
+
+    try {
+      const mode = b.mode || db.ai.userMode(req.user.id);
+
+      // Cache key — same (strategy, symbol) within a week returns cached
+      const week = Math.floor(Date.now() / (7 * 86400_000));
+      const cacheKey = _hashPrompt([req.user.id, 'auto-tune', mode, strategy_id, symbol, week]);
+      const cached = _cacheGet(cacheKey);
+      if (cached) return res.json({ ok: true, cached: true, ...cached.response, provider: cached.provider, model: cached.model, cost_inr: 0, call_id: cached.call_id || null });
+
+      // 1. Resolve user broker + pull last 120 days of daily candles
+      const r = await brokerResolver.resolveForRequest({ db, vault, globalBroker: null, fallbackToGlobal: false }, req);
+      if (!r || !r.broker) return res.status(412).json({ ok: false, reason: 'broker_not_connected', detail: 'Connect Zerodha to run auto-tune' });
+
+      const today = new Date();
+      const from = new Date(today.getTime() - 120 * 86400_000).toISOString().slice(0, 10);
+      const to = today.toISOString().slice(0, 10);
+      const candles = await r.broker.getHistorical({ symbol, interval: 'day', from, to }).catch(() => null);
+      if (!Array.isArray(candles) || candles.length < 60) {
+        return res.status(400).json({ ok: false, reason: 'insufficient_data', detail: `need >=60 candles, got ${candles?.length || 0}` });
+      }
+
+      // 2. Build a default param grid (3 values per param around the strategy default)
+      const grid = {};
+      for (const p of (strategy.params || [])) {
+        const def = p.default;
+        if (p.type === 'int' || p.type === 'float') {
+          const step = p.type === 'int' ? Math.max(1, Math.round((p.max - p.min) / 20)) : (p.max - p.min) / 20;
+          grid[p.name] = [Math.max(p.min, def - step), def, Math.min(p.max, def + step)];
+        } else {
+          grid[p.name] = [def];
+        }
+      }
+      // Explode grid (cap 27 — small for AI workflow; full grid is on /api/tune)
+      const keys = Object.keys(grid);
+      let combos = [{}];
+      for (const k of keys) {
+        const next = [];
+        for (const c of combos) for (const v of grid[k]) next.push({ ...c, [k]: v });
+        combos = next;
+        if (combos.length > 27) { combos = combos.slice(0, 27); break; }
+      }
+
+      // 3. Run backtests
+      const { runBacktest } = require('./backtest');
+      const results = [];
+      for (const params of combos) {
+        try {
+          const out = runBacktest({ candles, strategy: strategy_id, params, qty: 1 });
+          results.push({ params, trades: out.stats.trades, winRate: out.stats.winRate, totalPnl: out.stats.totalPnl, maxDrawdown: out.stats.maxDrawdown });
+        } catch (_) { /* skip bad combo */ }
+      }
+      results.sort((a, b) => (b.totalPnl || -Infinity) - (a.totalPnl || -Infinity));
+      const top3 = results.slice(0, 3);
+      const currentDefault = Object.fromEntries((strategy.params || []).map(p => [p.name, p.default]));
+      const currentRun = results.find(r => JSON.stringify(r.params) === JSON.stringify(currentDefault));
+
+      // 4. AI summary
+      const routed = await aiRouter.route({ db, vault, userId: req.user.id, workflow: 'strategy_autotune', mode });
+      if (!routed.ok) return res.status(routed.reason === 'no_ai_key' ? 412 : 404).json(routed);
+
+      const capCheck = _capCheck(db, req.user.id, 'strategy_autotune', routed.provider, routed.model, routed.est_cost_inr);
+      if (capCheck.blocked) return res.status(429).json({ ok: false, reason: 'spend_cap_exceeded', ...capCheck });
+
+      const prompt = {
+        system: `You are a quantitative strategist reviewing a parameter sweep for an Indian equity strategy. Output STRICTLY this JSON:
+{
+  "headline": "one-sentence verdict on whether to change params",
+  "should_change": true | false,
+  "proposed_params": { "<paramName>": <value>, ... } OR null if should_change=false,
+  "rationale": "2-3 sentences referencing the actual numbers (winRate, totalPnl, maxDrawdown)",
+  "risk_note": "one-sentence caveat about overfitting + small sample size"
+}
+Rules:
+- Suggest a param change ONLY if the proposed combo's totalPnl is meaningfully better AND max drawdown isn't much worse.
+- Mention the actual % improvement vs the current defaults in the rationale.
+- Always include the risk_note. 120 daily bars is small; encourage forward-testing in paper before promotion.`,
+        user: `Strategy: ${strategy.name} (${strategy_id})
+Symbol: ${symbol}
+Window: last 120 daily candles
+Current default params: ${JSON.stringify(currentDefault)}
+Current run result: ${JSON.stringify(currentRun)}
+
+Top 3 results by totalPnl:
+${JSON.stringify(top3, null, 2)}
+
+Return JSON verdict only.`,
+      };
+
+      const llmResult = await callLLM({ provider: routed.provider, apiKey: routed.apiKey, model: routed.model, prompt });
+      const advice = (llmResult && llmResult.advice) ?? llmResult;
+      const usage = (llmResult && llmResult.usage) || { prompt_tokens: 0, completion_tokens: 0 };
+      const cost_inr = estimateCost({ provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens });
+
+      let call_id = null;
+      try { call_id = db.ai.logCall({ user_id: req.user.id, workflow: 'strategy_autotune', provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null, context_tag: strategy_id, verdict: advice && advice.should_change ? 'change' : 'keep' }); } catch (e) { console.warn('[ai-workflows] auto-tune log:', e.message); }
+
+      const norm = {
+        strategy_id, strategy_name: strategy.name, symbol,
+        current_defaults: currentDefault,
+        current_result: currentRun || null,
+        top_3: top3,
+        headline: String(advice && advice.headline || '').slice(0, 300),
+        should_change: !!(advice && advice.should_change),
+        proposed_params: advice && advice.proposed_params && typeof advice.proposed_params === 'object' ? advice.proposed_params : null,
+        rationale: String(advice && advice.rationale || '').slice(0, 600),
+        risk_note: String(advice && advice.risk_note || '').slice(0, 300),
+      };
+      _cachePut(cacheKey, { ts: Date.now(), response: norm, cost_inr, provider: routed.provider, model: routed.model, call_id });
+      res.json({ ok: true, cached: false, ...norm, provider: routed.provider, model: routed.model, cost_inr, usage, call_id });
+    } catch (e) {
+      try { db.ai.logCall({ user_id: req.user.id, workflow: 'strategy_autotune', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e.message || 'autotune_failed').slice(0,200), context_tag: strategy_id, verdict: null }); } catch (_) {}
+      res.status(500).json({ ok: false, reason: 'autotune_failed', detail: e.message });
+    }
+  });
+
   // --- T-I5: per-call feedback (thumbs up/down) ---
   router.put('/feedback/:call_id', (req, res) => {
     const callId = parseInt(req.params.call_id, 10);
