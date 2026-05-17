@@ -28,6 +28,22 @@ async function runPreflight(ctx) {
   out.push(check('broker.access_token', 'Broker access token present', 'blocker',
     bh && bh.hasAccessToken, bh && bh.hasAccessToken ? 'token rehydrated' : 'no token -- login needed'));
 
+  // T99-T43: catch the two stall failure modes from T-34/T-37. Without these,
+  // preflight reported 'broker connected' even when the WS was either stalled
+  // on an expired access_token or frozen mid-day (connected but no ticks for
+  // >90s). Promoting to live trading in either state would route real money
+  // through dead price data — explicit blocker.
+  out.push(check('broker.not_stalled_on_token', 'Ticker not stalled on expired token', 'blocker',
+    !(bh && bh.stalledOnToken),
+    bh && bh.stalledOnToken
+      ? 'WS stopped reconnecting (3x HTTP 403) -- reconnect from Brokers screen'
+      : 'no stall detected'));
+  out.push(check('broker.tick_not_stale', 'Live ticks arriving (not frozen)', 'warn',
+    !(bh && bh.tickStale),
+    bh && bh.tickStale
+      ? `no ticks for >90s while market open (lagMs=${bh.lagMs})`
+      : (bh && bh.lagMs != null ? `latest tick ${Math.round(bh.lagMs/1000)}s ago` : 'awaiting first tick')));
+
   // Kill switch -- INFORMATIONAL not blocker; the user explicitly flips it
   out.push(check('killSwitch.armed', 'KILL_SWITCH=true (paper-only mode)', 'info',
     String(env.KILL_SWITCH || 'true').toLowerCase() === 'true',
