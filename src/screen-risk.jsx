@@ -79,6 +79,26 @@ const RiskScreen = () => {
 
       {window.RiskPredictor && <div style={{ marginBottom: 16 }}><window.RiskPredictor/></div>}
 
+      {/* T99-T91: honest banner — the 'Global limits' progress bars
+          (32% / 42% etc.), 'Per-strategy caps' rows (Momentum AI ₹8L /
+          Mean Reversion ₹6L / Grid Trader ₹4L near-cutoff / etc.), and
+          'Risk events' table (5 fake recent events) are all demo data.
+          The kill switch toggle IS local UI state (no backend yet either).
+          Same disclosure pattern as T-82/T-83/T-85/T-86. */}
+      <div role="note" style={{
+        padding: '8px 12px', marginBottom: 12, borderRadius: 6,
+        border: '1px solid color-mix(in oklab, var(--warn, #d97706) 35%, var(--border))',
+        background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
+        fontSize: 12, color: 'var(--text-2)',
+      }}>
+        <strong>Risk dashboard is demo data.</strong>{' '}
+        The Global limits, Per-strategy caps, and Risk events tables below are
+        hardcoded examples. Per-user risk-limit storage and a per-user event
+        log haven't shipped yet. The kill-switch toggle is local UI only — it
+        does not stop live trading. Don't rely on the limits shown for real
+        risk management.
+      </div>
+
       {/* Kill switch */}
       <Card style={{ marginBottom: 16, background: kill ? "var(--down-soft)" : "var(--surface)", borderColor: kill ? "var(--down)" : "var(--border)" }}>
         <div className="between">
