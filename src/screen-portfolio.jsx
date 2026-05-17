@@ -257,6 +257,12 @@ const PortfolioScreen = () => {
   }, []);
 
   const totalEquity = holdings.reduce((s, h) => s + h.qty * h.ltp, 0);
+  // T99-T98: real cost basis. broker.getHoldings() returns avgPrice per row,
+  // so total invested = sum(qty * avg) for the per-user equity holdings.
+  // Unrealized gain follows from totalEquity - invested. (XIRR still needs
+  // a cashflow ledger so it stays '—'.)
+  const invested = holdings.reduce((s, h) => s + (Number(h.qty) || 0) * (Number(h.avg) || 0), 0);
+  const unrealizedGain = totalEquity - invested;
   const totalMF = mf.reduce((s, m) => s + m.cur, 0);
   const totalETF = etf.reduce((s, e) => s + e.q * e.ltp, 0);
 
@@ -282,10 +288,12 @@ const PortfolioScreen = () => {
           unrealized-gain derives from real avg_price × qty for the user's
           actual holdings (and XIRR has a cashflow ledger), show '—' with
           honest sub-text. Same pattern as T-77/T-87/T-88. */}
+      {/* T99-T98: Invested + Unrealized gain now real (derived from broker
+          cost basis in holdings). XIRR still needs a cashflow ledger. */}
       <div className="grid grid-4" style={{ marginBottom: 16 }}>
         <Card><Stat label="Long-term value" value={inrCompact(totalEquity + totalMF + totalETF)} sub="today"/></Card>
-        <Card><Stat label="Invested" value="—" sub="needs per-user cost basis"/></Card>
-        <Card><Stat label="Unrealized gain" value="—" sub="needs cost basis"/></Card>
+        <Card><Stat label="Invested" value={invested > 0 ? inrCompact(invested) : "—"} sub={invested > 0 ? "cost basis · equity only" : "needs broker holdings"}/></Card>
+        <Card><Stat label="Unrealized gain" value={invested > 0 ? inrCompact(unrealizedGain) : "—"} sub={invested > 0 ? (totalEquity > 0 ? ((unrealizedGain / invested) * 100).toFixed(1) + "% on cost" : "—") : "needs broker holdings"}/></Card>
         <Card><Stat label="XIRR" value="—" sub="needs cashflow ledger"/></Card>
       </div>
 
