@@ -88,6 +88,26 @@ const GoalsScreen = () => {
         </button>
       </div>
 
+      {/* T99-T83: honest banner — the goal list, SIP fund names, target/current
+          amounts, ages, and 'on-track' status are all demo until per-user
+          financial-goal storage ships. /api/tax/goals exists but is global
+          (not per-user) and returns []; UI ignores it. Same disclosure pattern
+          as T-73/T-74/T-82. */}
+      {(!liveGoals || liveGoals.length === 0) && (
+        <div role="note" style={{
+          padding: '8px 12px', marginBottom: 12, borderRadius: 6,
+          border: '1px solid color-mix(in oklab, var(--warn, #d97706) 35%, var(--border))',
+          background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
+          fontSize: 12, color: 'var(--text-2)',
+        }}>
+          <strong>Sample goals shown.</strong>{' '}
+          The 5 goals below — including the SIP fund names, target amounts, and
+          on-track status — are demo data. Per-user goal storage hasn't shipped
+          yet; "New goal" is a UI stub until then. Don't use these numbers for
+          actual financial planning.
+        </div>
+      )}
+
       <div className="grid grid-4" style={{ marginBottom: 16 }}>
         <Stat label="Total goal value" value={`₹${(totalTarget/10000000).toFixed(1)} Cr`} sub="across 5 goals"/>
         <Stat label="Saved so far"     value={`₹${(totalCurrent/100000).toFixed(1)} L`} sub={`${((totalCurrent/totalTarget)*100).toFixed(1)}% funded`}/>
