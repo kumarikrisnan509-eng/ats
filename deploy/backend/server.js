@@ -3129,7 +3129,7 @@ app.use('/api/me/ai-workflows', (req, res, next) => {
       _aiWorkflowsRouter = createAiWorkflowsRouter({
         db, vault, requireAuth: auth.requireAuth, STRATEGIES,
         brokerResolver: _brokerResolver, surveillance: _surveillance,
-        earningsCal: _earningsCal, bulkDeals: _bulkDeals,
+        earningsCal: _earningsCal, bulkDeals: _bulkDeals, mfData: _mfData,
       });
       return _aiWorkflowsRouter(req, res, next);
     }

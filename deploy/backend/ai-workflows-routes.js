@@ -79,7 +79,7 @@ function _capCheck(db, userId, workflow, provider, model, est_cost_inr) {
   return { blocked: false };
 }
 
-function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES, brokerResolver, surveillance, earningsCal, bulkDeals }) {
+function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES, brokerResolver, surveillance, earningsCal, bulkDeals, mfData }) {
   const express = require('express');
   const router = express.Router();
   router.use(express.json({ limit: '32kb' }));
@@ -463,6 +463,142 @@ Return JSON verdict only.`;
     } catch (e) {
       try { db.ai.logCall({ user_id: req.user.id, workflow: 'intraday_critic', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e && e.message || 'critique_rich_failed').slice(0, 200) }); } catch (_) {}
       res.status(500).json({ ok: false, reason: 'critique_rich_failed', detail: e.message });
+    }
+  });
+
+  // --- mf_pick: AI-assisted mutual fund picker (uses G8 scheme master + NAV history) ---
+  router.post('/mf-pick', async (req, res) => {
+    const b = req.body || {};
+    const query = (b.query || '').toString().trim();
+    if (!query || query.length < 2) return res.status(400).json({ ok: false, reason: 'bad_request', detail: 'query (>=2 chars) required' });
+
+    try {
+      const mode = b.mode || db.ai.userMode(req.user.id);
+      const horizon = Math.max(1, Math.min(20, parseInt(b.horizon_years || '5', 10)));
+
+      // Cache key — query + today + horizon + mode. Re-searching the same in the same day is free.
+      const today = new Date().toISOString().slice(0, 10);
+      const cacheKey = _hashPrompt([req.user.id, 'mf-pick', mode, query, b.category || '', horizon, today]);
+      const cached = _cacheGet(cacheKey);
+      if (cached) return res.json({ ok: true, cached: true, ...cached.response, provider: cached.provider, model: cached.model, cost_inr: 0, call_id: cached.call_id || null });
+
+      if (!mfData) return res.status(503).json({ ok: false, reason: 'mf_data_not_ready' });
+
+      // 1. Search scheme master for matches
+      const matches = await mfData.search(query, { limit: 10 });
+      if (!matches.length) {
+        return res.json({ ok: true, query, count: 0, schemes: [], picks: [], note: 'No schemes matched. Try fewer / different keywords.' });
+      }
+
+      // 2. Pull NAV history for top 5 (limit fanout to MFAPI)
+      const topFive = matches.slice(0, 5);
+      const navs = await Promise.all(topFive.map(s => mfData.navHistory(s.code).catch(e => ({ error: e.message, code: s.code }))));
+
+      // 3. Compute CAGR over 1/3/5y where data exists
+      const computeCagr = (history, years) => {
+        if (!history || !Array.isArray(history.navs) || history.navs.length < 30) return null;
+        const today = history.navs[0];
+        const targetDays = years * 365;
+        // Find nav closest to (today - targetDays) ago
+        let best = null, bestDelta = Infinity;
+        for (const n of history.navs) {
+          const dDays = (Date.parse(today.date.split('-').reverse().join('-')) - Date.parse(n.date.split('-').reverse().join('-'))) / 86400_000;
+          const delta = Math.abs(dDays - targetDays);
+          if (delta < bestDelta) { bestDelta = delta; best = n; }
+          if (dDays > targetDays + 30) break;     // sorted oldest-last; stop once past window
+        }
+        if (!best || bestDelta > 60 || best.nav <= 0 || today.nav <= 0) return null;
+        const yrs = Math.max(0.5, (Date.parse(today.date.split('-').reverse().join('-')) - Date.parse(best.date.split('-').reverse().join('-'))) / 86400_000 / 365);
+        return +(((Math.pow(today.nav / best.nav, 1 / yrs) - 1) * 100).toFixed(2));
+      };
+
+      const enriched = topFive.map((s, i) => {
+        const h = navs[i];
+        if (!h || h.error) return { code: s.code, name: s.name, amc: s.amc, error: h?.error || 'nav fetch failed' };
+        return {
+          code: s.code,
+          name: h.scheme_name || s.name,
+          amc: h.fund_house || s.amc,
+          category: h.scheme_category || s.category,
+          latest_nav: h.navs[0]?.nav,
+          latest_nav_date: h.navs[0]?.date,
+          cagr_1y: computeCagr(h, 1),
+          cagr_3y: computeCagr(h, 3),
+          cagr_5y: computeCagr(h, 5),
+          nav_data_points: h.navs.length,
+        };
+      });
+
+      // 4. Route + spend cap
+      const routed = await aiRouter.route({ db, vault, userId: req.user.id, workflow: 'mf_pick', mode });
+      if (!routed.ok) return res.status(routed.reason === 'no_ai_key' ? 412 : 404).json(routed);
+
+      const capCheck = _capCheck(db, req.user.id, 'mf_pick', routed.provider, routed.model, routed.est_cost_inr);
+      if (capCheck.blocked) return res.status(429).json({ ok: false, reason: 'spend_cap_exceeded', ...capCheck });
+
+      // 5. Prompt
+      const prompt = {
+        system: `You are an experienced Indian mutual-fund analyst. Given 5 candidate funds and a user's horizon, pick the BEST 1-3 with plain English reasoning.
+
+Output STRICTLY this JSON:
+{
+  "headline": "one-sentence verdict about the user's query",
+  "picks": [
+    {
+      "code": <scheme code>,
+      "rank": 1-3,
+      "why": "one-sentence reason (mention CAGR, category fit, or risk profile)",
+      "caveat": "one-sentence risk/limitation"
+    }
+  ],
+  "discarded": [<list of scheme codes you rejected and why, max 2 entries>],
+  "general_advice": "one sentence about how to interpret these for the user's horizon"
+}
+
+Be strict:
+- Never recommend a fund without >=3y of NAV history.
+- Prefer Direct plans over Regular (lower expense ratio).
+- For horizon <2y prefer Liquid / Ultra Short / Money Market category.
+- For horizon 3-5y prefer Hybrid / Large+Mid Cap / ELSS.
+- For horizon >5y prefer Flexi Cap / Mid Cap / Small Cap / Sector funds.
+- Past performance is not a guarantee. Always include caveat.`,
+        user: `User query: ${query}
+Category filter: ${b.category || 'none'}
+Horizon: ${horizon} years
+
+Candidate funds with metrics (NAV in Rs, CAGR in %):
+${JSON.stringify(enriched, null, 2)}
+
+Return JSON only.`,
+      };
+
+      const llmResult = await callLLM({ provider: routed.provider, apiKey: routed.apiKey, model: routed.model, prompt });
+      const advice = (llmResult && llmResult.advice) ?? llmResult;
+      const usage = (llmResult && llmResult.usage) || { prompt_tokens: 0, completion_tokens: 0 };
+      const cost_inr = estimateCost({ provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens });
+
+      let call_id = null;
+      try { call_id = db.ai.logCall({ user_id: req.user.id, workflow: 'mf_pick', provider: routed.provider, model: routed.model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null }); } catch (e) { console.warn('[ai-workflows] mf-pick log:', e.message); }
+
+      const norm = {
+        query, category: b.category || null, horizon_years: horizon,
+        headline: String(advice && advice.headline || '').slice(0, 300),
+        picks: Array.isArray(advice && advice.picks) ? advice.picks.slice(0, 3).map(p => ({
+          code: p.code,
+          rank: Math.max(1, Math.min(3, parseInt(p.rank) || 1)),
+          why: String(p.why || '').slice(0, 300),
+          caveat: String(p.caveat || '').slice(0, 300),
+        })) : [],
+        discarded: Array.isArray(advice && advice.discarded) ? advice.discarded.slice(0, 2) : [],
+        general_advice: String(advice && advice.general_advice || '').slice(0, 400),
+        candidates: enriched,
+      };
+
+      _cachePut(cacheKey, { ts: Date.now(), response: norm, cost_inr, provider: routed.provider, model: routed.model, call_id });
+      res.json({ ok: true, cached: false, ...norm, provider: routed.provider, model: routed.model, cost_inr, usage, call_id });
+    } catch (e) {
+      try { db.ai.logCall({ user_id: req.user.id, workflow: 'mf_pick', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e && e.message || 'mf_pick_failed').slice(0,200) }); } catch (_) {}
+      res.status(500).json({ ok: false, reason: 'mf_pick_failed', detail: e.message });
     }
   });
 
