@@ -34,6 +34,11 @@ LOG_DIR="/var/log/ats"
 
 echo "==> [1/4] install dr-restore-test.sh -> $DEST"
 mkdir -p "$DEST_DIR" "$LOG_DIR" /etc/ats
+# Resolve realpaths so a same-file copy is a no-op even if one side is a symlink
+# or relative. Happens when this script is invoked from /opt/ats/scripts/ itself
+# (the deploy workflow scps dr-restore-test.sh there alongside this one).
+SRC_REAL="$(readlink -f "$SRC" 2>/dev/null || echo "$SRC")"
+DEST_REAL="$(readlink -f "$DEST" 2>/dev/null || echo "$DEST")"
 if [[ ! -f "$SRC" ]]; then
   if [[ -f "$DEST" ]]; then
     echo "    (source missing but $DEST already exists - keeping current)"
@@ -41,6 +46,10 @@ if [[ ! -f "$SRC" ]]; then
     echo "ERROR: source script not found at $SRC" >&2
     exit 2
   fi
+elif [[ "$SRC_REAL" == "$DEST_REAL" ]]; then
+  echo "    (source and destination are the same file - already in place, skipping)"
+  chmod 0755 "$DEST"
+  chown root:root "$DEST"
 else
   install -m 0755 -o root -g root "$SRC" "$DEST"
 fi
