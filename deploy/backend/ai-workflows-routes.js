@@ -609,6 +609,94 @@ Return JSON only.`,
     }
   });
 
+  // --- D1: multi-provider consensus (Anthropic + OpenAI + Gemini in parallel) ---
+  // Higher-stakes alternative to /critique. Runs the same prompt across all three
+  // providers, returns each verdict + the majority. Triple cost — only worth firing
+  // for live-trade critiques or final monthly verdicts.
+  router.post('/consensus', async (req, res) => {
+    const b = req.body || {};
+    const symbol = (b.symbol || '').toString().toUpperCase().trim();
+    const signal = (b.signal || '').toString();
+    if (!symbol || !signal) return res.status(400).json({ ok: false, reason: 'bad_request', detail: 'symbol + signal required' });
+
+    try {
+      // Cache key — symbol+signal+today; same day re-clicks return free
+      const today = new Date().toISOString().slice(0, 10);
+      const cacheKey = _hashPrompt([req.user.id, 'consensus', today, symbol, signal, b.value, b.message]);
+      const cached = _cacheGet(cacheKey);
+      if (cached) return res.json({ ok: true, cached: true, ...cached.response, cost_inr: 0 });
+
+      // Discover which provider keys the user has — only consult providers with keys
+      const keys = db._conn.prepare("SELECT provider, sealed_key, model_pref FROM ai_keys WHERE user_id = ?").all(req.user.id);
+      if (keys.length < 2) {
+        return res.status(412).json({ ok: false, reason: 'need_two_providers', detail: 'Consensus needs at least 2 BYOK providers configured. Add another key in Settings.' });
+      }
+
+      // Per-call budget check across the providers we're about to invoke
+      const cap = db.ai.dailyCapInr(req.user.id);
+      const alreadySpent = db.ai.dailySpend(req.user.id);
+      // Rough est: 3x the single-call STRONG budget
+      const budget = 3 * (require('./ai-advisor').estimateCostBudget({ provider: 'anthropic', model: 'claude-sonnet-4-6', expectedInTokens: 800, expectedOutTokens: 500 }));
+      if (alreadySpent + budget > cap) {
+        try { db.ai.logCall({ user_id: req.user.id, workflow: 'consensus', provider: 'multi', model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'blocked_by_cap', error: `cap Rs${cap}`, context_tag: symbol, verdict: null }); } catch (_) {}
+        return res.status(429).json({ ok: false, reason: 'spend_cap_exceeded', cap_inr: cap, spent_inr: +alreadySpent.toFixed(2) });
+      }
+
+      // Build the prompt once; run across providers in parallel
+      const prompt = buildCritiquePrompt({ symbol, signal, value: b.value, message: b.message, close: b.close, timeframe: b.timeframe });
+
+      const runOne = async (keyRow) => {
+        // Map provider -> STRONG-family model
+        const FAMILY_STRONG = { anthropic: 'claude-sonnet-4-6', openai: 'gpt-5', gemini: 'gemini-3.1-pro-preview' };
+        const model = FAMILY_STRONG[keyRow.provider] || keyRow.model_pref;
+        const apiKey = await vault.open(keyRow.sealed_key);
+        try {
+          const llmResult = await callLLM({ provider: keyRow.provider, apiKey, model, prompt });
+          const advice = (llmResult && llmResult.advice) ?? llmResult;
+          const usage = (llmResult && llmResult.usage) || { prompt_tokens: 0, completion_tokens: 0 };
+          const cost_inr = estimateCost({ provider: keyRow.provider, model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens });
+          const verdict = ['agree','caution','reject'].includes(String(advice && advice.verdict).toLowerCase()) ? String(advice.verdict).toLowerCase() : 'caution';
+          let call_id = null;
+          try { call_id = db.ai.logCall({ user_id: req.user.id, workflow: 'consensus', provider: keyRow.provider, model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null, context_tag: symbol, verdict }); } catch (_) {}
+          return { provider: keyRow.provider, model, verdict, confidence: Math.max(0, Math.min(100, parseInt(advice && advice.confidence) || 50)), summary: String(advice && advice.summary || '').slice(0, 200), cost_inr, call_id, usage };
+        } catch (e) {
+          try { db.ai.logCall({ user_id: req.user.id, workflow: 'consensus', provider: keyRow.provider, model, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e.message || 'failed').slice(0,200), context_tag: symbol, verdict: null }); } catch (_) {}
+          return { provider: keyRow.provider, model, error: e.message.slice(0, 200) };
+        }
+      };
+
+      const results = await Promise.all(keys.map(runOne));
+      const valid = results.filter(r => r.verdict);
+      if (!valid.length) return res.status(502).json({ ok: false, reason: 'all_providers_failed', results });
+
+      // Tally majority — caution counts both ways for the tiebreak
+      const tally = { agree: 0, caution: 0, reject: 0 };
+      for (const r of valid) tally[r.verdict] += 1;
+      const majority = Object.entries(tally).sort((a, b) => b[1] - a[1])[0][0];
+      const agreement = tally[majority] / valid.length;
+      const total_cost = +valid.reduce((s, r) => s + (r.cost_inr || 0), 0).toFixed(4);
+
+      const norm = {
+        symbol, signal,
+        providers_consulted: results.length,
+        providers_succeeded: valid.length,
+        majority,
+        agreement_strength: +agreement.toFixed(2),
+        tally,
+        per_provider: results,
+        total_cost_inr: total_cost,
+        verdict_note: agreement === 1 ? 'unanimous' :
+                      agreement >= 0.66 ? 'strong-majority' :
+                      'split — treat with extra caution',
+      };
+      _cachePut(cacheKey, { ts: Date.now(), response: norm });
+
+      res.json({ ok: true, cached: false, ...norm });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: 'consensus_failed', detail: e.message });
+    }
+  });
+
   // --- T-I5: per-call feedback (thumbs up/down) ---
   router.put('/feedback/:call_id', (req, res) => {
     const callId = parseInt(req.params.call_id, 10);
