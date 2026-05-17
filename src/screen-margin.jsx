@@ -81,10 +81,12 @@ const MarginScreen = () => {
         <Card>
           <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Available capital</div>
           <div className="mono" style={{ fontSize: 22, fontWeight: 700, marginTop: 6 }}>
-            {availableCash != null ? `₹${Math.round(availableCash).toLocaleString("en-IN")}` : "₹4,18,400"}
+            {availableCash != null ? `₹${Math.round(availableCash).toLocaleString("en-IN")}` : "—"}
           </div>
           <div style={{ fontSize: 11, marginTop: 4, color: availableCash != null && availableCash >= total.net ? "var(--up)" : "var(--text-3)" }}>
-            {availableCash != null ? (availableCash >= total.net ? "✓ Sufficient (live Kite balance)" : "⚠ Below required margin") : "(static fallback)"}
+            {availableCash != null
+              ? (availableCash >= total.net ? "✓ Sufficient (live Kite balance)" : "⚠ Below required margin")
+              : "(broker not connected — connect via Brokers screen)"}
           </div>
         </Card>
       </div>
