@@ -7,7 +7,7 @@
 
 'use strict';
 
-const { SUPPORTED_PROVIDERS, DEFAULT_MODEL_BY_PROVIDER, DEPRECATED_MODEL_ALIASES, resolveModel, buildPrompt, callLLM, normalizeAdvice, estimateCost, estimateCostBudget } = require('./ai-advisor');
+const { SUPPORTED_PROVIDERS, DEFAULT_MODEL_BY_PROVIDER, DEPRECATED_MODEL_ALIASES, resolveModel, buildPrompt, callLLM, normalizeAdvice, estimateCost, estimateCostBudget, redactPayload } = require('./ai-advisor');
 
 function createAiKeysRouter({ db, vault, requireAuth, brokerResolver }) {
   const express = require('express');
@@ -390,11 +390,17 @@ function createAdvisorAnalyzeRouter({ db, vault, requireAuth, brokerResolver }) 
         }
       } catch (_) {}
 
+      // H5: redact rupee + holdings counts before sending to LLM if user opted in
+      const _prefs = (() => { try { return db.prefs.get(req.user.id); } catch (_) { return { redact_pii: 1 }; } })();
+      const _redact = !!_prefs.redact_pii;
+      const _riskRedacted = _redact ? redactPayload(riskMetrics) : riskMetrics;
+      const _fxRedacted = _redact ? redactPayload(factorExposure) : factorExposure;
+      const _topRedacted = _redact ? redactPayload(topHoldings) : topHoldings;
       const prompt = buildPrompt({
         user: req.user,
-        riskMetrics,
-        factorExposure,
-        holdings: topHoldings,
+        riskMetrics: _riskRedacted,
+        factorExposure: _fxRedacted,
+        holdings: _topRedacted,
         marketContext: body.marketContext || null,
       });
 

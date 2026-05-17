@@ -43,6 +43,7 @@ const AiKeysScreen = () => {
   const [usageMeta, setUsageMeta] = React.useState({ cap_inr: 50, spent_today_inr: 0, cap_remaining_inr: 50, cap_used_pct: 0, byPeriod: {}, byWorkflow: [] });
   const [capDraft, setCapDraft] = React.useState('');     // T99-C1 spend-cap editor
   const [aiMode, setAiMode] = React.useState('balanced'); // T99-H9 quality | balanced | economy
+  const [redactPii, setRedactPii] = React.useState(true);  // H5 redact rupee values before sending to LLM
   const [routerPreview, setRouterPreview] = React.useState({ workflows: [], availableProviders: [], mode: 'balanced' });
   const [reviewBusy, setReviewBusy] = React.useState(false);
   const [reviewResult, setReviewResult] = React.useState(null);
@@ -90,6 +91,7 @@ const AiKeysScreen = () => {
         const pr = await fetch('/api/me/preferences', { credentials: 'include' }).then(r => r.json()).catch(() => null);
         if (pr && pr.ok && pr.preferences) {
           setAiMode(pr.preferences.ai_mode || 'balanced');
+          setRedactPii(pr.preferences.redact_pii !== 0);
         }
       } catch (_) {}
       // T99-H2: fetch router preview (what model gets picked for each workflow)
@@ -113,6 +115,18 @@ const AiKeysScreen = () => {
       if (r.ok) { flash(`AI mode: ${m}`); refresh(); }
       else flash(r.reason || 'mode_save_failed', false);
     } catch (e) { flash('mode_save_failed: ' + e.message, false); }
+  };
+
+  // H5: toggle redact-PII setting (sends bucketed values to LLM instead of real ₹ amounts)
+  const saveRedact = async (v) => {
+    setRedactPii(v);
+    try {
+      const cur = await fetch('/api/me/preferences', { credentials: 'include' }).then(r => r.json()).catch(() => null);
+      const body = { ...(cur && cur.preferences ? cur.preferences : {}), redact_pii: v ? 1 : 0 };
+      const r = await fetch('/api/me/preferences', { method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
+      if (r.ok) flash(v ? 'Privacy: rupee values redacted before sending to AI' : 'Privacy: rupee values sent as-is');
+      else flash(r.reason || 'redact_save_failed', false);
+    } catch (e) { flash('redact_save_failed: ' + e.message, false); }
   };
 
   // T99-A2: run on-demand monthly review now
@@ -334,6 +348,37 @@ const AiKeysScreen = () => {
             >{m}</button>
           ))}
         </div>
+      </div>
+
+      {/* H5: privacy redaction toggle */}
+      <div style={{
+        padding: 12, marginBottom: 12, borderRadius: 8, border: '1px solid var(--border)',
+        display: 'flex', alignItems: 'center', gap: 12,
+      }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Privacy: rupee redaction</div>
+          <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2 }}>
+            {redactPii
+              ? 'Portfolio rupee values and holdings counts are bucketed (\'small/medium/large\') before being sent to AI providers.'
+              : 'Raw rupee amounts and holdings counts are sent to AI providers. Faster prompts but the provider sees your portfolio scale.'}
+          </div>
+        </div>
+        <label style={{ position: 'relative', display: 'inline-block', width: 44, height: 24 }}>
+          <input
+            type="checkbox" checked={redactPii} onChange={e => saveRedact(e.target.checked)}
+            style={{ opacity: 0, width: 0, height: 0 }}
+          />
+          <span style={{
+            position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
+            background: redactPii ? 'var(--accent, #3b82f6)' : 'var(--border)',
+            borderRadius: 24, transition: '120ms',
+          }}>
+            <span style={{
+              position: 'absolute', height: 18, width: 18, left: redactPii ? 23 : 3, top: 3,
+              background: 'white', borderRadius: '50%', transition: '120ms',
+            }}/>
+          </span>
+        </label>
       </div>
 
       {/* T99-H2: router transparency — what ATS would call right now per workflow */}

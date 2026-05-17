@@ -266,6 +266,55 @@ function _priceFor(model) {
   if (/pro/i.test(model))         return { in: 1.25, out: 10.0 };
   return { in: 3.0, out: 15.0 };  // worst-case default
 }
+/**
+ * H5: redact rupee amounts + holdings counts in a payload before sending to
+ * an external LLM. Replaces numbers with bucketed labels so the model gets
+ * directional context without seeing the user's actual portfolio value.
+ *
+ * Buckets (INR):
+ *   < 1 L      → 'tiny'
+ *   1L–10L     → 'small'
+ *   10L–1Cr    → 'medium'
+ *   1Cr–10Cr   → 'large'
+ *   > 10Cr     → 'very-large'
+ *
+ * Holdings counts:
+ *   < 5  → 'few', 5-20 → 'handful', 20-50 → 'broad', > 50 → 'wide'
+ */
+function redactRupees(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '~unknown';
+  const abs = Math.abs(n);
+  const sign = n < 0 ? '-' : '';
+  if (abs < 1e5) return sign + 'tiny';
+  if (abs < 1e6) return sign + 'small';
+  if (abs < 1e7) return sign + 'medium';
+  if (abs < 1e8) return sign + 'large';
+  return sign + 'very-large';
+}
+function redactHoldingsCount(n) {
+  const x = Number(n) || 0;
+  if (x < 5) return 'few';
+  if (x < 20) return 'handful';
+  if (x < 50) return 'broad';
+  return 'wide';
+}
+/** Walks a JSON-able payload, replacing values flagged by a paths key list. Used for buildPrompt input redaction. */
+function redactPayload(obj, opts = {}) {
+  if (!obj || typeof obj !== 'object') return obj;
+  const RUPEE_KEYS = new Set(['portfolio_value', 'equity', 'cash', 'realized_pnl', 'unrealized_pnl', 'pnl', 'total_pnl', 'gross_pnl_inr', 'initialCapital', 'deployedCapital']);
+  const COUNT_KEYS = new Set(['holdingCount', 'holdings_count']);
+  if (Array.isArray(obj)) return obj.map(x => redactPayload(x, opts));
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (RUPEE_KEYS.has(k) && typeof v === 'number') out[k] = redactRupees(v);
+    else if (COUNT_KEYS.has(k) && typeof v === 'number') out[k] = redactHoldingsCount(v);
+    else if (v && typeof v === 'object') out[k] = redactPayload(v, opts);
+    else out[k] = v;
+  }
+  return out;
+}
+
 /** Compute ₹ cost for a single call given token usage. */
 function estimateCost({ provider, model, prompt_tokens, completion_tokens }) {
   const p = _priceFor(model);
@@ -335,5 +384,9 @@ module.exports = {
   // T99-A3
   estimateCost,
   estimateCostBudget,
+  // H5
+  redactRupees,
+  redactHoldingsCount,
+  redactPayload,
   _internal: { _parseJsonResponse, _priceFor },
 };

@@ -10,7 +10,7 @@
 
 const crypto = require('crypto');
 const aiRouter = require('./ai-router');
-const { callLLM, estimateCost } = require('./ai-advisor');
+const { callLLM, estimateCost, redactRupees, redactPayload } = require('./ai-advisor');
 
 const CACHE_MAX = 500;
 const _cache = new Map();
@@ -220,6 +220,13 @@ function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES, brokerRes
       const capCheck = _capCheck(db, req.user.id, 'monthly_review', routed.provider, routed.model, routed.est_cost_inr);
       if (capCheck.blocked) return res.status(429).json({ ok: false, reason: 'spend_cap_exceeded', ...capCheck });
 
+      // H5: redact rupee figures when user opted in (default on)
+      const _prefs = (() => { try { return db.prefs.get(req.user.id); } catch (_) { return { redact_pii: 1 }; } })();
+      const _redact = !!_prefs.redact_pii;
+      const _pnlRedacted = _redact ? redactPayload(pnlRows) : pnlRows;
+      const _winnersRedacted = _redact ? topMoves.winners.map(w => ({ symbol: w.symbol, pnl: redactRupees(w.pnl) })) : topMoves.winners;
+      const _losersRedacted = _redact ? topMoves.losers.map(w => ({ symbol: w.symbol, pnl: redactRupees(w.pnl) })) : topMoves.losers;
+      const _spendStr = _redact ? redactRupees(spend30d * 100000) /* convert to scale before bucket */ : `Rs ${spend30d.toFixed(2)}`;
       const prompt = {
         system: `You are an Indian retail-trading coach reviewing one month of paper-trading activity. Output STRICTLY this JSON:
 {
@@ -231,16 +238,16 @@ function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES, brokerRes
   "ai_spend_assessment": "1 sentence on whether AI spend (Rs) bought useful guidance"
 }
 No code, no specific entry/exit prices, no Rs targets.`,
-        user: `Paper trading P&L (last 30 days):
-${JSON.stringify(pnlRows.slice(0, 30), null, 2)}
+        user: `Paper trading P&L (last 30 days)${_redact ? ' (rupee values bucketed for privacy)' : ''}:
+${JSON.stringify(_pnlRedacted.slice(0, 30), null, 2)}
 
 Top winners:
-${JSON.stringify(topMoves.winners, null, 2)}
+${JSON.stringify(_winnersRedacted, null, 2)}
 
 Top losers:
-${JSON.stringify(topMoves.losers, null, 2)}
+${JSON.stringify(_losersRedacted, null, 2)}
 
-AI spend (last 30 days): Rs ${spend30d.toFixed(2)}
+AI spend (last 30 days): ${_redact ? _spendStr : `Rs ${spend30d.toFixed(2)}`}
 
 Return JSON review only.`,
       };

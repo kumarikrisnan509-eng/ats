@@ -127,6 +127,9 @@ function open(opts = {}) {
   // T99-H9: AI quality/economy mode (auto-router uses this when caller doesn't override)
   try { conn.exec("ALTER TABLE user_preferences ADD COLUMN ai_mode TEXT DEFAULT 'balanced'"); }
   catch (e) { /* already migrated */ }
+  // H5: redact PII (rupee amounts + holdings counts) from prompts (default on)
+  try { conn.exec("ALTER TABLE user_preferences ADD COLUMN redact_pii INTEGER DEFAULT 1"); }
+  catch (e) { /* already migrated */ }
 
   // Record schema version 1 if not already
   const v = conn.prepare('SELECT COUNT(*) AS n FROM _schema_version').get().n;
@@ -235,9 +238,9 @@ function makeRepo(conn) {
 
     // Tier 84: preferences
     prefsGet: conn.prepare('SELECT * FROM user_preferences WHERE user_id = ?'),
-    prefsUpsert: conn.prepare(`INSERT INTO user_preferences (user_id, theme, density, currency_format, round_rupees, show_pnl_in_header, daily_ai_cap_inr, ai_mode, updated_at)
-      VALUES (@user_id, @theme, @density, @currency_format, @round_rupees, @show_pnl_in_header, @daily_ai_cap_inr, @ai_mode, datetime('now'))
-      ON CONFLICT(user_id) DO UPDATE SET theme=@theme, density=@density, currency_format=@currency_format, round_rupees=@round_rupees, show_pnl_in_header=@show_pnl_in_header, daily_ai_cap_inr=@daily_ai_cap_inr, ai_mode=@ai_mode, updated_at=datetime('now')`),
+    prefsUpsert: conn.prepare(`INSERT INTO user_preferences (user_id, theme, density, currency_format, round_rupees, show_pnl_in_header, daily_ai_cap_inr, ai_mode, redact_pii, updated_at)
+      VALUES (@user_id, @theme, @density, @currency_format, @round_rupees, @show_pnl_in_header, @daily_ai_cap_inr, @ai_mode, @redact_pii, datetime('now'))
+      ON CONFLICT(user_id) DO UPDATE SET theme=@theme, density=@density, currency_format=@currency_format, round_rupees=@round_rupees, show_pnl_in_header=@show_pnl_in_header, daily_ai_cap_inr=@daily_ai_cap_inr, ai_mode=@ai_mode, redact_pii=@redact_pii, updated_at=datetime('now')`),
     // Tier 84: notifications
     notifGet: conn.prepare('SELECT * FROM user_notifications WHERE user_id = ?'),
     notifUpsert: conn.prepare(`INSERT INTO user_notifications (user_id, email_enabled, email_digest_time, telegram_enabled, telegram_bot_token, telegram_chat_id, webhook_enabled, webhook_url, webhook_secret, updated_at)
@@ -402,12 +405,13 @@ function makeRepo(conn) {
     prefs: {
       get: (userId) => {
         const row = x.prefsGet.get(userId);
-        const base = { user_id: userId, theme: 'auto', density: 'comfortable', currency_format: 'abbrev', round_rupees: 0, show_pnl_in_header: 1, daily_ai_cap_inr: 50, ai_mode: 'balanced' };
+        const base = { user_id: userId, theme: 'auto', density: 'comfortable', currency_format: 'abbrev', round_rupees: 0, show_pnl_in_header: 1, daily_ai_cap_inr: 50, ai_mode: 'balanced', redact_pii: 1 };
         if (!row) return base;
         return {
           ...base, ...row,
           daily_ai_cap_inr: row.daily_ai_cap_inr == null ? 50 : Number(row.daily_ai_cap_inr),
           ai_mode: ['quality','balanced','economy'].includes(row.ai_mode) ? row.ai_mode : 'balanced',
+          redact_pii: row.redact_pii == null ? 1 : (row.redact_pii ? 1 : 0),
         };
       },
       upsert: (row) => {
