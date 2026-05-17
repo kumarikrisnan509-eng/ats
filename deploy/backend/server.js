@@ -705,8 +705,49 @@ app.post('/api/admin/dr-status', express.json({ limit: '16kb' }), (req, res) => 
     const body = req.body || {};
     const ok = body.ok === true || body.ok === 'true' ? 1 : 0;
     const rto_sec = Number(body.rto_total_sec) || null;
+
+    // T99-T65: peek at the previous result so we can detect transitions
+    // (fail → fail = silent, fail → ok = recovery alert, ok → fail = critical).
+    let prevOk = null, prevTs = null;
+    try {
+      const prev = db._conn.prepare(`SELECT ok, ts FROM dr_test_history ORDER BY id DESC LIMIT 1`).get();
+      if (prev) { prevOk = prev.ok; prevTs = prev.ts; }
+    } catch (_) { /* first run; prev stays null */ }
+
     db._conn.prepare(`INSERT INTO dr_test_history (ok, rto_sec, payload) VALUES (?, ?, ?)`)
       .run(ok, rto_sec, JSON.stringify(body));
+
+    // T99-T65: Telegram alerts on transitions. Always alert on fail (whether
+    // it's a new failure or a continuing one — backups dying twice in a row
+    // is worth seeing twice). Alert on recovery only if prev was a fail OR
+    // the gap since the last test was > 35 days (stale recovery).
+    try {
+      if (ok === 0) {
+        notify('error', 'ATS DR backup test FAILED', {
+          body: 'sudo /opt/ats/scripts/dr-restore-test.sh exited non-zero. Restore path is at risk. Check /var/log/ats/dr-restore-test.log for details.',
+          fields: {
+            rto_sec: String(rto_sec || 'unknown'),
+            time: new Date().toISOString(),
+            error: String(body.error || body.reason || '(see log)').slice(0, 200),
+          },
+          url: 'https://ats.rajasekarselvam.com/api/health-deep',
+        }).catch(() => {});
+      } else if (ok === 1 && prevOk === 0) {
+        notify('success', 'ATS DR backup test recovered', {
+          body: 'After a previous failure, the DR restore test passed again. Backups are verified restorable.',
+          fields: { rto_sec: String(rto_sec || 'unknown'), time: new Date().toISOString() },
+        }).catch(() => {});
+      } else if (ok === 1 && prevTs) {
+        const ageMs = Date.now() - new Date(prevTs).getTime();
+        if (ageMs > 35 * 86400 * 1000) {
+          notify('warn', 'ATS DR backup test ran after long gap', {
+            body: `Previous test was ${Math.round(ageMs/86400000)} days ago. Cron may have been disabled or failing silently.`,
+            fields: { rto_sec: String(rto_sec || 'unknown'), time: new Date().toISOString() },
+          }).catch(() => {});
+        }
+      }
+    } catch (_) { /* notify must never break dr-status recording */ }
+
     res.json({ ok: true, recorded: true });
   } catch (e) {
     res.status(500).json({ ok: false, reason: 'dr_record_failed', detail: e.message });
