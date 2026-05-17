@@ -43,20 +43,32 @@ Idempotent — also runs a backup immediately so the gap is closed today.
 |---|---|---|
 | `/etc/ats/master.key` | libsodium key — without this, nothing decrypts | Off-site copy already exists locally (Windows BACKUP-CREDENTIALS.cmd). NOT backed up to GDrive deliberately — it would let anyone with GDrive access decrypt everything. |
 
-## One-time setup (T99-T36)
+## One-time setup (T99-T60 meta-runner)
 
-Run this ONCE after first deploy or after a fresh VM rebuild. It installs the
-script, generates the auth token, writes the monthly cron, and runs the test
-once so `/api/health-deep` stops reporting `drStale:true`.
+After a fresh VM bootstrap or DR rebuild, run the meta-runner ONCE — it
+invokes every setup script in the right order, idempotently:
 
 ```bash
-ssh ubuntu@141.148.192.4
+ssh ubuntu@141.148.192.4   # only needed if you're NOT already on the VM
+sudo /opt/ats/scripts/setup-all.sh
+```
+
+Runs (in order):
+  1. `sync-nginx-config.sh`        — install nginx configs from staged dir
+  2. `repair-rclone-wrapper.sh`    — install backup wrapper + run one backup
+  3. `setup-auto-login-cron.sh`    — write /etc/cron.d/ats-auto-login (7-day)
+  4. `setup-dr-cron.sh`            — DR test token + monthly cron + first run
+
+Final summary tells you what worked + what needs attention. Exit non-zero
+if any step failed.
+
+You can also run any single step individually (e.g. just re-sync nginx):
+
+```bash
 sudo /opt/ats/scripts/setup-dr-cron.sh
 ```
 
-Idempotent — safe to re-run. The deploy workflow keeps both
-`dr-restore-test.sh` and `setup-dr-cron.sh` synced to `/opt/ats/scripts/` on
-every push, so future code changes to the test logic land automatically.
+All scripts are idempotent — safe to re-run.
 
 ## Monthly test procedure (automated)
 
