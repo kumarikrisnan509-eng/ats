@@ -37,6 +37,7 @@ const TITLES = {
   money:      ["Wealth",       "Money (profits → long-term)"],
   lab:        ["Validate",     "Strategy Lab"],
   insights:   ["Wealth",       "AI insights"],
+  mf:         ["Long-term",   "Mutual funds"],
   'ai-keys':  ["System",       "AI providers"],
 };
 
@@ -235,6 +236,7 @@ function App() {
     money:      window.MoneyScreen ? <window.MoneyScreen/> : null,
     lab:        window.StrategyLabScreen ? <window.StrategyLabScreen/> : null,
     'ai-keys':  window.AiKeysScreen ? <window.AiKeysScreen/> : null,
+    mf:         window.MfPickerScreen ? <window.MfPickerScreen/> : null,
   };
 
   const [crumb, title] = TITLES[route] || TITLES.dashboard;

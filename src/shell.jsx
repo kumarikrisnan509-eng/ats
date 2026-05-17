@@ -133,6 +133,7 @@ const NAV_GROUPS = [
     label: "Long-term",
     items: [
       { id: "portfolio",  label: "Portfolio",            icon: I.portfolio },
+      { id: "mf",         label: "Mutual funds",         icon: I.basket },
       { id: "goals",      label: "Life goals",           icon: I.target,    overflow: true },
       { id: "stpswp",     label: "STP / SWP plans",      icon: I.refresh,   overflow: true },
       { id: "tax",        label: "Tax & ITR",            icon: I.calc,      overflow: true },
