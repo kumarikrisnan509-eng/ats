@@ -128,7 +128,7 @@ jobs:
               -o UserKnownHostsFile=~/.ssh/known_hosts \
               "${{ secrets.OCI_SSH_USER }}@${{ secrets.OCI_SSH_HOST }}" \
               "mv /tmp/docker-compose.yml.new /opt/ats/compose/docker-compose.yml"
-          # T99-T36+T39: sync DR test + backup wrapper + one-time setup scripts.
+          # T99-T36+T39+T41: sync DR + backup + nginx-staging scripts to VM.
           scp -i ~/.ssh/id_ed25519 \
               -o StrictHostKeyChecking=yes \
               -o UserKnownHostsFile=~/.ssh/known_hosts \
@@ -136,12 +136,27 @@ jobs:
               deploy/scripts/setup-dr-cron.sh \
               deploy/scripts/ats-archive.sh \
               deploy/scripts/repair-rclone-wrapper.sh \
+              deploy/scripts/sync-nginx-config.sh \
               "${{ secrets.OCI_SSH_USER }}@${{ secrets.OCI_SSH_HOST }}:/tmp/"
           ssh -i ~/.ssh/id_ed25519 \
               -o StrictHostKeyChecking=yes \
               -o UserKnownHostsFile=~/.ssh/known_hosts \
               "${{ secrets.OCI_SSH_USER }}@${{ secrets.OCI_SSH_HOST }}" \
-              "for f in dr-restore-test.sh setup-dr-cron.sh ats-archive.sh repair-rclone-wrapper.sh; do mv /tmp/\$f /opt/ats/scripts/\$f && chmod +x /opt/ats/scripts/\$f; done"
+              "for f in dr-restore-test.sh setup-dr-cron.sh ats-archive.sh repair-rclone-wrapper.sh sync-nginx-config.sh; do mv /tmp/\$f /opt/ats/scripts/\$f && chmod +x /opt/ats/scripts/\$f; done"
+          # T99-T41: stage nginx configs so sync-nginx-config.sh can install them.
+          # We don't apply them automatically — operator runs sync-nginx-config.sh once
+          # so any breaking nginx change is caught at their hands, not mid-deploy.
+          scp -i ~/.ssh/id_ed25519 \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              deploy/nginx/ats.rajasekarselvam.com.conf \
+              deploy/nginx/rajasekarselvam.com.conf \
+              "${{ secrets.OCI_SSH_USER }}@${{ secrets.OCI_SSH_HOST }}:/tmp/"
+          ssh -i ~/.ssh/id_ed25519 \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              "${{ secrets.OCI_SSH_USER }}@${{ secrets.OCI_SSH_HOST }}" \
+              "mkdir -p /opt/ats/scripts/nginx-staged && mv /tmp/*.conf /opt/ats/scripts/nginx-staged/"
 
       - name: Trigger deploy on VM
         env:
