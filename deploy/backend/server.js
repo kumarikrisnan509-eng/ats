@@ -2529,6 +2529,28 @@ app.get('/api/profile', async (req, res) => {
   }
 });
 
+// T99-T67: per-user identity from the users table. /api/profile returns the
+// BROKER profile (Kite). This returns OUR user record so the Profile screen
+// can show the logged-in user's actual email/name/created_at instead of
+// hardcoded sample text.
+app.get('/api/me/identity', (req, res) => {
+  if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
+  // Don't return password_hash / tokens / failed_logins / locked_until.
+  // Only the safe display fields.
+  res.json({
+    ok: true,
+    user: {
+      id:            req.user.id,
+      email:         req.user.email,
+      name:          req.user.name || null,
+      is_verified:   !!req.user.is_verified,
+      is_admin:      !!req.user.is_admin,
+      created_at:    req.user.created_at,
+      last_login_at: req.user.last_login_at || null,
+    },
+  });
+});
+
 app.get('/api/margins', async (req, res) => {
   try {
     const p = await pickBroker(req);

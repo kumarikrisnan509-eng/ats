@@ -2,8 +2,9 @@
 /* Profile screen — expanded user profile, KYC, plan, API tokens, security */
 
 const ProfileScreen = () => {
-  // ---- live /api/profile ----
+  // ---- live broker profile + user identity ----
   const [liveProfile, setLiveProfile] = React.useState(null);
+  const [me, setMe] = React.useState(null);  // T99-T67: per-user identity row
   React.useEffect(() => {
     if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
     let cancelled = false;
@@ -11,6 +12,10 @@ const ProfileScreen = () => {
       try {
         const d = await window.fetchApi('/api/profile');
         if (!cancelled && d && d.ok) setLiveProfile(d.profile || null);
+      } catch (e) {}
+      try {
+        const d2 = await window.fetchApi('/api/me/identity');
+        if (!cancelled && d2 && d2.ok) setMe(d2.user || null);
       } catch (e) {}
     })();
     return () => { cancelled = true; };
@@ -31,6 +36,7 @@ const ProfileScreen = () => {
       </div>
 
       {window.LoginHistory && <div style={{ marginBottom: 16 }}><window.LoginHistory/></div>}
+      {/* T99-T67: helpers for date formatting (close over `me` via parent) */}
 
       {/* Identity summary card */}
       <Card style={{ marginBottom: 16 }}>
@@ -45,15 +51,14 @@ const ProfileScreen = () => {
           }}>RS</div>
           <div style={{ flex: 1 }}>
             <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 4 }}>
-              <h2 style={{ fontSize: 20, fontWeight: 600, letterSpacing: "-0.01em" }}>Rajasekar Selvam</h2>
-              <Pill kind="up" dot>KYC verified</Pill>
-              <Pill kind="info">Pro plan</Pill>
+              <h2 style={{ fontSize: 20, fontWeight: 600, letterSpacing: "-0.01em" }}>{(me && me.name) || (me && me.email) || "Your profile"}</h2>
+              {me && me.is_verified && <Pill kind="up" dot>Email verified</Pill>}
+              {me && me.is_admin && <Pill kind="info">Admin</Pill>}
             </div>
-            <div className="muted" style={{ fontSize: 13, marginBottom: 6 }}>rajasekar@example.in · +91 98xxx-xx210</div>
+            <div className="muted" style={{ fontSize: 13, marginBottom: 6 }}>{(me && me.email) || "—"}</div>
             <div style={{ display: "flex", gap: 16, fontSize: 12 }}>
-              <span><span className="muted">Member since</span> <span className="mono">12 Mar 2025</span></span>
-              <span><span className="muted">Live trading since</span> <span className="mono">27 Mar 2025</span></span>
-              <span><span className="muted">Last login</span> <span className="mono">14:22 IST today</span></span>
+              <span><span className="muted">Member since</span> <span className="mono">{me && me.created_at ? new Date(me.created_at).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : "—"}</span></span>
+              <span><span className="muted">Last login</span> <span className="mono">{me && me.last_login_at ? new Date(me.last_login_at).toLocaleString('en-IN', { hour:'2-digit', minute:'2-digit', day:'2-digit', month:'short' }) : "never"}</span></span>
             </div>
           </div>
           <div style={{ textAlign: "right" }}>
@@ -80,7 +85,7 @@ const ProfileScreen = () => {
         ))}
       </div>
 
-      {tab === "overview"  && <OverviewTab/>}
+      {tab === "overview" && (() => { window._me = me; return <OverviewTab/>; })()}
       {tab === "kyc"       && <KYCTab/>}
       {tab === "security"  && <SecurityTab/>}
       {tab === "api"       && <ApiTab/>}
@@ -93,11 +98,11 @@ const ProfileScreen = () => {
 const OverviewTab = () => (
   <div className="grid grid-2">
     <Card title="Personal">
-      <KV label="Full name"      value="Rajasekar Selvam"/>
-      <KV label="Email"          value="rajasekar@example.in" verified/>
-      <KV label="Phone"          value="+91 98xxx-xx210" verified/>
-      <KV label="Date of birth"  value="14 Jun 1988"/>
-      <KV label="Address"        value="Chennai, Tamil Nadu, 600119"/>
+      <KV label="Full name"      value={(window._me && window._me.name) || "Not set"}/>
+      <KV label="Email"          value={(window._me && window._me.email) || "—"} verified={!!(window._me && window._me.is_verified)}/>
+      <KV label="Phone"          value="Not set"/>
+      <KV label="Date of birth"  value="Not set"/>
+      <KV label="Address"        value="Not set"/>
     </Card>
     <Card title="Account limits">
       <KV label="Starting capital"   value="₹45,00,000"/>
@@ -114,10 +119,10 @@ const OverviewTab = () => (
       <KV label="Theme"             value="Auto (system)"/>
     </Card>
     <Card title="Tax identifiers">
-      <KV label="PAN"               value="AHXPS••••F" mono/>
-      <KV label="Aadhaar"           value="xxxx-xxxx-8821" mono/>
+      <KV label="PAN"               value="Not set" mono/>
+      <KV label="Aadhaar"           value="Not set" mono/>
       <KV label="GSTIN"             value="Not applicable"/>
-      <KV label="Demat (NSDL)"      value="IN301774••••9832" mono/>
+      <KV label="Demat (NSDL)"      value="Not set" mono/>
       <KV label="Jurisdiction"      value="India · resident"/>
     </Card>
   </div>
