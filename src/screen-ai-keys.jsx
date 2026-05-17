@@ -88,7 +88,7 @@ const AiKeysScreen = () => {
       }
       // T99-H9: fetch saved AI mode
       try {
-        const pr = await fetch('/api/me/preferences', { credentials: 'include' }).then(r => r.json()).catch(() => null);
+        const pr = await fetch('/api/v1/me/preferences', { credentials: 'include' }).then(r => r.json()).catch(() => null);
         if (pr && pr.ok && pr.preferences) {
           setAiMode(pr.preferences.ai_mode || 'balanced');
           setRedactPii(pr.preferences.redact_pii !== 0);
@@ -109,9 +109,9 @@ const AiKeysScreen = () => {
   const saveMode = async (m) => {
     setAiMode(m);
     try {
-      const cur = await fetch('/api/me/preferences', { credentials: 'include' }).then(r => r.json()).catch(() => null);
+      const cur = await fetch('/api/v1/me/preferences', { credentials: 'include' }).then(r => r.json()).catch(() => null);
       const body = { ...(cur && cur.preferences ? cur.preferences : {}), ai_mode: m };
-      const r = await fetch('/api/me/preferences', { method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
+      const r = await fetch('/api/v1/me/preferences', { method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
       if (r.ok) { flash(`AI mode: ${m}`); refresh(); }
       else flash(r.reason || 'mode_save_failed', false);
     } catch (e) { flash('mode_save_failed: ' + e.message, false); }
@@ -121,9 +121,9 @@ const AiKeysScreen = () => {
   const saveRedact = async (v) => {
     setRedactPii(v);
     try {
-      const cur = await fetch('/api/me/preferences', { credentials: 'include' }).then(r => r.json()).catch(() => null);
+      const cur = await fetch('/api/v1/me/preferences', { credentials: 'include' }).then(r => r.json()).catch(() => null);
       const body = { ...(cur && cur.preferences ? cur.preferences : {}), redact_pii: v ? 1 : 0 };
-      const r = await fetch('/api/me/preferences', { method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
+      const r = await fetch('/api/v1/me/preferences', { method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
       if (r.ok) flash(v ? 'Privacy: rupee values redacted before sending to AI' : 'Privacy: rupee values sent as-is');
       else flash(r.reason || 'redact_save_failed', false);
     } catch (e) { flash('redact_save_failed: ' + e.message, false); }
@@ -150,9 +150,9 @@ const AiKeysScreen = () => {
     if (!Number.isFinite(n) || n < 0 || n > 5000) { flash('Cap must be ₹0–5000', false); return; }
     try {
       // Pull current prefs so we don't overwrite other fields with nulls
-      const cur = await fetch('/api/me/preferences', { credentials: 'include' }).then(r => r.json()).catch(() => null);
+      const cur = await fetch('/api/v1/me/preferences', { credentials: 'include' }).then(r => r.json()).catch(() => null);
       const body = { ...(cur && cur.preferences ? cur.preferences : {}), daily_ai_cap_inr: n };
-      const r = await fetch('/api/me/preferences', {
+      const r = await fetch('/api/v1/me/preferences', {
         method: 'PUT', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
