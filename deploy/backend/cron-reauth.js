@@ -102,6 +102,11 @@ function createCronReauth({ db, vault, audit, postTelegram }) {
     start() {
       if (_timer) return;
       _timer = setInterval(checkAndMaybeRun, CHECK_INTERVAL_MS);
+      // T99-T48: .unref() so SIGTERM (docker compose down) can exit promptly
+      // instead of waiting for the next CHECK_INTERVAL_MS fire. Without this,
+      // every deploy waits the full grace period before docker SIGKILLs.
+      // The HTTP server keeps the event loop alive on its own.
+      if (_timer.unref) _timer.unref();
       console.log(`[cron-reauth] scheduler started -- daily 05:45 IST (7 days/week)`);
     },
     stop() { if (_timer) { clearInterval(_timer); _timer = null; } },
