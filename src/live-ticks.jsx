@@ -167,6 +167,31 @@
         window.dispatchEvent(new CustomEvent("upstream-state", { detail: state().upstream }));
         return;
       }
+      if (msg.type === "order_update" && msg.orderId) {
+        // T99-T61: real-time Kite order postback. Backend HMAC-verified it
+        // already (line 1019 of server.js); we just store + fan out. UI
+        // consumers (Orders screen, toast notifier) can subscribe via the
+        // 'order-update' CustomEvent or poll window.LiveTicks.state().orderUpdates.
+        const entry = {
+          orderId:   msg.orderId,
+          status:    msg.status,
+          symbol:    msg.symbol,
+          exchange:  msg.exchange,
+          side:      msg.side,
+          quantity:  msg.quantity,
+          filledQty: msg.filledQty,
+          pendingQty: msg.pendingQty,
+          price:     msg.price,
+          avgPrice:  msg.avgPrice,
+          statusMsg: msg.statusMsg,
+          ts:        msg.ts || Date.now(),
+        };
+        orderUpdates.push(entry);
+        if (orderUpdates.length > ORDER_UPDATES_MAX) orderUpdates.shift();
+        try { console.log("[live-ticks] order_update:", entry.status, entry.symbol, entry.orderId); } catch {}
+        window.dispatchEvent(new CustomEvent("order-update", { detail: entry }));
+        return;
+      }
       if (msg.type === "subscribed") {
         // backend ack — log so it's visible in DevTools
         try { console.log("[live-ticks] subscribed:", msg); } catch {}
