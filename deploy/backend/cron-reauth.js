@@ -102,17 +102,35 @@ function createCronReauth({ db, vault, audit, postTelegram, broker, sessions }) 
         const elapsed = Date.now() - t0;
         // T99-T107: include the e.message detail in the persisted reason so a
         // failed exchange_failed/daemon_error/persist_failed gives ops something
-        // diagnosable without redeploying. db.cron.addHistory caps reason at
-        // 200 chars (deploy/backend/db.js); we slice here defensively.
+        // diagnosable without redeploying.
+        // T99-T113: also include kite_error_type when Kite REST rejected, and
+        // per-step timings. The audit event carries the full structured detail.
         const reasonForLog = result.ok ? null : (result.detail
           ? String(result.reason || 'unknown') + ': ' + String(result.detail).slice(0, 160)
           : String(result.reason || 'unknown'));
         try { db.cron.addHistory(row.user_id, row.broker, !!result.ok, reasonForLog, elapsed); } catch (_) {}
-        // Also surface to stdout + audit so the failure shows up in docker logs
-        // and /api/audit immediately, not just in cron_reauth_history.
         if (!result.ok) {
           console.error('[cron-reauth] user', row.user_id, 'failed:', reasonForLog);
-          try { audit && audit('cron.reauth.failed', { user_id: row.user_id, broker: row.broker, reason: result.reason, detail: result.detail }); } catch (_) {}
+          if (result.timings) {
+            console.error('[cron-reauth] timings (ms):', JSON.stringify(result.timings));
+          }
+          if (result.kite) {
+            // Full Kite response — invaluable for diagnosing exchange_failed
+            // (e.g. token_exception vs input_exception vs network_exception).
+            console.error('[cron-reauth] kite response:', JSON.stringify(result.kite));
+          }
+          try {
+            audit && audit('cron.reauth.failed', {
+              user_id: row.user_id, broker: row.broker,
+              reason: result.reason, detail: result.detail,
+              timings: result.timings || null,
+              kite: result.kite || null,
+            });
+          } catch (_) {}
+        } else if (result.timings) {
+          // On success, log timings at info level so weekly reports can spot
+          // trend regressions (e.g. daemon slowing down before it breaks).
+          console.log('[cron-reauth] user', row.user_id, 'ok timings (ms):', JSON.stringify(result.timings));
         }
         // T99-T106: on success, also resume the global broker if it stalled
         // on the previous day's expired token. No-op if broker not provided

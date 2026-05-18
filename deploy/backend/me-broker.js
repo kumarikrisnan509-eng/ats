@@ -72,11 +72,16 @@ function callDaemon(payload, timeoutMs = 30000) {
 }
 
 // Exchange a request_token for an access_token via Kite REST.
+// T99-T113: returns { ok, accessToken | error } shape instead of throwing
+// on Kite-rejection, so callers can read Kite's full structured response
+// (error_type, message, status, http_status) for diagnostics. Network /
+// timeout errors still throw.
 async function exchangeRequestToken({ apiKey, apiSecret, requestToken }) {
   const crypto = require('crypto');
   const checksum = crypto.createHash('sha256').update(apiKey + requestToken + apiSecret).digest('hex');
   const body = new URLSearchParams({ api_key: apiKey, request_token: requestToken, checksum }).toString();
   const https = require('https');
+  const t0 = Date.now();
   return new Promise((resolve, reject) => {
     const req = https.request({
       hostname: 'api.kite.trade',
@@ -92,14 +97,26 @@ async function exchangeRequestToken({ apiKey, apiSecret, requestToken }) {
       let buf = '';
       res.on('data', (d) => buf += d);
       res.on('end', () => {
-        try {
-          const j = JSON.parse(buf);
-          if (j.status === 'success' && j.data && j.data.access_token) resolve(j.data.access_token);
-          else reject(new Error(j.message || 'kite_session_failed'));
-        } catch (e) { reject(new Error('kite_bad_response: ' + buf.slice(0, 100))); }
+        const httpStatus = res.statusCode;
+        const elapsedMs = Date.now() - t0;
+        let parsed = null;
+        try { parsed = JSON.parse(buf); } catch (_) {}
+        if (parsed && parsed.status === 'success' && parsed.data && parsed.data.access_token) {
+          resolve({ ok: true, accessToken: parsed.data.access_token, elapsedMs, httpStatus });
+        } else {
+          // Surface full Kite structured response so the caller can log/persist it.
+          resolve({
+            ok: false,
+            elapsedMs, httpStatus,
+            kiteStatus:    parsed && parsed.status    || null,
+            kiteErrorType: parsed && parsed.error_type || null,
+            kiteMessage:   parsed && parsed.message    || null,
+            kiteRawBody:   buf.slice(0, 500),
+          });
+        }
       });
     });
-    req.on('error', reject);
+    req.on('error', (e) => reject(new Error('kite_network_error: ' + e.message)));
     req.on('timeout', () => { req.destroy(); reject(new Error('kite_timeout')); });
     req.write(body);
     req.end();
@@ -339,39 +356,66 @@ function createMeBrokerRouter({ db, vault, requireAuth }) {
 }
 
 async function runAutoReauth({ db, vault, userId, brokerRow }) {
+  // T99-T113: per-step timing + full Kite error capture. The timings (in ms)
+  // and Kite's structured error are included in result.timings/result.kite
+  // so cron-reauth can persist them and ops can diagnose without redeploying.
+  const timings = { unseal_ms: 0, daemon_ms: 0, exchange_ms: 0, persist_ms: 0 };
   let apiKey, apiSecret, totpSeed, password;
+  const tUnseal = Date.now();
   try {
     apiKey   = await vault.open(brokerRow.api_key);
     apiSecret = await vault.open(brokerRow.refresh_token);
     totpSeed = await vault.open(brokerRow.totp_seed);
     password = await vault.open(brokerRow.feed_token);
   } catch (e) {
-    return { ok: false, reason: 'unseal_failed', detail: e.message };
+    return { ok: false, reason: 'unseal_failed', detail: e.message, timings };
   }
+  timings.unseal_ms = Date.now() - tUnseal;
   if (!apiKey || !apiSecret || !totpSeed || !password) {
-    return { ok: false, reason: 'missing_credential' };
+    return { ok: false, reason: 'missing_credential', timings };
   }
 
+  const tDaemon = Date.now();
   const daemonResp = await callDaemon({
     api_key: apiKey,
     broker_user_id: brokerRow.broker_user_id,
     password, totp_seed: totpSeed,
   });
+  timings.daemon_ms = Date.now() - tDaemon;
   if (!daemonResp.ok) {
     try { db.brokers.recordTest(userId, brokerRow.id, false, daemonResp.reason || 'daemon_failed'); } catch (_) {}
-    return daemonResp;
+    return { ...daemonResp, timings };
   }
   const requestToken = daemonResp.request_token;
-  if (!requestToken) return { ok: false, reason: 'daemon_no_request_token' };
+  if (!requestToken) return { ok: false, reason: 'daemon_no_request_token', timings };
 
-  let accessToken;
+  let exchangeResp;
+  const tExchange = Date.now();
   try {
-    accessToken = await exchangeRequestToken({ apiKey, apiSecret, requestToken });
+    exchangeResp = await exchangeRequestToken({ apiKey, apiSecret, requestToken });
   } catch (e) {
+    timings.exchange_ms = Date.now() - tExchange;
+    // Network / timeout level errors throw.
     try { db.brokers.recordTest(userId, brokerRow.id, false, 'exchange_failed: ' + e.message); } catch (_) {}
-    return { ok: false, reason: 'exchange_failed', detail: e.message };
+    return { ok: false, reason: 'exchange_failed', detail: e.message, timings };
   }
+  timings.exchange_ms = Date.now() - tExchange;
+  if (!exchangeResp.ok) {
+    // Kite rejected — surface full structured detail.
+    const kite = {
+      http_status:    exchangeResp.httpStatus,
+      kite_status:    exchangeResp.kiteStatus,
+      kite_error_type: exchangeResp.kiteErrorType,
+      kite_message:   exchangeResp.kiteMessage,
+      kite_raw_body:  exchangeResp.kiteRawBody,
+    };
+    const summary = `kite_${exchangeResp.kiteErrorType || 'unknown'}: ${exchangeResp.kiteMessage || 'no message'}`;
+    try { db.brokers.recordTest(userId, brokerRow.id, false, 'exchange_failed: ' + summary); } catch (_) {}
+    return { ok: false, reason: 'exchange_failed', detail: summary, kite, timings };
+  }
+  const accessToken = exchangeResp.accessToken;
 
+  const tPersist = Date.now();
   try {
     const sealed = await vault.seal(accessToken);
     const issuedAt = new Date().toISOString();
@@ -379,9 +423,11 @@ async function runAutoReauth({ db, vault, userId, brokerRow }) {
     db.brokers.updateTokens(brokerRow.id, userId, sealed, issuedAt, expiresAt);
     db.brokers.recordTest(userId, brokerRow.id, true, null);
     try { require('./broker-resolver').invalidate(userId); } catch (_) {}
-    return { ok: true, issuedAt, expiresAt };
+    timings.persist_ms = Date.now() - tPersist;
+    return { ok: true, issuedAt, expiresAt, timings };
   } catch (e) {
-    return { ok: false, reason: 'persist_failed', detail: e.message };
+    timings.persist_ms = Date.now() - tPersist;
+    return { ok: false, reason: 'persist_failed', detail: e.message, timings };
   }
 }
 
