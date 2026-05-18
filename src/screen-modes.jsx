@@ -22,11 +22,16 @@ const ModesScreen = () => {
   const capitalFor = (id) => (TOTAL_CAPITAL * state[id].capitalPct) / 100;
 
   // Simulated per-mode runtime state (would come from backend)
+  // T99-T111: zeroed out per-mode RUNTIME demo numbers. T-82 banner already
+  // discloses these are demo. Per-mode aggregation backend not wired —
+  // showing zeros instead of fake non-zero values aligns the data with the
+  // banner's disclosure. When the per-mode endpoint ships, switch this back
+  // to a fetched object.
   const RUNTIME = {
-    intraday: { openPositions: 3, utilized: 285000, todayPnl:  12840, strategiesRunning: 3 },
-    swing:    { openPositions: 7, utilized: 1124000, todayPnl:  8420, strategiesRunning: 2 },
-    options:  { openPositions: 2, utilized: 420000, todayPnl: -4210, strategiesRunning: 1 },
-    futures:  { openPositions: 0, utilized: 0,      todayPnl:     0, strategiesRunning: 0 },
+    intraday: { openPositions: 0, utilized: 0, todayPnl: 0, strategiesRunning: 0 },
+    swing:    { openPositions: 0, utilized: 0, todayPnl: 0, strategiesRunning: 0 },
+    options:  { openPositions: 0, utilized: 0, todayPnl: 0, strategiesRunning: 0 },
+    futures:  { openPositions: 0, utilized: 0, todayPnl: 0, strategiesRunning: 0 },
   };
 
   const [detailMode, setDetailMode] = useState("intraday");
