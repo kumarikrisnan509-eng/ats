@@ -124,19 +124,19 @@ jobs:
             echo "no test script defined -- skipping"
           fi
 
-      - name: Playwright smoke tests (optional, against live URL)
+      - name: Playwright smoke tests (blocking, against live URL)
         # Only run on push to main; PRs skip to keep CI fast.
         if: github.event_name == 'push'
         working-directory: test-e2e
-        continue-on-error: true
+        # T-175: continue-on-error REMOVED. All 80 specs green as of T-174,
+        # so we now block the deploy if any E2E test regresses. If a real
+        # regression ships, the deploy step won't run and the VM keeps the
+        # last good image. To re-quarantine a flake, prefer fixing the spec
+        # over re-adding continue-on-error.
         run: |
           if [ -f package.json ]; then
             npm install --silent --no-audit --no-fund
             npx playwright install --with-deps chromium
-            # T-169: do not swallow failures with `|| echo`. The step is still
-            # non-blocking (continue-on-error above) but failures now mark red
-            # in the Actions UI so they are visible. 10 specs are known-stale
-            # as of T-168 -- see deploy/docs/TESTING-PLAN.md "P0 #1 follow-up".
             npx playwright test --reporter=list
           fi
 
