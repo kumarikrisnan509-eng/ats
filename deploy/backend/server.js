@@ -4567,9 +4567,19 @@ async function startBrokerFanout() {
     // 2. Drive paper trading fills (synchronous, debounced persist).
     try { if (paper) paper.onTick(tick); } catch (e) { /* keep loop alive */ }
     // 3. Fan out to /ws clients.
+    //
+    // T-131 (Tier 75 Phase 2): per-WS tick filtering. Each client carries a
+    // ws.symbolSet (Set<string>) built on connect from DEFAULT_SYMBOLS plus
+    // their persisted watchlist, mutated by subscribe/unsubscribe messages.
+    // If a client has no symbolSet (defensive, shouldn't happen) they fall
+    // through to the legacy "everyone gets every tick" behavior so we never
+    // drop traffic by accident.
+    const sym = tick && tick.symbol;
     const payload = JSON.stringify({ type: 'tick', ...tick });
     for (const ws of wsClients) {
-      if (ws.readyState === 1) ws.send(payload);
+      if (ws.readyState !== 1) continue;
+      if (ws.symbolSet && sym && !ws.symbolSet.has(sym)) continue;
+      ws.send(payload);
     }
   });
 }
@@ -4707,8 +4717,27 @@ wss.on('connection', (ws, req) => {
   });
 
   // Build the effective subscribe set: defaults + persisted watchlist (deduped).
-  const userSaved = watchlist ? watchlist.list() : [];
+  //
+  // T-131 (Tier 75 Phase 2): when ws.userId is set (authed via T-130), prefer
+  // the user's DB-backed watchlist (db.watchlist.list(userId)) over the legacy
+  // file-singleton. Anonymous WS clients still see the singleton list so the
+  // pre-login app shell continues to render the default-strip.
+  let userSaved = [];
+  try {
+    if (ws.userId && db && db.watchlist && typeof db.watchlist.list === 'function') {
+      const rows = db.watchlist.list(ws.userId) || [];
+      userSaved = rows.map(r => (r && r.symbol) ? r.symbol : (typeof r === 'string' ? r : null)).filter(Boolean);
+    } else if (watchlist) {
+      userSaved = watchlist.list() || [];
+    }
+  } catch (e) {
+    console.warn('[ws] watchlist load error (falling back to defaults):', e && e.message);
+    userSaved = [];
+  }
   const merged = Array.from(new Set([...DEFAULT_SYMBOLS, ...userSaved]));
+
+  // T-131: stamp the per-WS symbol set used by the fanout loop.
+  ws.symbolSet = new Set(merged);
 
   ws.send(JSON.stringify({
     type: 'welcome',
@@ -4761,16 +4790,37 @@ wss.on('connection', (ws, req) => {
 
     if (msg.type === 'subscribe' && Array.isArray(msg.symbols)) {
       const symbols = msg.symbols.filter(s => typeof s === 'string').slice(0, 200);
+      // T-131: extend this client's symbol set so the fanout loop forwards
+      // these ticks even before upstream confirms. ensureSubscribed below
+      // makes sure upstream is also subscribed (idempotent).
+      if (ws.symbolSet) {
+        for (const s of symbols) ws.symbolSet.add(s);
+      }
       if (typeof broker.ensureSubscribed === 'function') {
         broker.ensureSubscribed(symbols)
           .then((result) => {
-            audit('ws.subscribe', { count: symbols.length, ...result });
+            audit('ws.subscribe', { count: symbols.length, userId: ws.userId, ...result });
             ws.send(JSON.stringify({ type: 'subscribed', symbols, ...result }));
           })
           .catch((err) => {
             ws.send(JSON.stringify({ type: 'error', reason: err.message }));
           });
+      } else {
+        ws.send(JSON.stringify({ type: 'subscribed', symbols, note: 'symbolSet updated locally; broker has no ensureSubscribed' }));
       }
+      return;
+    }
+
+    // T-131: unsubscribe — shrink this client's symbol set. We deliberately
+    // do NOT unsubscribe upstream (other clients may still want these ticks);
+    // the per-WS filter handles isolation at zero upstream cost.
+    if (msg.type === 'unsubscribe' && Array.isArray(msg.symbols)) {
+      const symbols = msg.symbols.filter(s => typeof s === 'string').slice(0, 200);
+      if (ws.symbolSet) {
+        for (const s of symbols) ws.symbolSet.delete(s);
+      }
+      audit('ws.unsubscribe', { count: symbols.length, userId: ws.userId });
+      ws.send(JSON.stringify({ type: 'unsubscribed', symbols }));
       return;
     }
   });
