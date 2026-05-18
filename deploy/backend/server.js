@@ -1893,12 +1893,24 @@ app.post('/api/me/paper/promote-check', (req, res) => {
         : { pass: false, reason: 'telegram_not_configured', detail: 'Enable Telegram alerts in Settings so the 2FA confirm-before-trade challenge can reach you.' };
     } catch (_) {}
 
-    const can_promote = winRateGate.pass && surveillanceGate.pass && twofaGate.pass;
+    // === Gate 4 (T99-T126 / v11-E5): fundamental blackout — no live promote
+    // if the symbol has a quarterly/annual results announcement within ±3 days.
+    // Mirrors the E3 scanner gate (T-125). Skipped if no symbol given (strategy-
+    // wide promote applies to many symbols — caller should re-run per symbol).
+    let earningsGate = { pass: true, reason: 'no_symbol_check' };
+    if (symbol && _earningsCal && typeof _earningsCal.inResultsBlackout === 'function') {
+      const v = _earningsCal.inResultsBlackout(symbol, { windowDays: 3 });
+      earningsGate = v
+        ? { pass: false, reason: 'results_blackout', days_until: v.daysUntil, event_date: v.eventDate, detail: `${symbol} has results in ${v.daysUntil}d (${v.eventDate}). Promote after the announcement to avoid IV-crush + gap risk.` }
+        : { pass: true, reason: 'no_event_in_window' };
+    }
+
+    const can_promote = winRateGate.pass && surveillanceGate.pass && twofaGate.pass && earningsGate.pass;
     res.json({
       ok: true,
       can_promote,
       strategy, symbol: symbol || null,
-      gates: { win_rate: winRateGate, surveillance: surveillanceGate, twofa: twofaGate },
+      gates: { win_rate: winRateGate, surveillance: surveillanceGate, twofa: twofaGate, earnings: earningsGate },
       window: '30d',
       ts: new Date().toISOString(),
     });
