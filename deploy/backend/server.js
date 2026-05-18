@@ -3656,6 +3656,35 @@ const _zerodhaCallback = async (req, res) => {
         userId: session.userId,
         issuedAt: new Date().toISOString(),
       });
+      // T99-T118: also update broker_accounts so cron-reauth's
+      // _waitForCallbackPath (T-117) can detect this success. Previously the
+      // global-flow callback only wrote to in-memory broker + file, leaving
+      // the DB row stale. cron's exchange then raced the consumed token and
+      // logged exchange_failed even though the broker was healthy.
+      try {
+        const userIds = sessions.listAllUserIds();
+        for (const uid of userIds) {
+          const numericUid = parseInt(uid, 10);
+          if (!Number.isFinite(numericUid)) continue;
+          const list = db.brokers.list(numericUid) || [];
+          const row = list.find(r => r.broker === 'zerodha' && r.is_default) ||
+                      list.find(r => r.broker === 'zerodha');
+          if (!row) continue;
+          const sealed = await vault.seal(session.accessToken);
+          const issuedAt = new Date().toISOString();
+          // Same expiry logic as runAutoReauth — Kite tokens valid until 06:00 IST next morning.
+          const now = new Date();
+          const expiresAt = new Date(now);
+          expiresAt.setUTCHours(0, 30, 0, 0); // 06:00 IST = 00:30 UTC
+          if (expiresAt < now) expiresAt.setUTCDate(expiresAt.getUTCDate() + 1);
+          db.brokers.updateTokens(row.id, numericUid, sealed, issuedAt, expiresAt.toISOString());
+          try { db.brokers.recordTest(numericUid, row.id, true, null); } catch (_) {}
+          try { _brokerResolver.invalidate(numericUid); } catch (_) {}
+          audit('zerodha.callback.db-sync', { userId: numericUid, brokerRowId: row.id });
+        }
+      } catch (e) {
+        console.error('[server] global-callback DB sync failed:', e && e.message);
+      }
       const sid = sessions.newSession(session.userId);
       setSessionCookie(res, sid);
       audit('zerodha.connected.global-via-stateless-callback', { userId: session.userId });
