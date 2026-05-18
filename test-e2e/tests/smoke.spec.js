@@ -42,7 +42,7 @@ test('app shell sidebar nav renders at #dashboard', async ({ page }) => {
   await page.goto('/#dashboard', { waitUntil: 'networkidle' });
   await page.waitForTimeout(800);
   await expect(page.locator('text=Paper trading').first()).toBeVisible({ timeout: 5000 });
-  await expect(page.locator('text=Settings').first()).toBeVisible();
+  await expect(page.locator('text=Dashboard').first()).toBeVisible();
 });
 
 test('/api/health returns 200', async ({ request }) => {

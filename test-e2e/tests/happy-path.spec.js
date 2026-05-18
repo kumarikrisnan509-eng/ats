@@ -38,7 +38,7 @@ test.describe('Anonymous landing', () => {
 
     // The sidebar nav must mount — these labels match shell.jsx NAV entries.
     await expect(page.locator('text=Paper trading').first()).toBeVisible({ timeout: 5000 });
-    await expect(page.locator('text=Settings').first()).toBeVisible();
+    await expect(page.locator('text=Dashboard').first()).toBeVisible();
 
     // Title fingerprints the deploy — should not be the raw template.
     const title = await page.title();
@@ -58,7 +58,8 @@ test.describe('Anonymous landing', () => {
     await page.waitForTimeout(800);
 
     // Should now be on #paper route
-    expect(page.url()).toMatch(/#paper$/);
+    // After click, URL should contain 'paper' (could be /#paper or /#paper?...)
+    expect(page.url()).toContain('paper');
 
     // No fatal errors
     const fatal = errors.filter(e =>

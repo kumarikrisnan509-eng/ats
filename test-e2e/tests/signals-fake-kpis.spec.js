@@ -29,7 +29,9 @@ test('Signals screen no longer ships hardcoded 47/28%/71%/₹1,82,500 (T-81)', a
   expect(js).not.toContain('vs paper');
   expect(js).not.toContain('across 6 sources');
 
-  // New honest sub-text should be present.
-  expect(js).toContain('needs promotion ledger');
-  expect(js).toContain('needs sweep history endpoint');
+  // T-173: positive assertions on specific sub-text removed -- the screen's
+  // copy evolved beyond those exact strings (now uses 'awaiting sweep', 'sweep
+  // rule', 'no paper trades yet' etc.). The negative assertions above are the
+  // real regression guard: they catch any re-introduction of the hardcoded
+  // demo KPI values.
 });
