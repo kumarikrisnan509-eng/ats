@@ -17,9 +17,19 @@
 'use strict';
 
 const INTER_USER_DELAY_MS = 5000;     // 5s between users -> stays under Kite rate limit
-const TARGET_HOUR_IST    = 5;         // 05:45 IST  (00:15 UTC)
-const TARGET_MINUTE_IST  = 45;
 const CHECK_INTERVAL_MS  = 60 * 1000; // every 1 minute
+
+// T99-T116: multi-window schedule. Three reauth attempts per day:
+//   - 05:45 IST: original — 15min before Kite's ~06:00 invalidation
+//   - 09:00 IST: market-open backup — for users who weren't reauth'd by 05:45
+//   - 13:00 IST: mid-day catch-up — last chance before the day ends
+// Each window is a 5-minute fire band. Windows after the first only fire
+// if today's token hasn't been rotated yet (issued_at < today's IST date).
+const REAUTH_WINDOWS = [
+  { hour: 5,  minute: 45, label: '05:45-IST' },
+  { hour: 9,  minute:  0, label: '09:00-IST' },
+  { hour: 13, minute:  0, label: '13:00-IST' },
+];
 
 // T99-T114: retry backoff schedule for the daily reauth window.
 // If the 05:45 attempt fails, retry at +15min, +30min, +60min, +2h, +4h.
@@ -215,6 +225,34 @@ function createCronReauth({ db, vault, audit, postTelegram, broker, sessions }) 
     await attempt();
   }
 
+  // T99-T116: per-window dedup. Each window can only fire once per day,
+  // but DIFFERENT windows on the SAME day can both fire if earlier ones
+  // failed. _lastRunWindowKey is "YYYY-MM-DD::window-label".
+  let _lastRunWindowKey = null;
+
+  // T99-T116: skip the backup windows (09:00 / 13:00) when today's token
+  // has already been rotated successfully. Reads broker_accounts and
+  // compares issued_at against today's IST date.
+  function _isTodayAlreadyRotated() {
+    try {
+      const rows = db.brokers.listEligible();
+      const t = nowIst();
+      const todayKey = t.dateKey;
+      for (const row of rows) {
+        if (!row.issued_at) return false;
+        // Convert ISO -> IST date string.
+        const issued = new Date(row.issued_at);
+        const istMs = issued.getTime() + (5.5 * 60 * 60 * 1000);
+        const istDate = new Date(istMs);
+        const issuedKey = `${istDate.getUTCFullYear()}-${String(istDate.getUTCMonth()+1).padStart(2,'0')}-${String(istDate.getUTCDate()).padStart(2,'0')}`;
+        if (issuedKey !== todayKey) return false;
+      }
+      return rows.length > 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
   function checkAndMaybeRun() {
     const t = nowIst();
     // Run 7 days/week: Zerodha invalidates the access token daily at ~06:00 IST regardless
@@ -222,12 +260,29 @@ function createCronReauth({ db, vault, audit, postTelegram, broker, sessions }) 
     // viewable + paper trades work + the Brokers card never shows 'expired' from
     // Saturday morning onwards. ~30 seconds of Playwright on the OCI VM. No Kite
     // rate-limit concerns at once-per-day from a stable IP.
-    // Hit the window 05:45-05:50 IST exactly once per day.
-    const inWindow = (t.hour === TARGET_HOUR_IST && t.minute >= TARGET_MINUTE_IST && t.minute < TARGET_MINUTE_IST + 5);
-    if (!inWindow) return;
-    if (_lastRunDateKey === t.dateKey) return;
-    _lastRunDateKey = t.dateKey;
-    runWithRetries('schedule').catch(e => console.error('[cron-reauth] error:', e.message));
+    //
+    // T99-T116: three reauth windows per day. Check each one. The 05:45 window
+    // always fires. The 09:00 + 13:00 windows skip if today's tokens have
+    // already been rotated successfully (issued_at is today in IST).
+    for (const w of REAUTH_WINDOWS) {
+      const inWindow = (t.hour === w.hour && t.minute >= w.minute && t.minute < w.minute + 5);
+      if (!inWindow) continue;
+      const windowKey = `${t.dateKey}::${w.label}`;
+      if (_lastRunWindowKey === windowKey) return; // already fired this window today
+      // Skip backup windows if today's tokens are already fresh.
+      const isPrimaryWindow = (w.label === '05:45-IST');
+      if (!isPrimaryWindow && _isTodayAlreadyRotated()) {
+        _lastRunWindowKey = windowKey; // record to avoid re-checking
+        console.log(`[cron-reauth] window ${w.label} skipped — tokens already rotated today`);
+        return;
+      }
+      _lastRunWindowKey = windowKey;
+      // _lastRunDateKey kept for backward-compat (some places still read it).
+      _lastRunDateKey = t.dateKey;
+      console.log(`[cron-reauth] window ${w.label} firing`);
+      runWithRetries('schedule-' + w.label).catch(e => console.error('[cron-reauth] error:', e.message));
+      return;
+    }
   }
 
   return {
@@ -239,7 +294,7 @@ function createCronReauth({ db, vault, audit, postTelegram, broker, sessions }) 
       // every deploy waits the full grace period before docker SIGKILLs.
       // The HTTP server keeps the event loop alive on its own.
       if (_timer.unref) _timer.unref();
-      console.log(`[cron-reauth] scheduler started -- daily 05:45 IST (7 days/week)`);
+      console.log(`[cron-reauth] scheduler started -- 3 daily windows: ${REAUTH_WINDOWS.map(w => `${String(w.hour).padStart(2,'0')}:${String(w.minute).padStart(2,'0')} IST`).join(' / ')} (7 days/week)`);
     },
     stop() { if (_timer) { clearInterval(_timer); _timer = null; } _cancelRetries(); },
     runNow: () => runWithRetries('manual'),
