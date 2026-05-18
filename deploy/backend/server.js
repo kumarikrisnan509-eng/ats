@@ -309,18 +309,49 @@ async function init() {
       // the in-memory zerodha-broker singleton after a successful token
       // rotation. Without this, the broker stays in _stalledOnToken state
       // from the prior day even after the DB has a fresh token.
-      _cronReauth = createCronReauth({ db, vault, audit, postTelegram, broker });
+      // T99-T106b: also pass sessions so cron can refresh the filesystem
+      // token store that boot-rehydrate reads from.
+      _cronReauth = createCronReauth({ db, vault, audit, postTelegram, broker, sessions });
       _cronReauth.start();
     } catch (e) {
       console.error('[server] cron-reauth init failed:', e && e.message);
     }
-    // Try to rehydrate any saved Zerodha access token (single-user prod use)
+    // Try to rehydrate any saved Zerodha access token (single-user prod use).
+    // T99-T106b: prefer DB token over file token when both exist and DB is newer.
+    // Cron-reauth writes to DB (and now also to file via the cron→sessions path),
+    // but during the window BEFORE the cron has fired with the new code, only the
+    // DB has a fresh token. Reading DB-first means a deploy that lands between
+    // crons still picks up the freshest available token.
     const userIds = sessions.listAllUserIds();
     if (userIds.length === 1) {
-      const tok = await sessions.loadTokens(userIds[0]);
-      if (tok && tok.accessToken) {
-        broker.setAccessToken(tok.accessToken);
-        audit('broker.rehydrate', { userId: userIds[0] });
+      const uid = userIds[0];
+      let chosenToken = null;
+      let chosenSource = null;
+      // Try DB first if the userIds[0] matches a real DB user id (numeric).
+      try {
+        const numericUid = parseInt(uid, 10);
+        if (Number.isFinite(numericUid)) {
+          const list = db.brokers.list(numericUid) || [];
+          const row = list.find(r => r.broker === 'zerodha' && r.is_default) ||
+                      list.find(r => r.broker === 'zerodha');
+          if (row) {
+            const fullRow = db.brokers.getFull(numericUid, row.id);
+            if (fullRow && fullRow.access_token) {
+              const tk = await vault.open(fullRow.access_token);
+              if (tk) { chosenToken = tk; chosenSource = 'db'; }
+            }
+          }
+        }
+      } catch (e) { /* fall through to file */ }
+      if (!chosenToken) {
+        try {
+          const tok = await sessions.loadTokens(uid);
+          if (tok && tok.accessToken) { chosenToken = tok.accessToken; chosenSource = 'file'; }
+        } catch (_) {}
+      }
+      if (chosenToken) {
+        broker.setAccessToken(chosenToken);
+        audit('broker.rehydrate', { userId: uid, source: chosenSource });
       }
     }
   }

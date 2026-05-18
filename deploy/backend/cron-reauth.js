@@ -34,7 +34,7 @@ function nowIst() {
   };
 }
 
-function createCronReauth({ db, vault, audit, postTelegram, broker }) {
+function createCronReauth({ db, vault, audit, postTelegram, broker, sessions }) {
   let _timer = null;
   let _lastRunDateKey = null;  // YYYY-MM-DD of last successful trigger -- prevents double-fire
   let _inFlight = false;
@@ -63,6 +63,21 @@ function createCronReauth({ db, vault, audit, postTelegram, broker }) {
       if (!accessToken) return;
       broker.setAccessToken(accessToken);
       try { audit && audit('cron.reauth.broker-rehydrate', { userId }); } catch (_) {}
+      // T99-T106b: ALSO refresh the file-based token store. The boot rehydrate
+      // path (server.js init()) reads from sessions.loadTokens (filesystem),
+      // not from DB. Without this update, a container restart between cron
+      // runs would load the stale pre-cron token and the broker would re-stall.
+      if (sessions && typeof sessions.saveTokens === 'function') {
+        try {
+          await sessions.saveTokens(userId, {
+            accessToken,
+            userId: String(userId),
+            issuedAt: fullRow.issued_at || new Date().toISOString(),
+          });
+        } catch (e) {
+          console.error('[cron-reauth] sessions.saveTokens failed:', e && e.message);
+        }
+      }
     } catch (e) {
       console.error('[cron-reauth] global broker rehydrate failed:', e && e.message);
     }
