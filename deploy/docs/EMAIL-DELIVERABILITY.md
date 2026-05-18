@@ -79,18 +79,60 @@ The `rua=mailto:` address gets weekly aggregate XML reports — set up an email 
 
 ## How ATS sends email today
 
-The backend currently uses [email-alerts.js](../backend/email-alerts.js) — a stub that logs to console only. Wiring up a real provider (SendGrid free tier, AWS SES, or Resend) is a separate operator task. Whichever you pick, set:
+`deploy/backend/email-alerts.js` supports three transport modes (T-165):
 
-```
-# /etc/ats/backend.env on the VM
-SMTP_HOST=...           # e.g. smtp.sendgrid.net
-SMTP_PORT=587
-SMTP_USER=...
-SMTP_PASS=...           # ← never commit, set on the VM via setup-all.sh
-SMTP_FROM=no-reply@rajasekarselvam.com
+| `EMAIL_PROVIDER=` | Transport | When to pick |
+|---|---|---|
+| `smtp` | Real SMTP via nodemailer | Hostinger / Gmail / any real mail server |
+| `resend` | Resend HTTP API | Token-only setup, generous free tier |
+| `brevo` | Brevo HTTP API | Token-only, free up to 300/day |
+| `none` | Disabled (returns ok:false) | Local dev |
+
+### Hostinger SMTP setup (recommended for rajasekarselvam.com)
+
+You've already created `support@rajasekarselvam.com` in Hostinger hPanel. On the VM, **paste this block into `/etc/ats/backend.env`** (substituting the password you set in Hostinger — NEVER commit it):
+
+```sh
+EMAIL_PROVIDER=smtp
+EMAIL_FROM=support@rajasekarselvam.com
+EMAIL_TO=support@rajasekarselvam.com   # default recipient when no `to` field
+
+SMTP_HOST=smtp.hostinger.com
+SMTP_PORT=465                          # SSL. Use 587 for STARTTLS instead.
+SMTP_USER=support@rajasekarselvam.com  # full email, not just username
+SMTP_PASS=PASTE_YOUR_HOSTINGER_PASSWORD_HERE
 ```
 
-Then restart the container. `notify.js` already gracefully degrades if SMTP isn't configured (mirrors the Telegram `ENABLED` pattern from T-153/T-154).
+Then restart the container so it re-reads the env file:
+
+```sh
+sudo systemctl restart ats   # or `docker compose restart ats-backend`
+```
+
+### Verify it works
+
+```sh
+curl -s http://127.0.0.1:8080/api/admin/email-status   -H "X-ATS-Internal: 1" | jq
+```
+
+Expected: `enabled:true, provider:'smtp', smtp:{host:'smtp.hostinger.com', port:465, user:'support@…', passConfigured:true}`. If `passConfigured:false` you forgot to set `SMTP_PASS`.
+
+Then test-send:
+```sh
+curl -s -X POST http://127.0.0.1:8080/api/admin/email-test   -H "X-ATS-Internal: 1"   -d '{"to":"YOUR_PERSONAL_EMAIL","subject":"ATS test","text":"hello from rajasekarselvam.com"}'
+```
+
+### Security boundary
+
+`SMTP_PASS` lives ONLY in `/etc/ats/backend.env` on the VM (chmod 600, owned
+by root). It must NEVER appear in:
+- Any committed file in this repo
+- Any CI workflow log
+- Any commit message
+- Any GitHub secret (the VM env file is the single source of truth)
+
+If you ever need to rotate the password, change it in Hostinger hPanel and
+update the one line in backend.env on the VM. Nothing else touches it.
 
 ## Troubleshooting
 

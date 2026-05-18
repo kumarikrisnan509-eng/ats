@@ -3,18 +3,27 @@
 // Spec §0: "Alerts via Telegram, email, in-app, WhatsApp". Telegram is already
 // wired in notify.js. This module adds email as a parallel channel.
 //
-// We use Node's built-in HTTP-based providers via fetch (no nodemailer dep).
-// Two modes:
-//   1. SMTP via Brevo/Mailjet/Resend HTTP API (preferred -- token-only, no SMTP creds).
-//   2. SMTP via direct TCP (deferred to a later tier if needed; HTTP path covers most).
+// Three transport modes:
+//   1. HTTP API: Resend or Brevo (token-only, simplest; preferred when offered)
+//   2. SMTP (T-165): Hostinger, Gmail, any real SMTP server (nodemailer)
+//   3. none: disabled (returns ok:false reason:'disabled')
 //
-// Config (all via env):
-//   EMAIL_PROVIDER=resend      ('resend' | 'brevo' | 'none')
-//   EMAIL_API_KEY=<token>
-//   EMAIL_FROM=alerts@ats.local
+// Config (all via env, NEVER committed):
+//   EMAIL_PROVIDER=smtp        ('smtp' | 'resend' | 'brevo' | 'none')
+//   EMAIL_FROM=support@rajasekarselvam.com
 //   EMAIL_TO=user@example.com  (default recipient; can override per call)
 //
-// If EMAIL_API_KEY is unset, send() returns ok:false reason:'disabled'.
+//   --- if EMAIL_PROVIDER=resend or brevo ---
+//   EMAIL_API_KEY=<token>
+//
+//   --- if EMAIL_PROVIDER=smtp (T-165) ---
+//   SMTP_HOST=smtp.hostinger.com
+//   SMTP_PORT=465            (465 = SSL, 587 = STARTTLS)
+//   SMTP_USER=support@rajasekarselvam.com   (full email, not just username)
+//   SMTP_PASS=<set in /etc/ats/backend.env on the VM — never commit>
+//
+// Auth never appears in git: backend.env is operator-managed on the VM,
+// outside the repo. The container reads it via docker-compose env_file.
 
 class EmailAlerts {
   constructor({ audit } = {}) {
@@ -22,6 +31,14 @@ class EmailAlerts {
     this.apiKey   = process.env.EMAIL_API_KEY || '';
     this.from     = process.env.EMAIL_FROM    || 'alerts@ats.local';
     this.to       = process.env.EMAIL_TO      || '';
+    // T-165: SMTP transport (Hostinger / Gmail / generic). Lazy-loaded.
+    this.smtp = {
+      host: process.env.SMTP_HOST || '',
+      port: parseInt(process.env.SMTP_PORT || '465', 10),
+      user: process.env.SMTP_USER || '',
+      pass: process.env.SMTP_PASS || '',
+    };
+    this._transporter = null;   // nodemailer transport, created on first send
     this.audit    = audit || (() => {});
     this._sentToday = 0;
     this._resetAt   = this._tomorrowMs();
@@ -29,6 +46,9 @@ class EmailAlerts {
   }
 
   enabled() {
+    if (this.provider === 'smtp') {
+      return !!(this.smtp.host && this.smtp.user && this.smtp.pass);
+    }
     return this.provider !== 'none' && !!this.apiKey;
   }
 
@@ -38,6 +58,13 @@ class EmailAlerts {
       provider: this.provider,
       from: this.from,
       to: this.to,
+      // T-165: SMTP config (NEVER include pass)
+      smtp: this.provider === 'smtp' ? {
+        host: this.smtp.host,
+        port: this.smtp.port,
+        user: this.smtp.user,
+        passConfigured: !!this.smtp.pass,
+      } : null,
       sentToday: this._sentToday,
       dailyCap: this._maxDaily,
       dailyResetAt: new Date(this._resetAt).toISOString(),
@@ -111,6 +138,34 @@ class EmailAlerts {
         this._sentToday++;
         this.audit('email.sent', { provider: 'brevo', to: recipient, subject, id: body.messageId });
         return { ok: true, id: body.messageId, provider: 'brevo' };
+      }
+      if (this.provider === 'smtp') {
+        // T-165: lazy-require nodemailer so deployments that don't use SMTP
+        // don't pay the dep cost. Fail soft if not installed.
+        if (!this._transporter) {
+          let nodemailer;
+          try { nodemailer = require('nodemailer'); }
+          catch (_) {
+            this.audit('email.send.error', { provider: 'smtp', reason: 'nodemailer_not_installed' });
+            return { ok: false, reason: 'nodemailer_not_installed', detail: 'run: cd deploy/backend && npm install nodemailer' };
+          }
+          this._transporter = nodemailer.createTransport({
+            host: this.smtp.host,
+            port: this.smtp.port,
+            secure: this.smtp.port === 465,   // SSL on 465; STARTTLS on 587
+            auth: { user: this.smtp.user, pass: this.smtp.pass },
+          });
+        }
+        const info = await this._transporter.sendMail({
+          from: this.from,
+          to: recipient,
+          subject,
+          text,
+          html: `<pre style="font-family:monospace">${this._esc(text)}</pre>`,
+        });
+        this._sentToday++;
+        this.audit('email.sent', { provider: 'smtp', to: recipient, subject, id: info.messageId });
+        return { ok: true, id: info.messageId, provider: 'smtp' };
       }
       return { ok: false, reason: 'unknown_provider' };
     } catch (e) {
