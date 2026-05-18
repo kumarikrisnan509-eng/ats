@@ -100,7 +100,20 @@ function createCronReauth({ db, vault, audit, postTelegram, broker, sessions }) 
           result = { ok: false, reason: 'exception', detail: e.message };
         }
         const elapsed = Date.now() - t0;
-        try { db.cron.addHistory(row.user_id, row.broker, !!result.ok, result.reason || (result.ok ? null : 'unknown'), elapsed); } catch (_) {}
+        // T99-T107: include the e.message detail in the persisted reason so a
+        // failed exchange_failed/daemon_error/persist_failed gives ops something
+        // diagnosable without redeploying. db.cron.addHistory caps reason at
+        // 200 chars (deploy/backend/db.js); we slice here defensively.
+        const reasonForLog = result.ok ? null : (result.detail
+          ? String(result.reason || 'unknown') + ': ' + String(result.detail).slice(0, 160)
+          : String(result.reason || 'unknown'));
+        try { db.cron.addHistory(row.user_id, row.broker, !!result.ok, reasonForLog, elapsed); } catch (_) {}
+        // Also surface to stdout + audit so the failure shows up in docker logs
+        // and /api/audit immediately, not just in cron_reauth_history.
+        if (!result.ok) {
+          console.error('[cron-reauth] user', row.user_id, 'failed:', reasonForLog);
+          try { audit && audit('cron.reauth.failed', { user_id: row.user_id, broker: row.broker, reason: result.reason, detail: result.detail }); } catch (_) {}
+        }
         // T99-T106: on success, also resume the global broker if it stalled
         // on the previous day's expired token. No-op if broker not provided
         // (multi-tenant future / non-zerodha brokers).
