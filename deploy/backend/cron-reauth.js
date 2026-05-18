@@ -21,6 +21,18 @@ const TARGET_HOUR_IST    = 5;         // 05:45 IST  (00:15 UTC)
 const TARGET_MINUTE_IST  = 45;
 const CHECK_INTERVAL_MS  = 60 * 1000; // every 1 minute
 
+// T99-T114: retry backoff schedule for the daily reauth window.
+// If the 05:45 attempt fails, retry at +15min, +30min, +60min, +2h, +4h.
+// Reaches up to ~9:45 IST (about market open) to cover transient Kite issues.
+// On the first success, abort the retry chain.
+const RETRY_BACKOFF_MS = [
+  15 * 60 * 1000,   // +15min
+  30 * 60 * 1000,   // +30min (cumulative 45min)
+  60 * 60 * 1000,   // +60min (cumulative 1h45)
+  2 * 60 * 60 * 1000, // +2h    (cumulative 3h45)
+  4 * 60 * 60 * 1000, // +4h    (cumulative 7h45)
+];
+
 function nowIst() {
   // Convert current UTC time to IST (+05:30) clock values.
   const d = new Date();
@@ -160,6 +172,49 @@ function createCronReauth({ db, vault, audit, postTelegram, broker, sessions }) 
     }
   }
 
+  // T99-T114: retry chain. If the first attempt has any failures, schedule
+  // backoff retries. Cancellable by the next-day fire (_lastRunDateKey check).
+  // Each retry only re-runs failed rows from the previous attempt (filtered
+  // through the broker resolver — the cron-reauth runner naturally re-picks
+  // up rows where last_test_ok=0 via listEligible).
+  let _retryTimer = null;
+  function _cancelRetries() {
+    if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
+  }
+  async function runWithRetries(triggerLabel) {
+    _cancelRetries();
+    let attemptIdx = 0;
+    const attempt = async () => {
+      attemptIdx += 1;
+      const label = attemptIdx === 1 ? triggerLabel : `${triggerLabel}+retry${attemptIdx - 1}`;
+      const result = await runForAllEligible(label);
+      const allOk = result && result.okCount === result.total;
+      if (allOk) {
+        if (attemptIdx > 1) {
+          console.log(`[cron-reauth] retry chain succeeded on attempt ${attemptIdx}`);
+          try { audit && audit('cron.reauth.retry-recovered', { attempt: attemptIdx, trigger: triggerLabel }); } catch (_) {}
+        }
+        return;
+      }
+      // Schedule next retry if we have one left.
+      const backoffIdx = attemptIdx - 1; // attempt 1 just ran; next backoff is index 0
+      if (backoffIdx >= RETRY_BACKOFF_MS.length) {
+        console.error(`[cron-reauth] retry chain exhausted after ${attemptIdx} attempts — giving up until next scheduled cycle`);
+        try { audit && audit('cron.reauth.retry-exhausted', { attempts: attemptIdx, trigger: triggerLabel }); } catch (_) {}
+        if (typeof postTelegram === 'function') {
+          try { postTelegram(`ATS auto-reauth retry chain exhausted (${attemptIdx} attempts). Manual reauth needed via Brokers card.`); } catch (_) {}
+        }
+        return;
+      }
+      const delay = RETRY_BACKOFF_MS[backoffIdx];
+      console.log(`[cron-reauth] scheduling retry ${attemptIdx} -> in ${Math.round(delay / 60000)}min`);
+      try { audit && audit('cron.reauth.retry-scheduled', { attempt: attemptIdx, delayMs: delay, trigger: triggerLabel }); } catch (_) {}
+      _retryTimer = setTimeout(() => { attempt().catch(e => console.error('[cron-reauth] retry error:', e.message)); }, delay);
+      if (_retryTimer.unref) _retryTimer.unref();
+    };
+    await attempt();
+  }
+
   function checkAndMaybeRun() {
     const t = nowIst();
     // Run 7 days/week: Zerodha invalidates the access token daily at ~06:00 IST regardless
@@ -172,7 +227,7 @@ function createCronReauth({ db, vault, audit, postTelegram, broker, sessions }) 
     if (!inWindow) return;
     if (_lastRunDateKey === t.dateKey) return;
     _lastRunDateKey = t.dateKey;
-    runForAllEligible('schedule').catch(e => console.error('[cron-reauth] error:', e.message));
+    runWithRetries('schedule').catch(e => console.error('[cron-reauth] error:', e.message));
   }
 
   return {
@@ -186,8 +241,9 @@ function createCronReauth({ db, vault, audit, postTelegram, broker, sessions }) 
       if (_timer.unref) _timer.unref();
       console.log(`[cron-reauth] scheduler started -- daily 05:45 IST (7 days/week)`);
     },
-    stop() { if (_timer) { clearInterval(_timer); _timer = null; } },
-    runNow: () => runForAllEligible('manual'),
+    stop() { if (_timer) { clearInterval(_timer); _timer = null; } _cancelRetries(); },
+    runNow: () => runWithRetries('manual'),
+    runNowNoRetry: () => runForAllEligible('manual-no-retry'),
     _internal: { nowIst, runForAllEligible },
   };
 }
