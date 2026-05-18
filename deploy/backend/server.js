@@ -4239,6 +4239,39 @@ app.post('/api/email/send', async (req, res) => {
   res.json(r);
 });
 
+// T-166: admin-gated email status + test. Mirrors /api/email/* but locked
+// behind requireInternal() (loopback IP + X-ATS-Internal header) so it can
+// be safely called from operator tooling like SETUP-SMTP-ON-VM.cmd without
+// exposing send to the public internet.
+//
+// GET  /api/admin/email-status — returns the EmailAlerts.status() shape.
+//      For SMTP provider this includes { host, port, user, passConfigured:bool }
+//      — the password value is NEVER returned.
+// POST /api/admin/email-test   body: { to, subject, text }
+//      Sends one email through the configured transport. Useful first
+//      smoke-test after env update.
+app.get('/api/admin/email-status', (req, res) => {
+  if (!requireInternal(req, res)) return;
+  if (!emailAlerts) return res.status(503).json({ ok:false, reason:'email_not_initialized' });
+  res.json({ ok:true, ...emailAlerts.status() });
+});
+
+app.post('/api/admin/email-test', express.json({ limit: '32kb' }), async (req, res) => {
+  if (!requireInternal(req, res)) return;
+  if (!emailAlerts) return res.status(503).json({ ok:false, reason:'email_not_initialized' });
+  const { to, subject, text } = req.body || {};
+  if (!to || !subject || !text) {
+    return res.status(400).json({ ok:false, reason:'to_subject_text_required' });
+  }
+  try {
+    const r = await emailAlerts.send({ to, subject, text });
+    audit('email.admin_test', { to, subject, ok: r.ok, provider: r.provider, id: r.id });
+    res.json(r);
+  } catch (e) {
+    res.status(500).json({ ok:false, reason:'send_failed', detail: String(e && e.message).slice(0, 300) });
+  }
+});
+
 // ---------- Tier 28: WhatsApp alerts (Twilio HTTP) ----------
 app.get('/api/whatsapp/status', (_req, res) => {
   if (!whatsAppAlerts) return res.status(503).json({ ok:false, reason:'whatsapp_not_initialized' });
