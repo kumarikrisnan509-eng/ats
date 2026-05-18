@@ -481,6 +481,49 @@ app.get('/api/admin/observability', (req, res) => {
   });
 });
 
+// T99-T122 (v11-F1): admin-only LLM call trace viewer.
+// Returns recent ai_calls rows for triage. Filters supported:
+//   ?limit=N           default 50, max 200
+//   ?user_id=N         filter to a specific user (else all)
+//   ?status=error      filter to failed calls only
+//   ?workflow=NAME     filter to one workflow
+// Useful when a user reports 'AI is broken' or when monitoring spend.
+app.get('/api/admin/ai-trace', (req, res) => {
+  if (!req.user || !req.user.is_admin) return res.status(403).json({ ok: false, reason: 'admin_only' });
+  if (!db || !db._conn) return res.status(503).json({ ok: false, reason: 'db_unavailable' });
+  try {
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit || '50', 10)));
+    const filters = [];
+    const params = [];
+    if (req.query.user_id) { filters.push('user_id = ?'); params.push(parseInt(req.query.user_id, 10)); }
+    if (req.query.status)  { filters.push('status = ?'); params.push(String(req.query.status)); }
+    if (req.query.workflow) { filters.push('workflow = ?'); params.push(String(req.query.workflow)); }
+    const where = filters.length ? 'WHERE ' + filters.join(' AND ') : '';
+    const sql = `SELECT id, user_id, ts, workflow, provider, model,
+                        prompt_tokens, completion_tokens, cost_inr, status,
+                        substr(error, 1, 300) AS error
+                 FROM ai_calls ${where}
+                 ORDER BY id DESC LIMIT ?`;
+    const rows = db._conn.prepare(sql).all(...params, limit);
+    // Aggregate quick stats so the UI can show "of the last 50: 47 ok, 3 errors"
+    const stats = {
+      total: rows.length,
+      ok: rows.filter(r => r.status === 'ok').length,
+      error: rows.filter(r => r.status === 'error').length,
+      totalCostInr: rows.reduce((s, r) => s + (Number(r.cost_inr) || 0), 0),
+      byProvider: {},
+      byWorkflow: {},
+    };
+    for (const r of rows) {
+      stats.byProvider[r.provider] = (stats.byProvider[r.provider] || 0) + 1;
+      if (r.workflow) stats.byWorkflow[r.workflow] = (stats.byWorkflow[r.workflow] || 0) + 1;
+    }
+    res.json({ ok: true, rows, stats, filters: { limit, ...req.query } });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: 'ai_trace_failed', detail: e.message });
+  }
+});
+
 // T99-T78: lazy obs middleware wrappers. The observability module needs db to
 // be ready before it can prepare its insert statement. We defer first-binding
 // until the first request after db is initialised. Once bound, each request
