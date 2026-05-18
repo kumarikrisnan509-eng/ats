@@ -159,6 +159,59 @@ class SweepEngine {
       sweptByTarget,
     };
   }
+
+  /**
+   * T-158: per-month aggregation over the sweep history. Powers the
+   * Portfolio screen's Deployed (MTD) waterfall step (T-135 left it as
+   * "—" until this shipped). Returns one row per month, oldest-first.
+   *
+   * @param {object} [opts]
+   * @param {string} [opts.fromMonth] YYYY-MM inclusive lower bound
+   * @param {string} [opts.toMonth]   YYYY-MM inclusive upper bound
+   * @returns {Array<{month:string, total_inr:number, count:number, byTarget:object}>}
+   */
+  aggregateMonthly({ fromMonth, toMonth } = {}) {
+    return aggregateSweepMonthly(this._history, { fromMonth, toMonth });
+  }
 }
 
-module.exports = { SweepEngine };
+/**
+ * Pure aggregation helper for sweep history rows. Extracted so unit tests
+ * can exercise it without a SweepEngine instance.
+ *
+ * @param {Array<{ts:string, sweepINR:number, target:string}>} history
+ * @param {object} [opts]
+ * @param {string} [opts.fromMonth] YYYY-MM inclusive lower bound
+ * @param {string} [opts.toMonth]   YYYY-MM inclusive upper bound
+ * @returns {Array<{month:string, total_inr:number, count:number, byTarget:object}>}
+ */
+function aggregateSweepMonthly(history, { fromMonth, toMonth } = {}) {
+  if (!Array.isArray(history) || history.length === 0) return [];
+  const byMonth = new Map();
+  for (const h of history) {
+    if (!h || typeof h.ts !== 'string' || h.ts.length < 7) continue;
+    const month = h.ts.slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(month)) continue;
+    if (fromMonth && month < fromMonth) continue;
+    if (toMonth   && month > toMonth)   continue;
+    if (!byMonth.has(month)) byMonth.set(month, { month, total_inr: 0, count: 0, byTarget: {} });
+    const m = byMonth.get(month);
+    const amt = Number(h.sweepINR) || 0;
+    m.total_inr += amt;
+    m.count++;
+    const tgt = h.target || 'unknown';
+    m.byTarget[tgt] = (m.byTarget[tgt] || 0) + amt;
+  }
+  // Round + sort oldest-first
+  const out = [...byMonth.values()].map(m => ({
+    ...m,
+    total_inr: Math.round(m.total_inr * 100) / 100,
+    byTarget: Object.fromEntries(
+      Object.entries(m.byTarget).map(([k, v]) => [k, Math.round(v * 100) / 100])
+    ),
+  }));
+  out.sort((a, b) => a.month < b.month ? -1 : a.month > b.month ? 1 : 0);
+  return out;
+}
+
+module.exports = { SweepEngine, aggregateSweepMonthly };

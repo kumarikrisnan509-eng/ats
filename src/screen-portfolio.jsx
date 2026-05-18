@@ -211,6 +211,39 @@ const PositionsTable = ({ title, rows }) => (
 const PortfolioScreen = () => {
   const [holdings, setHoldings] = React.useState([]);
 
+  // T-158: live sweep MTD from /api/me/sweep/monthly. Falls back to "—"
+  // when not yet wired (no sweep history for the user) so the screen
+  // never shows a misleading fake number.
+  const [sweepMtd, setSweepMtd] = React.useState(null);  // { mtd, mtd_count, current_month } | null
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch('/api/me/sweep/monthly', { credentials: 'include' });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (cancelled || !j || !j.ok) return;
+        setSweepMtd({
+          mtd: Number(j.mtd) || 0,
+          mtd_count: Number(j.mtd_count) || 0,
+          current_month: j.current_month || null,
+          by_target: j.mtd_by_target || {},
+        });
+      } catch (_) { /* leave null — UI shows "—" */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  // Helper: format ₹ compactly (lakhs/thousands).
+  function _inrShort(n) {
+    if (!Number.isFinite(n)) return '—';
+    const abs = Math.abs(n);
+    const s = abs >= 100000 ? `₹${(abs/100000).toFixed(2)}L`
+            : abs >= 1000   ? `₹${(abs/1000).toFixed(1)}K`
+            : `₹${Math.round(abs).toLocaleString('en-IN')}`;
+    return (n < 0 ? '-' : '') + s;
+  }
+
+
   React.useEffect(() => {
     let cancelled = false;
     // If demo is ON, keep the sample; otherwise fetch real holdings.
@@ -332,13 +365,17 @@ const PortfolioScreen = () => {
           </div>
           <div className="waterfall__step">
             <div className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>4 · Deployed (MTD)</div>
-            {/* T99-T135: dropped hardcoded inr(182500). The MTD-deployed
-                number requires the sweep ledger endpoint that aggregates
-                rows from the harvest table. Until that ships, show "—" so
-                the visible number stops looking real. Same disclosure
-                pattern as T-89/T-89b for the upstream Trading-pot step. */}
-            <div className="mono" style={{ fontSize: 22, fontWeight: 500, margin: "6px 0" }}>—</div>
-            <div className="muted" style={{ fontSize: 11 }}>sweep ledger not wired</div>
+            {/* T99-T158: wired to /api/me/sweep/monthly. Shows the current
+                month's total sweep amount across all targets. Null state
+                rendered when the user has no sweep history yet. */}
+            <div className="mono up" style={{ fontSize: 22, fontWeight: 500, margin: "6px 0" }}>
+              {sweepMtd && sweepMtd.mtd > 0 ? _inrShort(sweepMtd.mtd) : '—'}
+            </div>
+            <div className="muted" style={{ fontSize: 11 }}>
+              {sweepMtd && sweepMtd.mtd > 0
+                ? `${sweepMtd.mtd_count} event${sweepMtd.mtd_count === 1 ? '' : 's'} this month`
+                : (sweepMtd ? 'no sweeps yet this month' : 'loading…')}
+            </div>
           </div>
         </div>
       </Card>

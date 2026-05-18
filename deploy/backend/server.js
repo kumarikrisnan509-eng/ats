@@ -3408,6 +3408,45 @@ app.get('/api/me/pnl/monthly', withAuth((req, res) => {
   }
 }));
 
+// T-158: per-month sweep ledger aggregation. Powers the Portfolio screen's
+// Deployed (MTD) waterfall tile (T-135 left it as "—" pending this).
+//
+// Note: the SweepEngine is currently single-tenant (singleton, not per-user).
+// Multi-tenant per-user sweep history is a future ship; for now this returns
+// the global engine's monthly aggregation, scoped via withAuth so only logged-in
+// users hit it. The history may include sweeps from the operator's own paper
+// account in v1; per-user separation will come with the broker_accounts-aware
+// scope refactor.
+app.get('/api/me/sweep/monthly', withAuth((req, res) => {
+  if (!sweep || typeof sweep.aggregateMonthly !== 'function') {
+    return res.json({ ok: true, from: null, to: null, months: [], note: 'sweep_engine_not_initialised' });
+  }
+  try {
+    const now = new Date();
+    const thisMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+    const m12Ago = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1));
+    const defaultFrom = `${m12Ago.getUTCFullYear()}-${String(m12Ago.getUTCMonth() + 1).padStart(2, '0')}`;
+    const fromMonth = /^\d{4}-\d{2}$/.test(req.query.from || '') ? req.query.from : defaultFrom;
+    const toMonth   = /^\d{4}-\d{2}$/.test(req.query.to   || '') ? req.query.to   : thisMonth;
+
+    const months = sweep.aggregateMonthly({ fromMonth, toMonth });
+    const current = months.find(m => m.month === thisMonth) || null;
+    res.json({
+      ok: true,
+      from: fromMonth,
+      to: toMonth,
+      current_month: thisMonth,
+      mtd: current ? current.total_inr : 0,
+      mtd_count: current ? current.count : 0,
+      mtd_by_target: current ? current.byTarget : {},
+      months,
+    });
+  } catch (e) {
+    console.error('[/api/me/sweep/monthly] error:', e && e.message);
+    res.status(500).json({ ok: false, reason: 'aggregation_failed', detail: String(e && e.message || e).slice(0, 200) });
+  }
+}));
+
 // Tier 69b: per-user factor exposure (momentum / volatility / drawdown / concentration)
 // Uses real Kite historical candles for each holding. Sector mapping comes from the
 // instrument master (best-effort -- defaults to 'Unclassified').

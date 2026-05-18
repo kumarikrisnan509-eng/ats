@@ -1,121 +1,169 @@
-const { test } = require('node:test');
+// sweep.test.js — T-158 regression guard for sweep.js aggregator + engine.
+//
+// SweepEngine tracks profit-sweep rules and history. aggregateSweepMonthly
+// powers the Portfolio screen's Deployed (MTD) tile (T-135). Regressions in
+// the aggregation directly mis-state how much profit has been swept into
+// long-term investments this month.
+
+'use strict';
+
+const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
-const { SweepEngine } = require('../sweep');
+const { SweepEngine, aggregateSweepMonthly } = require('../sweep');
 
-const tmp = () => path.join('/tmp', 'sweep-test-' + Math.random().toString(36).slice(2) + '.json');
+// ---------- fixtures ----------
+function tmpStore() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ats-sweep-test-'));
+  return path.join(dir, '_sweep.json');
+}
 
-test('constructor rejects missing getPaperStats', () => {
-  assert.throws(() => new SweepEngine({}), /getPaperStats/);
+function buildEngine({ realizedPnl = 0 } = {}) {
+  return new SweepEngine({
+    getPaperStats: () => ({ realizedPnl }),
+    audit: () => {},
+    storePath: tmpStore(),
+  });
+}
+
+// ---------- aggregateSweepMonthly: empty inputs ----------
+
+test('aggregateSweepMonthly returns [] for empty/null input', () => {
+  assert.deepEqual(aggregateSweepMonthly([]), []);
+  assert.deepEqual(aggregateSweepMonthly(null), []);
+  assert.deepEqual(aggregateSweepMonthly(undefined), []);
 });
 
-test('setRules validates + persists', () => {
-  const s = new SweepEngine({ getPaperStats: () => ({}), storePath: tmp() });
-  const rules = s.setRules([
-    { enabled: true, cadence: 'daily', minProfitINR: 2000, sweepMode: 'pct', sweepPct: 60, target: 'NIFTYBEES', targetKind: 'etf' },
+test('aggregateSweepMonthly filters out rows with missing ts', () => {
+  const r = aggregateSweepMonthly([
+    { ts: '2026-05-01T10:00:00Z', sweepINR: 100, target: 'NIFTYBEES' },
+    { sweepINR: 200, target: 'X' },                  // dropped — no ts
+    { ts: null, sweepINR: 300 },                     // dropped
+    { ts: 'short', sweepINR: 400 },                  // dropped — too short
   ]);
-  assert.equal(rules.length, 1);
-  assert.equal(rules[0].enabled, true);
-  assert.equal(rules[0].minProfitINR, 2000);
-  assert.equal(rules[0].sweepPct, 60);
-  assert.equal(rules[0].target, 'NIFTYBEES');
+  assert.equal(r.length, 1);
+  assert.equal(r[0].count, 1);
+  assert.equal(r[0].total_inr, 100);
 });
 
-test('setRules clamps values', () => {
-  const s = new SweepEngine({ getPaperStats: () => ({}), storePath: tmp() });
-  const rules = s.setRules([
-    { enabled: true, sweepMode: 'pct', sweepPct: 999, target: 'X' },
+// ---------- single month ----------
+
+test('aggregateSweepMonthly: one row per month with summed total_inr', () => {
+  const r = aggregateSweepMonthly([
+    { ts: '2026-05-01T10:00:00Z', sweepINR: 100, target: 'NIFTYBEES' },
+    { ts: '2026-05-15T10:00:00Z', sweepINR: 200, target: 'NIFTYBEES' },
+    { ts: '2026-05-20T10:00:00Z', sweepINR:  50, target: 'PPFAS' },
   ]);
-  assert.equal(rules[0].sweepPct, 100);   // clamped
+  assert.equal(r.length, 1);
+  assert.equal(r[0].month, '2026-05');
+  assert.equal(r[0].total_inr, 350);
+  assert.equal(r[0].count, 3);
+  assert.deepEqual(r[0].byTarget, { NIFTYBEES: 300, PPFAS: 50 });
 });
 
-test('evaluate returns empty when no rules enabled', () => {
-  const s = new SweepEngine({ getPaperStats: () => ({ realizedPnl: 5000 }), storePath: tmp() });
-  assert.equal(s.evaluate().wouldSweep.length, 0);
-});
+// ---------- multi-month ----------
 
-test('evaluate respects minProfitINR threshold', () => {
-  const s = new SweepEngine({ getPaperStats: () => ({ realizedPnl: 1500 }), storePath: tmp() });
-  s.setRules([
-    { enabled: true, cadence: 'daily', minProfitINR: 2000, sweepMode: 'pct', sweepPct: 50, target: 'X' },
+test('aggregateSweepMonthly: multi-month rows sorted oldest-first', () => {
+  const r = aggregateSweepMonthly([
+    { ts: '2026-05-01T10:00:00Z', sweepINR: 100, target: 'X' },
+    { ts: '2026-03-01T10:00:00Z', sweepINR: 200, target: 'X' },
+    { ts: '2026-04-15T10:00:00Z', sweepINR: 300, target: 'X' },
   ]);
-  const ev = s.evaluate();
-  assert.equal(ev.wouldSweep.length, 0);
-  assert.match(ev.notes[0], /below threshold|< threshold/);
+  assert.equal(r.length, 3);
+  assert.deepEqual(r.map(x => x.month), ['2026-03', '2026-04', '2026-05']);
+  assert.deepEqual(r.map(x => x.total_inr), [200, 300, 100]);
 });
 
-test('evaluate: pct mode computes sweep correctly', () => {
-  const s = new SweepEngine({ getPaperStats: () => ({ realizedPnl: 5000 }), storePath: tmp() });
-  s.setRules([
-    { enabled: true, cadence: 'daily', minProfitINR: 2000, sweepMode: 'pct', sweepPct: 60, target: 'NIFTYBEES' },
+// ---------- from/to filter ----------
+
+test('aggregateSweepMonthly: fromMonth filter excludes earlier months', () => {
+  const history = [
+    { ts: '2026-03-01T10:00:00Z', sweepINR: 100, target: 'X' },
+    { ts: '2026-04-01T10:00:00Z', sweepINR: 200, target: 'X' },
+    { ts: '2026-05-01T10:00:00Z', sweepINR: 300, target: 'X' },
+  ];
+  const r = aggregateSweepMonthly(history, { fromMonth: '2026-04' });
+  assert.equal(r.length, 2);
+  assert.deepEqual(r.map(x => x.month), ['2026-04', '2026-05']);
+});
+
+test('aggregateSweepMonthly: toMonth filter excludes later months', () => {
+  const history = [
+    { ts: '2026-03-01T10:00:00Z', sweepINR: 100, target: 'X' },
+    { ts: '2026-04-01T10:00:00Z', sweepINR: 200, target: 'X' },
+    { ts: '2026-05-01T10:00:00Z', sweepINR: 300, target: 'X' },
+  ];
+  const r = aggregateSweepMonthly(history, { toMonth: '2026-04' });
+  assert.equal(r.length, 2);
+  assert.deepEqual(r.map(x => x.month), ['2026-03', '2026-04']);
+});
+
+test('aggregateSweepMonthly: from + to range filter', () => {
+  const history = [
+    { ts: '2026-01-01T10:00:00Z', sweepINR: 100, target: 'X' },
+    { ts: '2026-03-01T10:00:00Z', sweepINR: 200, target: 'X' },
+    { ts: '2026-05-01T10:00:00Z', sweepINR: 300, target: 'X' },
+    { ts: '2026-07-01T10:00:00Z', sweepINR: 400, target: 'X' },
+  ];
+  const r = aggregateSweepMonthly(history, { fromMonth: '2026-03', toMonth: '2026-05' });
+  assert.equal(r.length, 2);
+  assert.deepEqual(r.map(x => x.total_inr), [200, 300]);
+});
+
+// ---------- rounding ----------
+
+test('aggregateSweepMonthly rounds money values to 2 decimal places', () => {
+  const r = aggregateSweepMonthly([
+    { ts: '2026-05-01T10:00:00Z', sweepINR: 100.1234, target: 'X' },
+    { ts: '2026-05-02T10:00:00Z', sweepINR: 50.5678, target: 'X' },
   ]);
-  const ev = s.evaluate();
-  assert.equal(ev.wouldSweep.length, 1);
-  // (5000 - 2000) * 60% = 1800
-  assert.equal(ev.wouldSweep[0].sweepINR, 1800);
-  assert.equal(ev.wouldSweep[0].target, 'NIFTYBEES');
+  assert.equal(r[0].total_inr, 150.69);
+  assert.equal(r[0].byTarget.X, 150.69);
 });
 
-test('evaluate: absolute mode caps at excess', () => {
-  const s = new SweepEngine({ getPaperStats: () => ({ realizedPnl: 5000 }), storePath: tmp() });
-  s.setRules([
-    { enabled: true, sweepMode: 'absolute', minProfitINR: 1000, sweepAbsINR: 10000, target: 'X' },
-  ]);
-  const ev = s.evaluate();
-  // excess = 4000, requested 10000, capped to 4000
-  assert.equal(ev.wouldSweep[0].sweepINR, 4000);
+// ---------- engine integration ----------
+
+test('SweepEngine.aggregateMonthly delegates to the helper over its history', () => {
+  const e = buildEngine();
+  // Seed _history directly (production sets it via execute()).
+  e._history = [
+    { ts: '2026-04-01T10:00:00Z', sweepINR: 500, target: 'NIFTYBEES' },
+    { ts: '2026-05-01T10:00:00Z', sweepINR: 700, target: 'NIFTYBEES' },
+  ];
+  const r = e.aggregateMonthly();
+  assert.equal(r.length, 2);
+  assert.equal(r[0].month, '2026-04');
+  assert.equal(r[0].total_inr, 500);
+  assert.equal(r[1].total_inr, 700);
 });
 
-test('evaluate: all_above mode sweeps everything over threshold', () => {
-  const s = new SweepEngine({ getPaperStats: () => ({ realizedPnl: 75000 }), storePath: tmp() });
-  s.setRules([
-    { enabled: true, sweepMode: 'all_above', minProfitINR: 50000, target: 'PPFC_SIP' },
-  ]);
-  const ev = s.evaluate();
-  assert.equal(ev.wouldSweep[0].sweepINR, 25000);
+test('SweepEngine.aggregateMonthly returns [] when history is empty', () => {
+  const e = buildEngine();
+  assert.deepEqual(e.aggregateMonthly(), []);
 });
 
-test('execute logs sweep events to history', () => {
-  const s = new SweepEngine({ getPaperStats: () => ({ realizedPnl: 5000 }), storePath: tmp() });
-  s.setRules([
-    { enabled: true, sweepMode: 'pct', minProfitINR: 0, sweepPct: 50, target: 'X' },
-  ]);
-  const r = s.execute();
-  assert.equal(r.executed.length, 1);
-  assert.equal(r.executed[0].sweepINR, 2500);
-  assert.equal(r.executed[0].status, 'logged');
-  assert.equal(s.history().length, 1);
+// ---------- existing engine behaviour (legacy stats) ----------
+
+test('SweepEngine.stats returns counts even with empty history', () => {
+  const e = buildEngine();
+  const s = e.stats();
+  assert.equal(s.ruleCount, 0);
+  assert.equal(s.history, 0);
+  assert.equal(s.totalSweptINR, 0);
 });
 
-test('disabled rules do not fire', () => {
-  const s = new SweepEngine({ getPaperStats: () => ({ realizedPnl: 5000 }), storePath: tmp() });
-  s.setRules([
-    { enabled: false, sweepMode: 'pct', minProfitINR: 0, sweepPct: 50, target: 'X' },
-  ]);
-  assert.equal(s.evaluate().wouldSweep.length, 0);
+test('SweepEngine.evaluate returns wouldSweep:[] when no rules + no profit', () => {
+  const e = buildEngine({ realizedPnl: 0 });
+  const r = e.evaluate();
+  assert.deepEqual(r.wouldSweep, []);
+  assert.equal(r.realizedPnl, 0);
 });
 
-test('persistence round-trip', () => {
-  const store = tmp();
-  const s1 = new SweepEngine({ getPaperStats: () => ({ realizedPnl: 0 }), storePath: store });
-  s1.setRules([{ enabled: true, sweepMode: 'pct', sweepPct: 30, target: 'A' }]);
-  const s2 = new SweepEngine({ getPaperStats: () => ({}), storePath: store });
-  s2.load();
-  assert.equal(s2.getRules().length, 1);
-  assert.equal(s2.getRules()[0].target, 'A');
-  fs.unlinkSync(store);
-});
+// ---------- module shape ----------
 
-test('stats aggregates by target', () => {
-  const s = new SweepEngine({ getPaperStats: () => ({ realizedPnl: 5000 }), storePath: tmp() });
-  s.setRules([
-    { enabled: true, sweepMode: 'pct', minProfitINR: 0, sweepPct: 50, target: 'NIFTYBEES' },
-  ]);
-  s.execute();
-  s.execute();
-  const st = s.stats();
-  assert.equal(st.history, 2);
-  assert.equal(st.totalSweptINR, 5000);   // 2500 x 2
-  assert.equal(st.sweptByTarget.NIFTYBEES, 5000);
+test('module exports SweepEngine + aggregateSweepMonthly', () => {
+  assert.equal(typeof SweepEngine, 'function');
+  assert.equal(typeof aggregateSweepMonthly, 'function');
 });

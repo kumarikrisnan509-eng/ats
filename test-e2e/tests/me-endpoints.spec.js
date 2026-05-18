@@ -14,7 +14,7 @@
 
 const { test, expect } = require('@playwright/test');
 
-const PATHS = ['/api/me/identity', '/api/me/prefs', '/api/me/pnl/monthly'];
+const PATHS = ['/api/me/identity', '/api/me/prefs', '/api/me/pnl/monthly', '/api/me/sweep/monthly'];
 
 for (const p of PATHS) {
   test(`${p} requires auth (T-67/T-70)`, async ({ request }) => {
