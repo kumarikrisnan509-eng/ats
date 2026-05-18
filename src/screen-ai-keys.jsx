@@ -784,6 +784,23 @@ const AiKeysScreen = () => {
                 {isConfigured ? <Pill kind="up" dot>Active</Pill> : <Pill kind="neutral">Not set</Pill>}
               </div>
 
+              {/* T99-T120 (v11-H2): per-provider "Powering N of M workflows".
+                  Counts workflows where the router would currently pick this
+                  provider for the user, given their configured keys. Shows
+                  the user concrete value-per-BYOK-key. */}
+              {(() => {
+                const total = routerPreview.workflows.filter(w => w.ai !== false || w.reason !== 'no_ai_call').length;
+                const aiTotal = routerPreview.workflows.filter(w => w.ai === true || (w.ai !== false && w.workflow !== 'regime_inject')).length;
+                const poweringHere = routerPreview.workflows.filter(w => w.ai === true && w.provider === provider).length;
+                if (!isConfigured) return null;
+                return (
+                  <div className="muted" style={{ fontSize: 11, marginBottom: 10, padding: '6px 10px', borderRadius: 6, background: 'color-mix(in oklab, var(--up) 8%, transparent)', border: '1px solid color-mix(in oklab, var(--up) 25%, var(--border))' }}>
+                    <strong style={{ color: 'var(--up)' }}>Powering {poweringHere} of {aiTotal} workflows</strong>{' '}
+                    <span style={{ color: 'var(--text-3)' }}>· mode: {routerPreview.mode}</span>
+                  </div>
+                );
+              })()}
+
               <label style={{ display: 'block', marginBottom: 10 }}>
                 <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>Model</div>
                 <select className="input" value={draft.model || existing?.model_pref || meta.defaultModel}
