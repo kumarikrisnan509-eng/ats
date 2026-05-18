@@ -165,6 +165,8 @@ async function init() {
     audit,
     storePath: process.env.SCANNER_PATH || '/var/lib/ats/tokens/_scanner.json',
     surveillance: _surveillance,
+    // T99-T125 (v11-E3): pass earningsCal so scanner can apply results-day blackout
+    earningsCal: _earningsCal,
   });
   scanner.load();
   scanner.scheduleDaily();

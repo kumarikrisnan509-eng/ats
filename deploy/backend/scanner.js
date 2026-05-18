@@ -75,7 +75,7 @@ class Scanner {
    * @param {(event:string,data:object)=>void} [opts.audit]
    * @param {string} [opts.storePath]
    */
-  constructor({ broker, watchlist, notify, audit, storePath, surveillance }) {
+  constructor({ broker, watchlist, notify, audit, storePath, surveillance, earningsCal }) {
     this.broker = broker;
     this.watchlist = watchlist;
     this.notify = notify || (() => Promise.resolve());
@@ -83,6 +83,7 @@ class Scanner {
     this.storePath = storePath || DEFAULT_STORE;
     // T99-E2: optional NseSurveillance gate. When provided, skip ASM/GSM/T2T symbols.
     this.surveillance = surveillance || null;
+    this.earningsCal  = earningsCal  || null;  // T-125 E3 results-day blackout
     this._lastSkipped = [];
     /** Map<"SYMBOL|SIGNAL", { date:'YYYY-MM-DD', value:number }> */
     this._fired = new Map();
@@ -236,6 +237,31 @@ class Scanner {
       }
       if (skipped.length) console.log(`[scanner] surveillance gate blocked ${skipped.length} symbol(s):`, skipped.slice(0,5).map(x => `${x.symbol}(${x.reason})`).join(', '));
       symbols = safe;
+    }
+
+    // T99-T125 (v11-E3): results-day blackout. Skip symbols with quarterly /
+    // annual results announcement within ±3 days. Earnings days have IV crush
+    // + gap risk that defeats RSI/EMA signal logic. Uses cached event list
+    // (refreshed nightly); no extra network fetch in the scanner hot path.
+    if (this.earningsCal && typeof this.earningsCal.inResultsBlackout === 'function') {
+      const earningsSkipped = [];
+      const safe = [];
+      for (const sym of symbols) {
+        const v = this.earningsCal.inResultsBlackout(sym, { windowDays: 3 });
+        if (v) {
+          earningsSkipped.push({ symbol: sym, reason: 'results_blackout', daysUntil: v.daysUntil, eventDate: v.eventDate });
+          this.audit('scanner.skip_results', { symbol: sym, days_until: v.daysUntil, event_date: v.eventDate, category: v.category });
+        } else {
+          safe.push(sym);
+        }
+      }
+      if (earningsSkipped.length) {
+        console.log(`[scanner] results-day blackout (E3) blocked ${earningsSkipped.length} symbol(s):`,
+          earningsSkipped.slice(0, 5).map(x => `${x.symbol}(${x.daysUntil}d)`).join(', '));
+      }
+      symbols = safe;
+      // Merge into _lastSkipped so /api/scanner status reflects both gates.
+      skipped.push(...earningsSkipped);
     }
     this._lastSkipped = skipped;
 

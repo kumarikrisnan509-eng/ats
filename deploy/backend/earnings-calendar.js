@@ -147,6 +147,36 @@ class EarningsCalendar {
       lastFetchMs: this._cache.fetchedMs,
     };
   }
+
+  /** T99-T125 (v11-E3): synchronous results-day blackout check for scanner gates.
+      Returns { inBlackout, daysUntil, eventDate, category } if symbol has any
+      RESULTS-category event in the [-windowDays, +windowDays] window, else null.
+      Uses cached events (no fetch). Returns null if cache not warmed yet. */
+  inResultsBlackout(symbol, { windowDays = 3 } = {}) {
+    if (!this._cache) return null;
+    const sym = String(symbol || '').toUpperCase().trim();
+    if (!sym) return null;
+    const now = Date.now();
+    const minMs = now - windowDays * 86400_000;
+    const maxMs = now + windowDays * 86400_000;
+    for (const e of this._cache.events) {
+      if (e.symbol !== sym) continue;
+      // E3 blackout applies to RESULTS (quarterly + annual). Dividends + record dates
+      // are less disruptive, skip the gate for those.
+      if (e.category && !/result/i.test(e.category) && !/quarterly/i.test(e.category) && !/annual/i.test(e.category)) continue;
+      const t = parseNseDate(e.date);
+      if (!t) continue;
+      const ms = t.getTime();
+      if (ms < minMs || ms > maxMs) continue;
+      return {
+        inBlackout: true,
+        daysUntil: Math.round((ms - now) / 86400_000),
+        eventDate: e.date,
+        category: e.category || 'results',
+      };
+    }
+    return null;
+  }
 }
 
 module.exports = { EarningsCalendar, parseNseDate, categorise };
