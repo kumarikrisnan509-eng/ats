@@ -531,3 +531,76 @@ input, select, textarea { font-family: inherit; color: inherit; }
 
 /* Focus */
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+
+/* ============================================================
+   T-162 H6: mobile responsive sweep — v11 Tier 3 readiness item.
+   Targets phones <=768px wide. Goals:
+   1. Sidebar nav collapses to top horizontal scroll-bar
+   2. KPI grids reflow from 4-col to 2-col then 1-col
+   3. Tables get a horizontal scrollbar instead of overflowing
+   4. Card padding tightens; font-sizes step down by ~10%
+   5. Modal dialogs go full-screen on narrow viewports
+   ============================================================ */
+@media (max-width: 768px) {
+  body { font-size: 13px; }
+
+  /* Sidebar — collapse to a horizontal bar at the top */
+  .sidebar, .sidebar__nav, [class*="sidebar"] {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    width: 100%;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* KPI grids — 4 cols → 2 cols on tablet/large-phone */
+  .grid.grid-4 { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .grid.grid-3 { grid-template-columns: repeat(2, 1fr); }
+  .grid.grid-2 { grid-template-columns: 1fr; }
+
+  /* Card padding tightens */
+  .card, .Card, [class*="card"] {
+    padding: 12px;
+  }
+
+  /* Tables: horizontal scroll instead of overflowing the viewport */
+  .table-wrap, .table-container, table {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Page header stacks vertically */
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .page-header__right {
+    flex-wrap: wrap;
+  }
+
+  /* KPI tile typography — step down ~10% */
+  .stat-value, [class*="stat-value"] { font-size: 16px; }
+
+  /* Pipe scroll (Signals screen pipeline columns) */
+  .pipe-scroll .pipe {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  /* Modals — go (near) full-screen */
+  .modal, [class*="modal"] {
+    width: 96vw !important;
+    max-width: 96vw !important;
+    max-height: 92vh;
+    margin: 4vh 2vw;
+  }
+}
+
+/* Very narrow phones (<=420px) — 4-col grids go to 1-col */
+@media (max-width: 420px) {
+  .grid.grid-4 { grid-template-columns: 1fr; }
+  body { font-size: 12.5px; }
+}

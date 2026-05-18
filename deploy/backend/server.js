@@ -526,6 +526,90 @@ app.get('/api/admin/ai-trace', (req, res) => {
   }
 });
 
+// T-162 F2: admin replay — re-run a past ai_calls row with a different provider/model.
+// Returns the new response side-by-side with the original so the admin can
+// eyeball model drift / cost-quality tradeoffs.
+// POST /api/admin/ai-replay  body: { ai_call_id, provider?, model? }
+app.post('/api/admin/ai-replay', express.json({ limit: '32kb' }), async (req, res) => {
+  if (!req.user || !req.user.is_admin) return res.status(403).json({ ok: false, reason: 'admin_only' });
+  if (!db || !db._conn) return res.status(503).json({ ok: false, reason: 'db_unavailable' });
+  const id = parseInt((req.body || {}).ai_call_id, 10);
+  const overrideProvider = (req.body || {}).provider;
+  const overrideModel = (req.body || {}).model;
+  if (!id) return res.status(400).json({ ok: false, reason: 'ai_call_id_required' });
+  try {
+    // Fetch the original call including its prompt (we persist it in ai_calls).
+    const row = db._conn.prepare(
+      'SELECT id, user_id, ts, workflow, provider, model, prompt_system, prompt_user, response_text, status FROM ai_calls WHERE id = ?'
+    ).get(id);
+    if (!row) return res.status(404).json({ ok: false, reason: 'ai_call_not_found' });
+
+    const newProvider = overrideProvider || row.provider;
+    const newModel = overrideModel || row.model;
+
+    // Resolve API key for the target user + provider via vault.
+    let apiKey = null;
+    try {
+      const k = db._conn.prepare('SELECT sealed_key FROM ai_keys WHERE user_id = ? AND provider = ?').get(row.user_id, newProvider);
+      if (k && k.sealed_key && vault) apiKey = await vault.open(k.sealed_key);
+    } catch (_) {}
+    if (!apiKey) return res.status(404).json({ ok: false, reason: 'no_provider_key_for_user' });
+
+    const { callLLM } = require('./ai-advisor');
+    const r = await callLLM({
+      provider: newProvider,
+      apiKey,
+      model: newModel,
+      prompt: { system: row.prompt_system || '', user: row.prompt_user || '' },
+    });
+
+    res.json({
+      ok: true,
+      original: { id: row.id, provider: row.provider, model: row.model, ts: row.ts, response_text: row.response_text },
+      replay:   { provider: newProvider, model: newModel, response_text: r && r.text, cost_inr: r && r.cost_inr, prompt_tokens: r && r.prompt_tokens, completion_tokens: r && r.completion_tokens },
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: 'replay_failed', detail: String(e && e.message).slice(0, 300) });
+  }
+});
+
+// T-162 H8: A/B compare — fire two providers in parallel on the same prompt and
+// return both responses for side-by-side eyeballing. Admin-only because the
+// caller specifies the prompt directly (no rate-limit / cost-cap inheritance).
+// POST /api/admin/ai-compare  body: { system?, user, a:{provider,model}, b:{provider,model}, user_id }
+app.post('/api/admin/ai-compare', express.json({ limit: '32kb' }), async (req, res) => {
+  if (!req.user || !req.user.is_admin) return res.status(403).json({ ok: false, reason: 'admin_only' });
+  const b = req.body || {};
+  if (!b.user || !b.a || !b.b || !b.user_id) {
+    return res.status(400).json({ ok: false, reason: 'missing_fields', detail: 'user, a, b, user_id required' });
+  }
+  try {
+    const { callLLM } = require('./ai-advisor');
+    const fetchKey = async (provider) => {
+      const k = db._conn.prepare('SELECT sealed_key FROM ai_keys WHERE user_id = ? AND provider = ?').get(b.user_id, provider);
+      if (!k || !k.sealed_key || !vault) return null;
+      return vault.open(k.sealed_key);
+    };
+    const [keyA, keyB] = await Promise.all([fetchKey(b.a.provider), fetchKey(b.b.provider)]);
+    if (!keyA) return res.status(404).json({ ok: false, reason: 'no_key_for_provider_a' });
+    if (!keyB) return res.status(404).json({ ok: false, reason: 'no_key_for_provider_b' });
+
+    const t0 = Date.now();
+    const [resA, resB] = await Promise.allSettled([
+      callLLM({ provider: b.a.provider, apiKey: keyA, model: b.a.model, prompt: { system: b.system || '', user: b.user } }),
+      callLLM({ provider: b.b.provider, apiKey: keyB, model: b.b.model, prompt: { system: b.system || '', user: b.user } }),
+    ]);
+    res.json({
+      ok: true,
+      elapsedMs: Date.now() - t0,
+      a: resA.status === 'fulfilled' ? { ok: true, ...resA.value } : { ok: false, error: String(resA.reason && resA.reason.message || resA.reason) },
+      b: resB.status === 'fulfilled' ? { ok: true, ...resB.value } : { ok: false, error: String(resB.reason && resB.reason.message || resB.reason) },
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: 'compare_failed', detail: String(e && e.message).slice(0, 300) });
+  }
+});
+
 // T99-T78: lazy obs middleware wrappers. The observability module needs db to
 // be ready before it can prepare its insert statement. We defer first-binding
 // until the first request after db is initialised. Once bound, each request

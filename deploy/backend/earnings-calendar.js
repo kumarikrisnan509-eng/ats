@@ -179,4 +179,36 @@ class EarningsCalendar {
   }
 }
 
+// T-162 E1: broader corporate-events surface. The /api/event-calendar JSON
+// includes everything (bonus, split, dividend, AGM, EGM, buyback, rights)
+// already cached; just expose a byCategory() helper so the scanner /
+// AI-critique can surface non-earnings context too.
+EarningsCalendar.prototype.byCategory = function byCategory(symbol, { categories, windowDays = 7 } = {}) {
+  if (!this._cache) return [];
+  const sym = String(symbol || '').toUpperCase().trim();
+  if (!sym) return [];
+  const cats = Array.isArray(categories) && categories.length > 0
+    ? categories.map(c => String(c).toLowerCase())
+    : null;
+  const now = Date.now();
+  const minMs = now - windowDays * 86400_000;
+  const maxMs = now + windowDays * 86400_000;
+  const out = [];
+  for (const e of this._cache.events) {
+    if (e.symbol !== sym) continue;
+    if (cats && !cats.includes(String(e.category || '').toLowerCase())) continue;
+    const t = parseNseDate(e.date);
+    if (!t) continue;
+    const ms = t.getTime();
+    if (ms < minMs || ms > maxMs) continue;
+    out.push({
+      category: e.category || 'other',
+      date: e.date,
+      daysUntil: Math.round((ms - now) / 86400_000),
+      purpose: e.purpose || null,
+    });
+  }
+  return out;
+};
+
 module.exports = { EarningsCalendar, parseNseDate, categorise };
