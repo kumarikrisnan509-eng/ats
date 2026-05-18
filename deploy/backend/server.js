@@ -3656,31 +3656,39 @@ const _zerodhaCallback = async (req, res) => {
         userId: session.userId,
         issuedAt: new Date().toISOString(),
       });
-      // T99-T118: also update broker_accounts so cron-reauth's
+      // T99-T118 + T99-T119: also update broker_accounts so cron-reauth's
       // _waitForCallbackPath (T-117) can detect this success. Previously the
       // global-flow callback only wrote to in-memory broker + file, leaving
       // the DB row stale. cron's exchange then raced the consumed token and
       // logged exchange_failed even though the broker was healthy.
+      //
+      // T-119: iterate broker_accounts rows directly. T-118 originally used
+      // sessions.listAllUserIds() but those are FILENAME-based ids ("ARS209")
+      // not numeric DB user_ids — parseInt("ARS209") returns NaN and the
+      // loop skipped every row. The fix is to query db.brokers.listEligible()
+      // directly and update each zerodha row whose broker_user_id matches
+      // session.userId (or all zerodha rows in single-tenant mode).
       try {
-        const userIds = sessions.listAllUserIds();
-        for (const uid of userIds) {
-          const numericUid = parseInt(uid, 10);
-          if (!Number.isFinite(numericUid)) continue;
-          const list = db.brokers.list(numericUid) || [];
-          const row = list.find(r => r.broker === 'zerodha' && r.is_default) ||
-                      list.find(r => r.broker === 'zerodha');
-          if (!row) continue;
+        let rows = [];
+        try { rows = db.brokers.listEligible() || []; } catch (_) { rows = []; }
+        const targetClientId = String(session.userId || '');
+        for (const row of rows) {
+          if (row.broker !== 'zerodha') continue;
+          // Match by broker_user_id (Kite client id like "ARS209"). If the
+          // row has no broker_user_id, fall through and accept the row
+          // anyway in single-row deployments.
+          if (row.broker_user_id && targetClientId && row.broker_user_id !== targetClientId) continue;
           const sealed = await vault.seal(session.accessToken);
           const issuedAt = new Date().toISOString();
-          // Same expiry logic as runAutoReauth — Kite tokens valid until 06:00 IST next morning.
           const now = new Date();
           const expiresAt = new Date(now);
           expiresAt.setUTCHours(0, 30, 0, 0); // 06:00 IST = 00:30 UTC
           if (expiresAt < now) expiresAt.setUTCDate(expiresAt.getUTCDate() + 1);
-          db.brokers.updateTokens(row.id, numericUid, sealed, issuedAt, expiresAt.toISOString());
-          try { db.brokers.recordTest(numericUid, row.id, true, null); } catch (_) {}
-          try { _brokerResolver.invalidate(numericUid); } catch (_) {}
-          audit('zerodha.callback.db-sync', { userId: numericUid, brokerRowId: row.id });
+          db.brokers.updateTokens(row.id, row.user_id, sealed, issuedAt, expiresAt.toISOString());
+          try { db.brokers.recordTest(row.user_id, row.id, true, null); } catch (_) {}
+          try { _brokerResolver.invalidate(row.user_id); } catch (_) {}
+          audit('zerodha.callback.db-sync', { userId: row.user_id, brokerRowId: row.id, kiteClientId: targetClientId });
+          console.log('[server] global-callback DB sync ok: row=' + row.id + ' user=' + row.user_id + ' kite=' + targetClientId);
         }
       } catch (e) {
         console.error('[server] global-callback DB sync failed:', e && e.message);
