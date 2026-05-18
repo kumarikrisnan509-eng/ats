@@ -240,6 +240,22 @@ const SignalsScreen = () => {
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 
+  // T-159: live promotion-readiness rate from /api/me/signals/promotion-rate.
+  const [promo, setPromo] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch('/api/me/signals/promotion-rate', { credentials: 'include' });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (cancelled || !j || !j.ok) return;
+        setPromo(j);
+      } catch (_) { /* leave null — UI shows "—" */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const triggerScan = async () => {
     try { await fetch('/api/scanner/run', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body:'{}' }); } catch {}
   };
@@ -368,8 +384,12 @@ const SignalsScreen = () => {
         /></Card>
         <Card><Stat
           label="Paper → Live rate"
-          value="—"
-          sub="needs promotion ledger"
+          value={promo && promo.total_groups > 0
+            ? `${(promo.rate * 100).toFixed(0)}%`
+            : "—"}
+          sub={promo && promo.total_groups > 0
+            ? `${promo.ready_groups}/${promo.total_groups} groups ready · ${promo.window_days}d`
+            : (promo ? "no paper trades yet" : "loading…")}
         /></Card>
         <Card><Stat
           label="Swept to long-term"
