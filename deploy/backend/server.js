@@ -4660,7 +4660,51 @@ setTimeout(() => {
 wss.on('connection', (ws, req) => {
   if (wsClients.size > MAX_WS_CLIENTS) { ws.close(1013, 'too many clients'); return; }
   wsClients.add(ws);
-  audit('ws.connect', { ip: req.socket.remoteAddress, total: wsClients.size });
+
+  // T-130 (Tier 75 Phase 1): WebSocket auth-on-connect.
+  //
+  // Read the ats.sid cookie from the upgrade-request headers, verify the HMAC,
+  // and look up the session row. Stash userId + userEmail on the ws instance
+  // so future per-user filtering (Tier 75 Phase 2) can scope tick broadcasts.
+  //
+  // This phase does NOT change broadcast behavior — every connected client still
+  // gets every tick. We're only adding the identification plumbing so the
+  // filtering change in Phase 2 is mechanically small.
+  //
+  // Failures (no cookie, bad HMAC, expired session, sessions module unavailable)
+  // are non-fatal: ws.userId stays null and the connection proceeds as anonymous.
+  ws.userId = null;
+  ws.userEmail = null;
+  try {
+    const sid = readSessionCookie(req);
+    if (sid && db && db.sessions && typeof db.sessions.get === 'function') {
+      const row = db.sessions.get(sid);
+      if (row && row.user_id) {
+        const now = Date.now();
+        const exp = row.expires_at ? Number(row.expires_at) : 0;
+        if (!exp || exp > now) {
+          ws.userId = row.user_id;
+          // Try to enrich with email — best-effort, the welcome packet can
+          // still go out if this fails.
+          try {
+            if (db.users && typeof db.users.byId === 'function') {
+              const u = db.users.byId(row.user_id);
+              if (u && u.email) ws.userEmail = u.email;
+            }
+          } catch (_) {}
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[ws] auth lookup error (continuing anonymous):', e && e.message);
+  }
+
+  audit('ws.connect', {
+    ip: req.socket.remoteAddress,
+    total: wsClients.size,
+    userId: ws.userId,
+    authed: !!ws.userId,
+  });
 
   // Build the effective subscribe set: defaults + persisted watchlist (deduped).
   const userSaved = watchlist ? watchlist.list() : [];
@@ -4674,6 +4718,12 @@ wss.on('connection', (ws, req) => {
     symbols: merged,
     defaultSymbols: DEFAULT_SYMBOLS,
     watchlist: userSaved,
+    // T-130: surface auth state so the frontend can confirm the session was
+    // recognized on the WS handshake (independent of the HTTP /api/me/identity
+    // round-trip). userEmail may be null even when userId is set.
+    authed: !!ws.userId,
+    userId: ws.userId,
+    userEmail: ws.userEmail,
     note: broker.name === 'mock'
       ? 'Simulated ticks for UI only. Not a real market feed.'
       : 'Live ticks via Kite Ticker. Subject to market hours.',
