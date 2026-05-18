@@ -1,0 +1,38 @@
+[Unit]
+Description=ATS — daily per-user Kite token rotation (oneshot)
+Documentation=https://github.com/kumarikrisnan509-eng/ats/blob/main/deploy/docs/TIER76-BULKROTATE.md
+After=network-online.target docker.service
+Requires=network-online.target
+
+[Service]
+Type=oneshot
+
+# Runs as the deployer user (owns /opt/ats). Inherits the user's npm/node
+# install so playwright + otplib + node-fetch resolve correctly.
+User=deployer
+Group=deployer
+WorkingDirectory=/opt/ats/scripts
+
+# The ATS container exposes /api on host 127.0.0.1:8080 per docker-compose.
+Environment=ATS_BASE_URL=http://127.0.0.1:8080
+
+# Use the system Chromium that playwright install --with-deps drops in.
+Environment=PLAYWRIGHT_BROWSERS_PATH=/home/deployer/.cache/ms-playwright
+
+# Cap CPU/RAM so an unexpected memory leak in headless Chromium can't OOM the
+# host. Adjust if the eligible-user count grows past ~50.
+MemoryMax=1G
+CPUQuota=80%
+TimeoutStartSec=30min
+
+ExecStart=/usr/bin/env node /opt/ats/scripts/bulk-rotate.js
+
+# Capture stdout/stderr to a dedicated log + journal.
+StandardOutput=append:/var/log/ats/bulk-rotate.log
+StandardError=append:/var/log/ats/bulk-rotate.log
+
+# Don't restart on failure — the timer will pick us up at the next window.
+Restart=no
+
+[Install]
+WantedBy=multi-user.target
