@@ -195,7 +195,8 @@ const AIReviewScreen = () => {
         </Card>
       </div>
 
-      {/* Highlights */}
+      {/* Highlights — T99-T139: gated behind _isDemo (T-136 set _isDemo). */}
+      {_isDemo && (
       <div style={{ marginTop: 16 }}>
         <Card title="Key highlights" sub="Most important findings">
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
@@ -217,8 +218,10 @@ const AIReviewScreen = () => {
           </div>
         </Card>
       </div>
+      )}
 
-      {/* Strategy review */}
+      {/* Strategy review — T99-T139: gated behind _isDemo. */}
+      {_isDemo && (
       <div style={{ marginTop: 16 }}>
         <Card title="Strategy-by-strategy review" sub="AI verdict for each active strategy">
           <div style={{ display: "grid", gridTemplateColumns: "1.4fr 80px 70px 90px 70px 80px 80px 2fr", padding: "8px 12px", borderBottom: "1px solid var(--border)", fontSize: 10, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600 }}>
@@ -250,8 +253,12 @@ const AIReviewScreen = () => {
           })}
         </Card>
       </div>
+      )}
 
-      {/* AI cost breakdown */}
+      {/* AI cost breakdown — T99-T139: gated behind _isDemo. The real
+          AI cost panel lives on the AI Providers screen (T-123) which is
+          wired to /api/me/ai-keys budget telemetry. */}
+      {_isDemo && (
       <div style={{ marginTop: 16 }}>
         <Card title="AI cost breakdown" sub="Where LLM budget was spent this month">
           <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20 }}>
@@ -284,8 +291,12 @@ const AIReviewScreen = () => {
           </div>
         </Card>
       </div>
+      )}
 
-      {/* Recommended actions */}
+      {/* Recommended actions — T99-T139: gated behind _isDemo. When live,
+          recommended actions come from the Generate review button above
+          which calls /api/me/ai-workflows/monthly-review. */}
+      {_isDemo && (
       <div style={{ marginTop: 16 }}>
         <Card title="Recommended actions" sub="All 3 AIs must agree before an action is surfaced here">
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -307,6 +318,22 @@ const AIReviewScreen = () => {
           </div>
         </Card>
       </div>
+      )}
+
+      {/* T99-T139: single empty-state for non-demo users; replaces the four
+          demo card blocks above. The Generate review button (above this
+          section) hits a real /api/me/ai-workflows/monthly-review endpoint
+          so users CAN populate this screen — they just have to click. */}
+      {!_isDemo && (
+        <div style={{ marginTop: 16 }}>
+          <Card title="Monthly review" sub="Static demo report is hidden in production">
+            <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-3)', fontSize: 12 }}>
+              Click <strong>Generate review</strong> above to have the AI consensus
+              produce a real monthly narrative for {months.find(m => m.v === month)?.label} based on your paper-trading history.
+            </div>
+          </Card>
+        </div>
+      )}
     </>
   );
 };
