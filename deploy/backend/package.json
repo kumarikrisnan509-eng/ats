@@ -12,7 +12,8 @@
     "dev": "node --watch server.js",
     "test": "node test/_runner.js",
     "migrate": "node migrate-from-json.js",
-    "init-master-key": "node -e \"require('./crypto-vault').writeNewMasterKey(process.env.MASTER_KEY_PATH || '/etc/ats/master.key').then(p => console.log('wrote', p))\""
+    "init-master-key": "node -e \"require('./crypto-vault').writeNewMasterKey(process.env.MASTER_KEY_PATH || '/etc/ats/master.key').then(p => console.log('wrote', p))\"",
+    "lock:check": "npm ci --dry-run --ignore-scripts --no-audit --no-fund"
   },
   "dependencies": {
     "express": "^4.21.0",
