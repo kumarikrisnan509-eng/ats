@@ -1,0 +1,35 @@
+# robots.txt — T-164 (v11-I3 completion)
+# Allow indexing of public marketing + docs pages; block the app shell + API
+# from search engines. Sitemap below points crawlers at the canonical URLs.
+
+User-agent: *
+Allow: /
+Allow: /docs.html
+Allow: /legal.html
+Allow: /status.html
+
+# Don't index the React app shell (#hash routes; nothing to index)
+Disallow: /app.html
+
+# Never index the backend
+Disallow: /api/
+Disallow: /ws
+
+# AI scrapers — explicit policy. Allow content training crawlers on the
+# public docs page only; they don't need to hammer the app.
+User-agent: GPTBot
+Allow: /docs.html
+Allow: /legal.html
+Disallow: /
+
+User-agent: ClaudeBot
+Allow: /docs.html
+Allow: /legal.html
+Disallow: /
+
+User-agent: Google-Extended
+Allow: /docs.html
+Allow: /legal.html
+Disallow: /
+
+Sitemap: https://ats.rajasekarselvam.com/sitemap.xml

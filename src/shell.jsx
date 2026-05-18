@@ -155,6 +155,10 @@ const NAV_GROUPS = [
       { id: "risk",       label: "Risk",           icon: I.shield,      overflow: true },
       { id: "compliance", label: "Compliance",     icon: I.shieldCheck, overflow: true },
       { id: "apidocs",    label: "API & Webhooks", icon: I.code,        overflow: true },
+      // T-164 (v11-I3): link to the user-docs static page. external:true so
+      // the click opens /docs.html as a real navigation instead of trying
+      // to mount a hash-route screen.
+      { id: "user-docs",  label: "Help & docs",    icon: I.help || I.info, overflow: true, external: '/docs.html' },
     ],
   },
 ];
@@ -182,7 +186,7 @@ const NavOverflow = ({ items, route, setRoute, groupKey }) => {
       {expanded && items.map(it => (
         <button
           key={it.id}
-          onClick={() => setRoute(it.id)}
+          onClick={() => { if (it.external) { window.location.href = it.external; } else { setRoute(it.id); } }}
           className={"nav__item" + (route === it.id ? " nav__item--active" : "")}
           style={{ paddingLeft: 26 }}
         >
