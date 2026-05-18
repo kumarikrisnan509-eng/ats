@@ -332,11 +332,13 @@ const PortfolioScreen = () => {
           </div>
           <div className="waterfall__step">
             <div className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>4 · Deployed (MTD)</div>
-            <div className="mono up" style={{ fontSize: 22, fontWeight: 500, margin: "6px 0" }}>{inr(182500)}</div>
-            <div className="muted" style={{ fontSize: 11 }}>Next sweep: May 1, 10:00 IST</div>
-            <div style={{ marginTop: 8 }}>
-              <Pill kind="acc" dot>auto</Pill>
-            </div>
+            {/* T99-T135: dropped hardcoded inr(182500). The MTD-deployed
+                number requires the sweep ledger endpoint that aggregates
+                rows from the harvest table. Until that ships, show "—" so
+                the visible number stops looking real. Same disclosure
+                pattern as T-89/T-89b for the upstream Trading-pot step. */}
+            <div className="mono" style={{ fontSize: 22, fontWeight: 500, margin: "6px 0" }}>—</div>
+            <div className="muted" style={{ fontSize: 11 }}>sweep ledger not wired</div>
           </div>
         </div>
       </Card>
