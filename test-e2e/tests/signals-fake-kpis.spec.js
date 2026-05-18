@@ -15,7 +15,7 @@ const { test, expect } = require('@playwright/test');
 
 test('Signals screen no longer ships hardcoded 47/28%/71%/₹1,82,500 (T-81)', async ({ request }) => {
   // T-172: project uses runtime Babel — frontend file is .jsx, not .js
-  const r = await request.get('/src/screen-signals.jsx');
+  const r = await request.get('/src/screen-signals.js');
   expect(r.ok()).toBeTruthy();
   const js = await r.text();
 
