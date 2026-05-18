@@ -762,6 +762,60 @@ const AiKeysScreen = () => {
         )}
       </div>
 
+      {/* T99-T123 (v11-H1): empty-state + smart upsell banners.
+          - 0 keys: green getting-started block explaining what 15 workflows unlocks
+          - 1 key:  amber smart-upsell block explaining cross-provider fallback value
+          - 2+ keys: nothing (user is on the curve already) */}
+      {(() => {
+        const configuredCount = (keys || []).filter(k => k && k.provider).length;
+        if (configuredCount === 0) {
+          return (
+            <div style={{
+              padding: '14px 16px', marginBottom: 16, borderRadius: 10,
+              background: 'color-mix(in oklab, var(--up) 6%, transparent)',
+              border: '1px solid color-mix(in oklab, var(--up) 30%, var(--border))',
+              fontSize: 13, lineHeight: 1.55,
+            }}>
+              <div style={{ fontWeight: 600, marginBottom: 6, color: 'var(--up)' }}>
+                Add your first AI key to unlock 15 workflows
+              </div>
+              <div style={{ color: 'var(--text-2)', marginBottom: 8 }}>
+                ATS runs critique, monthly review, strategy explainers, news sentiment, and 11 more workflows through your own provider keys (BYOK).
+                Pick whichever provider you already have — keys are sealed at rest and never leave your VM unencrypted.
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, fontSize: 12 }}>
+                <div><strong>Anthropic Claude</strong> — best on Indian retail finance text. Console: console.anthropic.com</div>
+                <div><strong>OpenAI</strong> — best vision + tool-use. Console: platform.openai.com</div>
+                <div><strong>Google Gemini</strong> — generous free tier for batch workloads. Console: aistudio.google.com</div>
+              </div>
+              <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-3)' }}>
+                Estimated spend: ~₹6–13/day with one key, ~₹13–26/day with three. Daily spend cap is enforced — set it on Settings.
+              </div>
+            </div>
+          );
+        }
+        if (configuredCount === 1) {
+          const sole = (keys || []).find(k => k && k.provider);
+          const soleName = (sole && sole.provider) || 'this provider';
+          const alts = ['anthropic', 'openai', 'gemini'].filter(p => p !== (sole && sole.provider));
+          const fmtAlt = (p) => ({ anthropic: 'Claude', openai: 'OpenAI', gemini: 'Gemini' }[p] || p);
+          return (
+            <div style={{
+              padding: '12px 14px', marginBottom: 16, borderRadius: 8,
+              background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
+              border: '1px solid color-mix(in oklab, var(--warn, #d97706) 30%, var(--border))',
+              fontSize: 12, lineHeight: 1.5, color: 'var(--text-2)',
+            }}>
+              <strong style={{ color: 'oklch(45% 0.13 80)' }}>One provider configured.</strong>{' '}
+              Adding a second unlocks cross-provider fallback — when {soleName} rate-limits or returns 5xx,
+              ATS routes to your alternate. Recommended pair: <em>{soleName}</em> + <em>{fmtAlt(alts[0])}</em>.
+              Both keys stay sealed; ATS only opens the one it routes to.
+            </div>
+          );
+        }
+        return null;
+      })()}
+
             <div className="grid grid-3" style={{ gap: 16, marginBottom: 16 }}>
         {supportedProviders.map(provider => {
           const meta = _PROVIDER_META[provider] || { label: provider, logo: provider[0]?.toUpperCase(), logoColor: '#888', modelOptions: [], defaultModel: '' };
