@@ -355,6 +355,41 @@ function createMeBrokerRouter({ db, vault, requireAuth }) {
   return router;
 }
 
+// T99-T117: check if broker_accounts.issued_at has been updated to today in
+// IST. The OAuth-callback handler at /api/v1/oauth/zerodha/callback writes
+// here when Kite's redirect lands on our backend (which happens during the
+// daemon's headless flow — Playwright's route.abort() loses the race). If
+// the callback already exchanged the request_token, our own exchange would
+// fail with TokenException because the request_token is single-use.
+function _isRowFreshToday(db, userId, brokerId) {
+  try {
+    const row = db.brokers.getFull(userId, brokerId);
+    if (!row || !row.issued_at) return false;
+    const issued = new Date(row.issued_at);
+    if (isNaN(issued.getTime())) return false;
+    // Convert issued_at -> IST date.
+    const istMs = issued.getTime() + (5.5 * 60 * 60 * 1000);
+    const i = new Date(istMs);
+    const issuedKey = `${i.getUTCFullYear()}-${String(i.getUTCMonth()+1).padStart(2,'0')}-${String(i.getUTCDate()).padStart(2,'0')}`;
+    const now = new Date();
+    const nowIstMs = now.getTime() + (5.5 * 60 * 60 * 1000);
+    const n = new Date(nowIstMs);
+    const nowKey = `${n.getUTCFullYear()}-${String(n.getUTCMonth()+1).padStart(2,'0')}-${String(n.getUTCDate()).padStart(2,'0')}`;
+    return issuedKey === nowKey;
+  } catch (_) { return false; }
+}
+
+// Poll the DB for up to maxMs (every stepMs) waiting for the OAuth-callback
+// path to land a fresh issued_at. Returns true on success, false on timeout.
+async function _waitForCallbackPath(db, userId, brokerId, maxMs = 4000, stepMs = 200) {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    if (_isRowFreshToday(db, userId, brokerId)) return true;
+    await new Promise(r => setTimeout(r, stepMs));
+  }
+  return false;
+}
+
 async function runAutoReauth({ db, vault, userId, brokerRow }) {
   // T99-T113: per-step timing + full Kite error capture. The timings (in ms)
   // and Kite's structured error are included in result.timings/result.kite
@@ -388,6 +423,31 @@ async function runAutoReauth({ db, vault, userId, brokerRow }) {
   }
   const requestToken = daemonResp.request_token;
   if (!requestToken) return { ok: false, reason: 'daemon_no_request_token', timings };
+
+  // T99-T117: the OAuth callback at /api/v1/oauth/zerodha/callback receives
+  // Kite's redirect while the daemon is still running and exchanges the
+  // request_token ITSELF. Wait briefly to see if it already updated the DB —
+  // if so, our exchange would fail with TokenException (token already
+  // consumed) and we'd needlessly report 'exchange_failed' on a healthy
+  // reauth. Saves the doomed Kite REST call AND fixes the misleading
+  // cron_reauth_history.ok=0 status.
+  const tWait = Date.now();
+  const callbackOk = await _waitForCallbackPath(db, userId, brokerRow.id, 4000, 200);
+  timings.callback_wait_ms = Date.now() - tWait;
+  if (callbackOk) {
+    // OAuth callback path already exchanged & persisted. Read fresh row to
+    // get issued_at + expires_at for the return payload.
+    const fresh = db.brokers.getFull(userId, brokerRow.id);
+    try { db.brokers.recordTest(userId, brokerRow.id, true, null); } catch (_) {}
+    try { require('./broker-resolver').invalidate(userId); } catch (_) {}
+    return {
+      ok: true,
+      issuedAt: fresh && fresh.issued_at,
+      expiresAt: fresh && fresh.expires_at,
+      via: 'oauth_callback',
+      timings,
+    };
+  }
 
   let exchangeResp;
   const tExchange = Date.now();
