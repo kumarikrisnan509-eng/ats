@@ -93,8 +93,16 @@ jobs:
           print('no duplicate top-level const identifiers across .jsx files')
           PY
 
-      - name: Backend unit tests (Jest)
+      - name: Backend unit tests (node:test)
         working-directory: deploy/backend
+        env:
+          # T-150: enable _runner.js strict mode so test failures hard-fail
+          # the validate step. Before this flag, the runner deferred to the
+          # underlying node --test exit code which could mask failures in
+          # some shells/sandboxes (see T-144). The full suite passes 371/371
+          # locally with better-sqlite3 properly installed (which 'npm ci'
+          # does in CI), so flipping strict is safe from this commit forward.
+          ATS_TEST_STRICT: "1"
         run: |
           if [ -f package.json ] && grep -q '"test"' package.json; then
             npm test
