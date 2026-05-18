@@ -449,7 +449,22 @@ const SignalWhy = ({ confidence = 82, factors }) => {
 
 // ============ #8 Risk predictor — extrapolation chip ============
 // Drop into Risk screen near the daily drawdown gauge.
-const RiskPredictor = ({ current = -0.4, limit = -3.0, rate = -0.18 }) => {
+// T99-T110: previously had defaults (-0.4 / -3.0 / -0.18%) that rendered as
+// 'breach -3.0% drawdown in ~14 min' on every visit even with no real burn
+// rate. Now hides entirely when invoked without real props; shows an honest
+// placeholder when explicitly demo'd. Live burn-rate feed isn't wired yet.
+const RiskPredictor = ({ current, limit, rate, demo }) => {
+  // No real data: render nothing rather than fake a breach prediction.
+  if (current == null || limit == null || rate == null) {
+    if (!demo) return null;
+    // Demo placeholder (only when caller explicitly opts in)
+    return (
+      <div className="muted" style={{ padding: '10px 14px', borderRadius: 10, background: 'var(--bg-soft)', border: '1px solid var(--border)', fontSize: 12 }}>
+        Drawdown burn-rate not wired — RiskPredictor will activate when per-user daily
+        equity + intraday tick feeds are aggregated.
+      </div>
+    );
+  }
   // rate is %/hour (negative); compute minutes until breach at current rate.
   const remaining = limit - current; // negative
   const hours = remaining / rate;
