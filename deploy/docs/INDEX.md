@@ -19,6 +19,7 @@ Single entry point for every doc in this repo. Live at
 | 🛠 [README-DEPLOY-v2](../README-DEPLOY-v2.md) | Production deploy guide. GitHub Actions → GHCR → Oracle VM via SSH. |
 | 🛠 [AUTO-LOGIN-SETUP](../../AUTO-LOGIN-SETUP.md) | Single-account Zerodha auto-login (the `zerodha-auto-login.js` host script). For the operator's own Kite account. |
 | 🛠 [TIER76-BULKROTATE](TIER76-BULKROTATE.md) | Per-user daily TOTP rotation. Architecture diagram + the two internal routes (`bulk-rotate`, `seal-token`) shipped in T-133. |
+| 🛠 [EMAIL-DELIVERABILITY](EMAIL-DELIVERABILITY.md) | **T-161 / v11-I7**: SPF / DKIM / DMARC setup for transactional email + `check-email-deliverability.sh` verifier. |
 | 🛠 [scripts/systemd/INSTALL](../scripts/systemd/INSTALL.md) | 5-minute install of the bulk-rotate systemd timer on the VM host. Operator picks this up to ship Tier 76 Phase 2. |
 | 🛠 [GITHUB-SETUP](../GITHUB-SETUP.md) | One-time CI/CD configuration: GHCR registry, repo secrets, deployer SSH key. |
 | 🛠 [SECRETS](../../SECRETS.md) | Where each secret lives (master.key, broker_accounts, audit.log, sealed-tokens). Rotation procedures. |
