@@ -98,7 +98,36 @@ class ZerodhaBroker extends BrokerGateway {
         global broker today — answers 'is brokerWsStalled because the cron
         failed, or because something else is wrong'. */
     this._lastAccessTokenSetAt = 0;
+
+    /** T99-T115: reactive reauth hook. When _stalledOnToken flips true,
+        we call _onStall (if set) so the cron-reauth runner can attempt
+        an immediate reauth instead of waiting for the next 05:45 IST
+        cycle. Set via setOnStall() from server.js after cron-reauth is
+        created. We also track the last-trigger timestamp to rate-limit
+        (at most once per 15 min, max 3 per rolling 24h). */
+    this._onStall = null;
+    this._stallTriggerHistory = []; // array of Date.now() values
   }
+
+  /** T99-T115: set the reactive-reauth callback. Called when the broker
+      detects 3 consecutive 403s and pauses the ticker. The callback
+      receives a reason string and returns a promise (we don't await it
+      from the error handler — fire-and-forget). */
+  setOnStall(fn) { this._onStall = typeof fn === 'function' ? fn : null; }
+
+  /** T99-T115: rate-limit gate. Returns true if we should fire the
+      onStall callback right now. Limits: at most once per 15 min,
+      and at most 3 fires in any rolling 24h. */
+  _canFireStallTrigger() {
+    const now = Date.now();
+    // Prune entries older than 24h.
+    this._stallTriggerHistory = this._stallTriggerHistory.filter(t => now - t < 24 * 60 * 60 * 1000);
+    if (this._stallTriggerHistory.length >= 3) return false;
+    const last = this._stallTriggerHistory[this._stallTriggerHistory.length - 1];
+    if (last && (now - last) < 15 * 60 * 1000) return false;
+    return true;
+  }
+  _recordStallTrigger() { this._stallTriggerHistory.push(Date.now()); }
 
   // 9:15–15:30 IST on weekdays. We deliberately ignore holidays for the
   // heartbeat — on a holiday the WS won't be sending ticks anyway and the
@@ -304,6 +333,18 @@ class ZerodhaBroker extends BrokerGateway {
             if (typeof this.ticker.autoReconnect === 'function') this.ticker.autoReconnect(false, 0, 60);
             this.ticker.disconnect();
           } catch (_e) { /* ignore */ }
+          // T99-T115: fire reactive reauth trigger (rate-limited). The
+          // callback (set from server.js after cron-reauth is created)
+          // runs the same daemon→exchange→setAccessToken chain that the
+          // 05:45 IST scheduler uses. If it succeeds, _stalledOnToken
+          // flips false again inside setAccessToken().
+          if (this._onStall && this._canFireStallTrigger()) {
+            this._recordStallTrigger();
+            console.log('[zerodha] firing reactive reauth trigger (stall recovery)');
+            Promise.resolve(this._onStall('3x_403_stall')).catch(e => console.error('[zerodha] onStall error:', e && e.message));
+          } else if (this._onStall) {
+            console.log('[zerodha] stall detected but reactive trigger rate-limited');
+          }
           return;
         }
         // Only log first two 403s loudly; suppress the rest until we trip the gate.

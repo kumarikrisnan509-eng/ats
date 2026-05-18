@@ -313,6 +313,22 @@ async function init() {
       // token store that boot-rehydrate reads from.
       _cronReauth = createCronReauth({ db, vault, audit, postTelegram, broker, sessions });
       _cronReauth.start();
+      // T99-T115: wire reactive reauth — when broker hits 3-strike 403 stall,
+      // immediately trigger cron-reauth.runNow() instead of waiting until the
+      // next 05:45 IST scheduled cycle. Rate-limited inside the broker
+      // (max 1 per 15 min, max 3 per 24h).
+      if (broker && typeof broker.setOnStall === 'function') {
+        broker.setOnStall(async (reason) => {
+          try {
+            console.log('[server] reactive reauth triggered by broker stall:', reason);
+            try { audit('broker.stall.reactive-reauth', { reason }); } catch (_) {}
+            await _cronReauth.runNow();
+          } catch (e) {
+            console.error('[server] reactive reauth error:', e && e.message);
+          }
+        });
+        console.log('[server] reactive reauth trigger wired (T-115)');
+      }
     } catch (e) {
       console.error('[server] cron-reauth init failed:', e && e.message);
     }
