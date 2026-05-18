@@ -9,12 +9,13 @@
 // and 'Swept to long-term') with '—' + honest sub-text. The two strings
 // 'Live accuracy' and 'Paper → Live rate' moved to the latter pattern.
 //
-// We assert the bundled JS no longer ships the literal hardcoded values.
+// We assert the bundled JSX source no longer ships the literal hardcoded values.
 
 const { test, expect } = require('@playwright/test');
 
 test('Signals screen no longer ships hardcoded 47/28%/71%/₹1,82,500 (T-81)', async ({ request }) => {
-  const r = await request.get('/src/screen-signals.js');
+  // T-172: project uses runtime Babel — frontend file is .jsx, not .js
+  const r = await request.get('/src/screen-signals.jsx');
   expect(r.ok()).toBeTruthy();
   const js = await r.text();
 

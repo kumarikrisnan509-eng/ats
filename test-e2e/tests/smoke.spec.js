@@ -36,10 +36,13 @@ for (const route of ROUTES) {
   });
 }
 
-test('homepage loads + sidebar nav present', async ({ page }) => {
-  await page.goto('/', { waitUntil: 'networkidle' });
-  await expect(page.locator('text=Paper trading')).toBeVisible();
-  await expect(page.locator('text=Settings')).toBeVisible();
+// T-172: navigate to a hash route so the app shell mounts (the bare `/` route
+// serves the marketing landing page, which does NOT include the sidebar nav).
+test('app shell sidebar nav renders at #dashboard', async ({ page }) => {
+  await page.goto('/#dashboard', { waitUntil: 'networkidle' });
+  await page.waitForTimeout(800);
+  await expect(page.locator('text=Paper trading').first()).toBeVisible({ timeout: 5000 });
+  await expect(page.locator('text=Settings').first()).toBeVisible();
 });
 
 test('/api/health returns 200', async ({ request }) => {
