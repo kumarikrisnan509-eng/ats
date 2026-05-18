@@ -13,6 +13,89 @@ const safePct = (num, den, dec = 2, fallback = 0) => {
 
 // Today's run — single compact row showing live system heartbeat
 // Replaces the old Pipeline health strip which duplicated the Pipeline flow diagram below
+// E8 — dashboard tile showing today's top NSE bulk + block deals.
+function BulkDealsTile() {
+  const [data, setData] = React.useState(null);
+  const [err, setErr] = React.useState(null);
+  React.useEffect(() => {
+    let live = true;
+    const load = async () => {
+      try {
+        const r = await fetch('/api/me/bulk-deals/today?limit=10', { credentials: 'include' }).then(r => r.json());
+        if (!live) return;
+        if (r.ok) setData(r); else setErr(r.reason || r.detail || 'load failed');
+      } catch (e) { if (live) setErr(e.message); }
+    };
+    load();
+    const id = setInterval(load, 10 * 60 * 1000);   // refresh every 10 min
+    return () => { live = false; clearInterval(id); };
+  }, []);
+  if (err && !data) return null;
+  if (!data) return null;
+  const bulk = Array.isArray(data.bulk) ? data.bulk : (Array.isArray(data.deals) ? data.deals : []);
+  const block = Array.isArray(data.block) ? data.block : [];
+  const dateIso = data.date_iso || data.date || data.fetched_at || '';
+  if (bulk.length === 0 && block.length === 0) {
+    return (
+      <div style={{ padding: 14, marginBottom: 16, borderRadius: 10, border: '1px solid var(--border)' }}>
+        <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Bulk &amp; block deals</div>
+        <div className="muted" style={{ fontSize: 12 }}>No deals reported for the most recent session (NSE Archives pulls overnight).</div>
+      </div>
+    );
+  }
+  const fmtCr = (qty, price) => {
+    const v = (qty || 0) * (price || 0);
+    if (v >= 1e7) return '₹' + (v / 1e7).toFixed(2) + ' Cr';
+    if (v >= 1e5) return '₹' + (v / 1e5).toFixed(1) + ' L';
+    return '₹' + Math.round(v).toLocaleString('en-IN');
+  };
+  const rows = bulk.slice(0, 6);
+  return (
+    <div style={{ padding: 14, marginBottom: 16, borderRadius: 10, border: '1px solid var(--border)' }}>
+      <div className="row between" style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Bulk &amp; block deals · {dateIso}</div>
+        <div className="muted" style={{ fontSize: 11 }}>{bulk.length} bulk · {block.length} block</div>
+      </div>
+      <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ textAlign: 'left', color: 'var(--text-3)', borderBottom: '1px solid var(--border)' }}>
+            <th style={{ padding: '4px 6px' }}>Symbol</th>
+            <th style={{ padding: '4px 6px' }}>Side</th>
+            <th style={{ padding: '4px 6px', textAlign: 'right' }}>Qty</th>
+            <th style={{ padding: '4px 6px', textAlign: 'right' }}>Price</th>
+            <th style={{ padding: '4px 6px', textAlign: 'right' }}>Value</th>
+            <th style={{ padding: '4px 6px' }}>Client</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((d, i) => {
+            const sym = d.symbol || d.sym || '';
+            const side = (d.side || d.buy_sell || d.bs || '').toUpperCase();
+            const qty = d.qty || d.quantity || 0;
+            const price = d.price || d.trade_price || d.avg_price || 0;
+            const client = d.client || d.client_name || d.party || '—';
+            return (
+              <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+                <td style={{ padding: '6px 6px', fontWeight: 500 }}>{sym}</td>
+                <td style={{ padding: '6px 6px' }}>
+                  <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: side === 'BUY' ? 'var(--up-soft)' : 'var(--down-soft)', color: side === 'BUY' ? 'var(--up)' : 'var(--down)' }}>{side || '—'}</span>
+                </td>
+                <td className="mono" style={{ padding: '6px 6px', textAlign: 'right' }}>{Number(qty).toLocaleString('en-IN')}</td>
+                <td className="mono" style={{ padding: '6px 6px', textAlign: 'right' }}>₹{Number(price).toFixed(2)}</td>
+                <td className="mono" style={{ padding: '6px 6px', textAlign: 'right', fontWeight: 500 }}>{fmtCr(qty, price)}</td>
+                <td style={{ padding: '6px 6px', color: 'var(--text-2)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={client}>{client}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {bulk.length > rows.length && (
+        <div className="muted" style={{ fontSize: 11, marginTop: 8, textAlign: 'center' }}>+ {bulk.length - rows.length} more bulk deals</div>
+      )}
+    </div>
+  );
+}
+
 // E7: dashboard tile showing today's FII + DII net activity + 5d FII trend.
 function FiiDiiTile() {
   const [data, setData] = React.useState(null);
@@ -820,6 +903,9 @@ const DashboardScreen = () => {
 
       {/* E7: FII/DII tile */}
       <FiiDiiTile/>
+
+      {/* T99-T121 (v11-E8): Bulk + block deals tile */}
+      <BulkDealsTile/>
 
       {/* Pipeline flow diagram — how trades move through the system */}
       <PipelineFlow/>
