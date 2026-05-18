@@ -1073,9 +1073,16 @@ const DashboardScreen = () => {
                 ? <Pill kind="up" dot>streaming</Pill>
                 : <Pill kind="muted" dot>—</Pill>}
             </div>
+            {/* T99-T109: 'Last deploy' was hardcoded '2h 14m ago · main@8f3c1a2'.
+                Real deploy timestamp + git SHA need /api/system/info build-meta
+                which isn't currently fetched here. Show '—' until then. */}
             <div className="between" style={{ fontSize: 12 }}>
               <span className="muted">Last deploy</span>
-              <span className="mono" style={{ fontSize: 11 }}>2h 14m ago · main@8f3c1a2</span>
+              <span className="mono" style={{ fontSize: 11 }}>
+                {sysHealth && sysHealth.buildSha
+                  ? (sysHealth.buildAgo || '—') + ' · ' + String(sysHealth.buildSha).slice(0, 7)
+                  : '—'}
+              </span>
             </div>
           </div>
         </Card>
