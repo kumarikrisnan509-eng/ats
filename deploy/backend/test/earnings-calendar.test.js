@@ -25,6 +25,15 @@ function todayPlus(days) {
   return `${dd}-${mon}-${d.getUTCFullYear()}`;
 }
 
+// inResultsBlackout computes daysUntil as round((eventMs - now) / 86400000).
+// parseNseDate returns midnight UTC of the day, so when 'now' is e.g. noon
+// UTC, todayPlus(2) is only 36h away → rounds to daysUntil=1, not 2. The
+// tests below want time-of-day-independent assertions; use a tolerance.
+function nearby(actualDaysUntil, expectedDays) {
+  // Accept ±1 day to absorb the noon-UTC rounding boundary.
+  return Math.abs(actualDaysUntil - expectedDays) <= 1;
+}
+
 function buildCal(events) {
   // Pass a no-op fetchImpl so we never hit nseindia.com from CI.
   const cal = new EarningsCalendar({ fetchImpl: async () => ({ ok: false }) });
@@ -67,7 +76,7 @@ test('inResultsBlackout returns blackout for symbol with results in next 2 days'
   const r = cal.inResultsBlackout('HDFCBANK');
   assert.ok(r, 'expected blackout object');
   assert.equal(r.inBlackout, true);
-  assert.equal(r.daysUntil, 2);
+  assert.ok(nearby(r.daysUntil, 2), `daysUntil should be ~2, got ${r.daysUntil}`);
   assert.equal(r.category, 'quarterly_results');
 });
 
@@ -78,7 +87,7 @@ test('inResultsBlackout returns blackout for symbol with results 2 days ago', ()
   const r = cal.inResultsBlackout('RELIANCE');
   assert.ok(r);
   assert.equal(r.inBlackout, true);
-  assert.equal(r.daysUntil, -2);
+  assert.ok(nearby(r.daysUntil, -2), `daysUntil should be ~-2, got ${r.daysUntil}`);
 });
 
 test('inResultsBlackout is case-insensitive on symbol', () => {
@@ -99,7 +108,7 @@ test('inResultsBlackout respects windowDays override', () => {
   const r = cal.inResultsBlackout('INFY', { windowDays: 7 });
   assert.ok(r);
   assert.equal(r.inBlackout, true);
-  assert.equal(r.daysUntil, 5);
+  assert.ok(nearby(r.daysUntil, 5), `daysUntil should be ~5, got ${r.daysUntil}`);
 });
 
 test('inResultsBlackout ignores non-results categories (dividend, record_date)', () => {
@@ -119,8 +128,8 @@ test('inResultsBlackout picks the first matching event in the window', () => {
   const r = cal.inResultsBlackout('AXISBANK');
   assert.ok(r);
   assert.equal(r.inBlackout, true);
-  // Returns the first match — which has daysUntil 1.
-  assert.equal(r.daysUntil, 1);
+  // Returns the first match — which has daysUntil ~1.
+  assert.ok(nearby(r.daysUntil, 1), `daysUntil should be ~1, got ${r.daysUntil}`);
 });
 
 test('parseNseDate handles NSE DD-Mon-YYYY format', () => {

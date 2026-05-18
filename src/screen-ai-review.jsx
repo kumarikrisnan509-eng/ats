@@ -7,6 +7,8 @@ const AIReviewScreen = () => {
   // T-157: live per-month PnL from /api/me/pnl/monthly (T-156)
   const [liveMonthly, setLiveMonthly] = React.useState(null);  // { summary, months[] } | null
   const [liveErr, setLiveErr] = React.useState(null);
+  // T-160: live risk metrics (Sharpe ratio) from /api/me/risk-metrics
+  const [liveRisk, setLiveRisk] = React.useState(null);
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -21,6 +23,15 @@ const AIReviewScreen = () => {
           setMonth(j.months[j.months.length - 1].month);
         }
       } catch (e) { if (!cancelled) setLiveErr(String(e.message || e)); }
+    })();
+    (async () => {
+      try {
+        const r = await fetch('/api/me/risk-metrics', { credentials: 'include' });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (cancelled || !j || !j.ok) return;
+        setLiveRisk(j);
+      } catch (_) {}
     })();
     return () => { cancelled = true; };
   }, []);
@@ -198,7 +209,7 @@ const AIReviewScreen = () => {
           </div>
           <div>
             <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Sharpe</div>
-            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: _isDemo ? undefined : "var(--text-3)" }}>{_isDemo ? "1.72" : __dash}</div>
+            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: (liveRisk && Number.isFinite(liveRisk.sharpeRatio)) ? undefined : (_isDemo ? undefined : "var(--text-3)") }}>{(liveRisk && Number.isFinite(liveRisk.sharpeRatio)) ? liveRisk.sharpeRatio.toFixed(2) : (_isDemo ? "1.72" : __dash)}</div>
             <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>vs 3mo 1.64</div>
           </div>
           <div>

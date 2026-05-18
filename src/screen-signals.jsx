@@ -242,6 +242,9 @@ const SignalsScreen = () => {
 
   // T-159: live promotion-readiness rate from /api/me/signals/promotion-rate.
   const [promo, setPromo] = React.useState(null);
+  // T-160: live sweep MTD from /api/me/sweep/monthly (same endpoint as T-158
+  // Portfolio screen). Drives the "Swept to long-term" tile below.
+  const [sweepMtd, setSweepMtd] = React.useState(null);
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -253,8 +256,32 @@ const SignalsScreen = () => {
         setPromo(j);
       } catch (_) { /* leave null — UI shows "—" */ }
     })();
+    (async () => {
+      try {
+        const r = await fetch('/api/me/sweep/monthly', { credentials: 'include' });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (cancelled || !j || !j.ok) return;
+        setSweepMtd({
+          mtd: Number(j.mtd) || 0,
+          mtd_count: Number(j.mtd_count) || 0,
+          total_months: Array.isArray(j.months) ? j.months.length : 0,
+          total_swept: (j.months || []).reduce((s, m) => s + (Number(m.total_inr) || 0), 0),
+        });
+      } catch (_) {}
+    })();
     return () => { cancelled = true; };
   }, []);
+  // Compact ₹ formatter shared with the Swept tile.
+  function _inrCompact(n) {
+    if (!Number.isFinite(n)) return '—';
+    const abs = Math.abs(n);
+    const s = abs >= 10000000 ? `₹${(abs/10000000).toFixed(2)}Cr`
+            : abs >= 100000   ? `₹${(abs/100000).toFixed(2)}L`
+            : abs >= 1000     ? `₹${(abs/1000).toFixed(1)}K`
+            : `₹${Math.round(abs).toLocaleString('en-IN')}`;
+    return (n < 0 ? '-' : '') + s;
+  }
 
   const triggerScan = async () => {
     try { await fetch('/api/scanner/run', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body:'{}' }); } catch {}
@@ -393,8 +420,12 @@ const SignalsScreen = () => {
         /></Card>
         <Card><Stat
           label="Swept to long-term"
-          value="—"
-          sub="needs sweep history endpoint"
+          value={sweepMtd && sweepMtd.total_swept > 0
+            ? _inrCompact(sweepMtd.total_swept)
+            : "—"}
+          sub={sweepMtd && sweepMtd.total_swept > 0
+            ? `MTD: ${_inrCompact(sweepMtd.mtd)} · ${sweepMtd.total_months} month${sweepMtd.total_months === 1 ? '' : 's'}`
+            : (sweepMtd ? "no sweep history yet" : "loading…")}
         /></Card>
       </div>
 

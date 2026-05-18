@@ -36,6 +36,16 @@ Single entry point for every doc in this repo. Live at
 | 🧑‍💻 [test-e2e/README](../../test-e2e/README.md) | Playwright spec inventory (smoke, happy-path, health-deep, etc.) + how to add new specs. |
 | 🧑‍💻 [TIER75-78-DEFERRED](../../TIER75-78-DEFERRED.md) | What was left after Tiers 71-74 and the rationale for each deferral. |
 
+## API contracts shipped in the test-coverage arc (T-156 / T-158 / T-159)
+
+| Endpoint | Powers | Spec |
+|---|---|---|
+| `GET /api/me/pnl/monthly` | AI Review KPI band (Net PnL, trades, win rate, Max DD per month) | `test/pnl-monthly.test.js` |
+| `GET /api/me/sweep/monthly` | Portfolio Deployed (MTD) waterfall, Signals "Swept to long-term" tile | `test/sweep.test.js` |
+| `GET /api/me/signals/promotion-rate` | Signals "Paper → Live rate" tile | `test/promotion-rate.test.js` |
+
+All three are withAuth-gated, default to a sensible window (12 months / 30 days), and have Playwright auth-gate guards in `test-e2e/tests/me-endpoints.spec.js`.
+
 ## For the end user (you, on the app)
 
 | Doc | What it's for |
