@@ -4,11 +4,13 @@
   "description": "ATS backend",
   "private": true,
   "main": "server.js",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test test/*.test.js",
+    "test": "node test/_runner.js",
     "migrate": "node migrate-from-json.js",
     "init-master-key": "node -e \"require('./crypto-vault').writeNewMasterKey(process.env.MASTER_KEY_PATH || '/etc/ats/master.key').then(p => console.log('wrote', p))\""
   },
