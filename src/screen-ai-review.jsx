@@ -3,7 +3,27 @@
    Claude Opus 4.6 drafts narrative; Gemini validates; GPT-5 generates recommendations. */
 
 const AIReviewScreen = () => {
-  const [month, setMonth] = React.useState("2026-03");
+  const [month, setMonth] = React.useState(null);  // T-157: defaults to latest live month
+  // T-157: live per-month PnL from /api/me/pnl/monthly (T-156)
+  const [liveMonthly, setLiveMonthly] = React.useState(null);  // { summary, months[] } | null
+  const [liveErr, setLiveErr] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch('/api/me/pnl/monthly', { credentials: 'include' });
+        if (!r.ok) { if (!cancelled) setLiveErr(`http_${r.status}`); return; }
+        const j = await r.json();
+        if (cancelled || !j || !j.ok) return;
+        setLiveMonthly(j);
+        // Default selected month to most-recent live month if present.
+        if (Array.isArray(j.months) && j.months.length > 0 && !month) {
+          setMonth(j.months[j.months.length - 1].month);
+        }
+      } catch (e) { if (!cancelled) setLiveErr(String(e.message || e)); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
   // Tier 6: live Claude integration helpers
   const [aiBusy, setAiBusy] = React.useState(false);
   const [aiOutput, setAiOutput] = React.useState(null);
@@ -44,12 +64,30 @@ const AIReviewScreen = () => {
   // Also expose globally so anyone can trigger from devtools
   window.atsAskLiveAI = askLiveAI;
 
-  const months = [
-    { v: "2026-03", label: "March 2026" },
-    { v: "2026-02", label: "February 2026" },
-    { v: "2026-01", label: "January 2026" },
-    { v: "2025-12", label: "December 2025" },
-  ];
+  // T-157: build months dropdown from live data when available; fall back
+  // to the demo list so the screen renders for users with no trades yet.
+  const liveMonthRows = (liveMonthly && Array.isArray(liveMonthly.months)) ? liveMonthly.months : [];
+  const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const months = liveMonthRows.length > 0
+    ? liveMonthRows.map(r => {
+        const [y, m] = r.month.split('-');
+        return { v: r.month, label: `${MONTH_NAMES[parseInt(m,10)-1] || m} ${y}` };
+      }).reverse()  // most-recent first
+    : [
+        { v: "2026-03", label: "March 2026" },
+        { v: "2026-02", label: "February 2026" },
+        { v: "2026-01", label: "January 2026" },
+        { v: "2025-12", label: "December 2025" },
+      ];
+  // Find the live row for the selected month (or null if user has none)
+  const liveRow = liveMonthRows.find(r => r.month === month) || null;
+  // Helper: format ₹ value with +/- sign
+  function _fmtINR(n) {
+    if (n == null || !Number.isFinite(n)) return '—';
+    const abs = Math.abs(n);
+    const s = abs >= 100000 ? `₹${(abs/100000).toFixed(2)}L` : `₹${abs.toLocaleString('en-IN')}`;
+    return (n >= 0 ? '+' : '-') + s;
+  }
 
   const strategies = [
     { name: "Momentum AI (Intraday)", mode: "Intraday", trades: 142, win: 58, pnl: 48200, sharpe: 1.84, drift: "stable", verdict: "keep", reason: "Consistent with last 3mo baseline. Confidence calibration within 4% of expected." },
@@ -145,17 +183,17 @@ const AIReviewScreen = () => {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, padding: 16, background: "var(--bg-soft)", borderRadius: "var(--r-md)" }}>
           <div>
             <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Net PnL</div>
-            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: _isDemo ? "var(--up)" : "var(--text-3)" }}>{_isDemo ? "+₹1,24,800" : __dash}</div>
+            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: liveRow ? (liveRow.net_pnl >= 0 ? "var(--up)" : "var(--down)") : (_isDemo ? "var(--up)" : "var(--text-3)") }}>{liveRow ? _fmtINR(liveRow.net_pnl) : (_isDemo ? "+₹1,24,800" : __dash)}</div>
             <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>+11.2% of capital</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Trades</div>
-            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: _isDemo ? undefined : "var(--text-3)" }}>{_isDemo ? "654" : __dash}</div>
+            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: liveRow ? undefined : (_isDemo ? undefined : "var(--text-3)") }}>{liveRow ? String(liveRow.trades) : (_isDemo ? "654" : __dash)}</div>
             <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>across 6 strategies</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Win rate</div>
-            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: _isDemo ? undefined : "var(--text-3)" }}>{_isDemo ? "58.4%" : __dash}</div>
+            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: liveRow ? undefined : (_isDemo ? undefined : "var(--text-3)") }}>{liveRow ? `${(liveRow.win_rate * 100).toFixed(1)}%` : (_isDemo ? "58.4%" : __dash)}</div>
             <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>vs 3mo avg 56.2%</div>
           </div>
           <div>
@@ -165,7 +203,7 @@ const AIReviewScreen = () => {
           </div>
           <div>
             <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Max DD</div>
-            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: _isDemo ? "var(--down)" : "var(--text-3)" }}>{_isDemo ? "-₹18,400" : __dash}</div>
+            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: liveRow ? "var(--down)" : (_isDemo ? "var(--down)" : "var(--text-3)") }}>{liveRow ? _fmtINR(liveRow.max_drawdown_inr) : (_isDemo ? "-₹18,400" : __dash)}</div>
             <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>Mar 14, recovered 2d</div>
           </div>
         </div>
