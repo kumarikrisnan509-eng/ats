@@ -3341,13 +3341,21 @@ app.get('/api/me/factor-exposure', withAuth(async (req, res) => {
       } catch (e) {
         candlesBySymbol[sym] = [];
       }
-      // Sector lookup from instrument master if available
+      // Sector lookup — try instrument master first, fall back to static
+      // sector-map (T99-T127 / v11-E6).
       try {
         if (broker && broker.instruments && typeof broker.instruments.lookup === 'function') {
           const meta = broker.instruments.lookup(sym);
           if (meta && meta.sector) sectorMap[sym] = meta.sector;
         }
       } catch (_) {}
+      if (!sectorMap[sym]) {
+        try {
+          const { sectorOf } = require('./sector-map');
+          const s = sectorOf(sym);
+          if (s) sectorMap[sym] = s;
+        } catch (_) {}
+      }
     }
 
     const norm = holdings.map(h => ({

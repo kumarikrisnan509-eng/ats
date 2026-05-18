@@ -11,6 +11,7 @@
 const crypto = require('crypto');
 const aiRouter = require('./ai-router');
 const { callLLM, callLLMVision, estimateCost, redactRupees, redactPayload } = require('./ai-advisor');
+const { sectorOf } = require('./sector-map');   // T99-T127 (v11-E6)
 
 const CACHE_MAX = 500;
 const _cache = new Map();
@@ -405,10 +406,16 @@ Return JSON review only.`,
         }
       } catch (_) {}
 
+      // 7a. T99-T127 (v11-E6): sector context. Useful for "TCS is IT, IT sector
+      // has been weak vs broader market" kind of reasoning. Static lookup table
+      // covers NIFTY 200; null for less liquid names is fine, AI just won't see
+      // the sector line.
+      const symbolSector = sectorOf(symbol);
+
       // 7. Cache key includes today's date so a re-click later same day with same context is free,
       //    but tomorrow's context (different candles) bypasses
       const today = new Date().toISOString().slice(0, 10);
-      const cacheKey = _hashPrompt([req.user.id, 'critique-rich', mode, symbol, signal, b.value, today]);
+      const cacheKey = _hashPrompt([req.user.id, 'critique-rich-v2', mode, symbol, signal, b.value, today, symbolSector || '']);
       const cached = _cacheGet(cacheKey);
       if (cached) return res.json({ ok: true, cached: true, ...cached.response, provider: cached.provider, model: cached.model, cost_inr: 0, call_id: cached.call_id || null });
 
@@ -441,6 +448,7 @@ NIFTY 50 ${benchMove ? benchMove.days + 'd move' : 'recent move'}: ${benchMove ?
 Surveillance status: ${surveillanceVerdict ? `${surveillanceVerdict.list} (${surveillanceVerdict.reason})` : 'clean'}
 Upcoming corporate event: ${earningsContext ? `${earningsContext.category} in ${earningsContext.days_until} day(s) -- ${earningsContext.purpose}` : 'none in next 45 days'}
 Today's bulk/block deals: ${bulkDealsContext ? `${bulkDealsContext.count} deals, net ${bulkDealsContext.net_cr >= 0 ? '+' : ''}${bulkDealsContext.net_cr}Cr — top: ${bulkDealsContext.top_clients.join(' | ')}` : 'none'}
+Symbol sector: ${symbolSector || 'unclassified (not in NIFTY 200 sector map)'}
 
 Be MORE skeptical when:
 - the symbol is in a different regime than NIFTY (e.g. symbol in high_vol while index in trending_up)
