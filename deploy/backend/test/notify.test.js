@@ -101,13 +101,34 @@ test('notify accepts an unknown string-level without throwing (falls through to 
   try {
     await notify('debug',     't', { body: 'b' });
     await notify('madeup',    't', { body: 'b' });
-    await notify('',          't', { body: 'b' });   // empty string also OK
+    await notify('',          't', { body: 'b' });   // empty string OK
     assert.ok(true, 'notify must not throw on unknown string level');
   } finally {
     console.log = origLog;
   }
-  // NOTE: notify(null, …) currently throws on level.toUpperCase().
-  // That's a latent bug — callers must pass a string. Tracked separately.
+});
+
+test('notify defends against non-string level (null/undefined/number)', async () => {
+  // T-154: regression guard for the previously-latent crash on
+  // level.toUpperCase() when level is null/undefined/non-string. The fix
+  // coerces to a safe 'info' default rather than throwing — keeps the
+  // operator-alert path crash-free if a caller forwards e.g. an Error.
+  const captured = [];
+  const origLog = console.log;
+  console.log = (...args) => captured.push(args.join(' '));
+  try {
+    await notify(null,      't', { body: 'b' });
+    await notify(undefined, 't', { body: 'b' });
+    await notify(42,        't', { body: 'b' });
+    await notify({},        't', { body: 'b' });
+    const lines = captured.filter(l => l.includes('[NOTIFY:'));
+    assert.ok(lines.length >= 4, `expected >=4 NOTIFY lines, saw ${lines.length}`);
+    // Non-string level should default to 'info'.
+    assert.ok(lines.every(l => /\[NOTIFY:INFO\]/.test(l)),
+      `non-string level should default to INFO; saw: ${lines.join(' | ')}`);
+  } finally {
+    console.log = origLog;
+  }
 });
 
 test('notify with no details still works (no body, fields, url)', async () => {

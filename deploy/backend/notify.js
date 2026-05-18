@@ -61,14 +61,20 @@ function postTelegram(text) {
  * @param {{ body?: string, fields?: Object<string,string|number>, url?: string }} details
  */
 async function notify(level, title, details = {}) {
+  // T-154: coerce level to a safe string so notify(null|undefined|<non-string>)
+  // doesn't crash on .toUpperCase(). Callers SHOULD pass info/warn/error/success
+  // but a defensive default keeps the operator-alert path crash-free if a
+  // caller (e.g. an error handler) forwards an Error object by mistake.
+  const safeLevel = (typeof level === 'string' && level) ? level : 'info';
+
   const emoji = {
     info:    'ℹ️',
     warn:    '⚠️',
     error:   '❌',
     success: '✅',
-  }[level] || '•';
+  }[safeLevel] || '•';
 
-  const consoleLine = `[NOTIFY:${level.toUpperCase()}] ${title}${details.body ? ' — ' + details.body : ''}`;
+  const consoleLine = `[NOTIFY:${safeLevel.toUpperCase()}] ${title}${details.body ? ' — ' + details.body : ''}`;
   console.log(consoleLine);
 
   const lines = [`${emoji} *${title}*`];
