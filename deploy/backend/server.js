@@ -4579,6 +4579,128 @@ app.post('/api/brokers/zerodha/auto-login/exchange', express.json(), async (req,
   }
 });
 
+// ---------- T-133 (Tier 76 Phase 1): bulk per-user TOTP rotation ----------
+//
+// These two routes power the host-side daily auto-reauth script that runs
+// Playwright headless Kite logins for every user opted into auto_reauth_enabled.
+//
+// The flow:
+//   1. Host script calls POST /api/admin/internal/bulk-rotate to fetch the
+//      list of eligible users + their unsealed credentials. Credentials cross
+//      the wire UNSEALED — safe because the route is gated by
+//      requireInternal() (loopback/private IP + X-ATS-Internal header) and
+//      nginx strips X-ATS-Internal from public traffic (T-41).
+//   2. For each row, the host script:
+//      a. Opens a headless browser
+//      b. Drives the Kite login (user_id + password + TOTP)
+//      c. Captures the redirect's request_token
+//      d. Exchanges request_token → access_token via the Kite API directly
+//      e. POSTs access_token back to /api/admin/internal/seal-token which
+//         seals + persists it.
+//
+// Eligibility: broker_accounts.auto_reauth_enabled=1 AND all four sealed
+// columns present (api_key, refresh_token=api_secret, totp_seed, feed_token=password).
+// That filter lives in db.brokers.listEligible (Tier 80).
+
+app.post('/api/admin/internal/bulk-rotate', express.json(), async (req, res) => {
+  if (!requireInternal(req, res)) return;
+  if (!vault) return res.status(503).json({ ok: false, reason: 'vault_not_open' });
+  if (!db || !db.brokers || typeof db.brokers.listEligible !== 'function') {
+    return res.status(503).json({ ok: false, reason: 'db_not_ready' });
+  }
+  try {
+    const rows = db.brokers.listEligible() || [];
+    const out = [];
+    const errors = [];
+    for (const r of rows) {
+      try {
+        // Unseal each credential. If any one fails (corrupted blob, key
+        // mismatch) we skip this row and surface it in errors[] so the host
+        // script can log it without aborting the whole batch.
+        const apiKey    = await vault.open(r.api_key);
+        const apiSecret = await vault.open(r.refresh_token);
+        const totpSeed  = await vault.open(r.totp_seed);
+        const password  = await vault.open(r.feed_token);
+        out.push({
+          id:             r.id,
+          user_id:        r.user_id,
+          broker:         r.broker,
+          broker_user_id: r.broker_user_id,
+          api_key:        apiKey,
+          api_secret:     apiSecret,
+          totp_seed:      totpSeed,
+          password:       password,
+          // Issuing the loginUrl per-user is cheap and keeps the host script simple.
+          login_url:      `https://kite.zerodha.com/connect/login?v=3&api_key=${encodeURIComponent(apiKey)}`,
+        });
+      } catch (e) {
+        errors.push({ id: r.id, user_id: r.user_id, reason: 'unseal_failed', detail: String(e && e.message || e).slice(0, 200) });
+      }
+    }
+    audit('bulkrotate.bundle.served', { count: out.length, errors: errors.length });
+    res.json({ ok: true, count: out.length, accounts: out, errors });
+  } catch (err) {
+    audit('bulkrotate.bundle.error', { msg: err.message });
+    res.status(500).json({ ok: false, error: err.message.slice(0, 200) });
+  }
+});
+
+// Host-side script POSTs the freshly-rotated access_token back here for each
+// user. We seal it and persist via the same updateTokens path that cron-reauth
+// (T-106) uses, so any in-memory broker re-hydration hooks fire identically.
+//
+// Body: { user_id, id?, broker_user_id?, access_token, issued_at?, expires_at? }
+//   - user_id REQUIRED
+//   - id (broker_accounts row id) preferred if known; otherwise we look it up
+//     by (user_id, broker='zerodha')
+//   - access_token REQUIRED (plaintext from Kite)
+//   - issued_at / expires_at default to now / now+24h if omitted
+app.post('/api/admin/internal/seal-token', express.json(), async (req, res) => {
+  if (!requireInternal(req, res)) return;
+  if (!vault) return res.status(503).json({ ok: false, reason: 'vault_not_open' });
+
+  const body = req.body || {};
+  const userId       = body.user_id;
+  const rowId        = body.id;
+  const accessToken  = body.access_token;
+  if (!userId)      return res.status(400).json({ ok: false, reason: 'user_id_required' });
+  if (!accessToken) return res.status(400).json({ ok: false, reason: 'access_token_required' });
+
+  const issuedAt  = body.issued_at  || new Date().toISOString();
+  const expiresAt = body.expires_at || new Date(Date.now() + 24*60*60*1000).toISOString();
+
+  try {
+    // Resolve the broker_accounts row.
+    let row;
+    if (rowId) {
+      row = db.brokers.getFull(userId, rowId);
+    } else {
+      row = db.brokers.getByBroker(userId, 'zerodha');
+    }
+    if (!row) {
+      audit('bulkrotate.seal.miss', { userId, rowId });
+      return res.status(404).json({ ok: false, reason: 'broker_account_not_found' });
+    }
+
+    const sealed = await vault.seal(String(accessToken));
+    db.brokers.updateTokens(row.id, userId, sealed, issuedAt, expiresAt);
+
+    // Mirror the cron-reauth post-update bookkeeping: stamp the test row OK
+    // so the Brokers UI shows a green tick + last-rotate timestamp.
+    try {
+      if (typeof db.brokers.recordTest === 'function') {
+        db.brokers.recordTest(userId, row.id, true, null);
+      }
+    } catch (_) {}
+
+    audit('bulkrotate.seal.ok', { userId, rowId: row.id, broker_user_id: row.broker_user_id });
+    res.json({ ok: true, id: row.id, broker_user_id: row.broker_user_id, issued_at: issuedAt, expires_at: expiresAt });
+  } catch (err) {
+    audit('bulkrotate.seal.error', { userId, msg: err && err.message });
+    res.status(500).json({ ok: false, error: String(err && err.message).slice(0, 200) });
+  }
+});
+
 app.post('/api/brokers/disconnect', async (req, res) => {
   const sid = readSessionCookie(req);
   if (!sid) return res.status(401).json({ ok: false });
