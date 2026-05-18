@@ -140,20 +140,25 @@ const TodaysRun = () => {
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 
-  const __mock_items = [
-    { label: "Last signal",  value: "2m ago",    sub: "HDFCBANK · Claude · 82%", href: "#signals",  dot: "var(--up)" },
-    { label: "Last order",   value: "14m ago",   sub: "BUY INFY · Momentum AI",  href: "#trading",  dot: "var(--info)" },
-    { label: "Next sweep",   value: "May 1",     sub: "10:00 IST · auto",        href: "#portfolio",dot: "var(--vio)" },
-    { label: "Risk budget",  value: "32% used",  sub: "₹4.8k / ₹15k today",      href: "#risk",     dot: "var(--up)" },
-    { label: "Errors (24h)", value: "0",         sub: "all systems nominal",     href: "#infra",    dot: "var(--up)" },
+  // T99-T108: per-field empty entries instead of fake-data fallbacks. When
+  // /api/me/dashboard-kpis is reachable but a field is null (no signal/order
+  // yet, no autorun scheduled, no risk-budget set), show '—' with an honest
+  // sub-line rather than the prior 'Last signal HDFCBANK Claude 82%' demo.
+  // Aggregate fallback (whole endpoint unreachable) uses the same honest set.
+  const __empty_items = [
+    { label: "Last signal",  value: "—", sub: "no signals yet", href: "#signals",   dot: "var(--text-4)" },
+    { label: "Last order",   value: "—", sub: "no orders yet",  href: "#trading",   dot: "var(--text-4)" },
+    { label: "Autorun",      value: "—", sub: "not configured",  href: "#strategies",dot: "var(--text-4)" },
+    { label: "Cash · paper", value: "—", sub: "no paper state",  href: "#paper",     dot: "var(--text-4)" },
+    { label: "Errors (24h)", value: "—", sub: "no audit data",   href: "#audit",     dot: "var(--text-4)" },
   ];
   const items = liveKpi ? [
-    liveKpi.lastSignal ? { label: 'Last signal', value: liveKpi.lastSignal.value, sub: liveKpi.lastSignal.sub, href: '#signals', dot: 'var(--up)', live: true } : __mock_items[0],
-    liveKpi.lastOrder  ? { label: 'Last order',  value: liveKpi.lastOrder.value,  sub: liveKpi.lastOrder.sub,  href: '#trading', dot: 'var(--info)', live: true } : __mock_items[1],
-    liveKpi.autorun    ? { label: 'Autorun',     value: liveKpi.autorun.value,    sub: liveKpi.autorun.sub,    href: '#strategies', dot: 'var(--vio)', live: true } : __mock_items[2],
-    liveKpi.riskBudget ? { label: 'Cash · paper', value: liveKpi.riskBudget.value, sub: liveKpi.riskBudget.sub, href: '#paper', dot: 'var(--up)', live: true } : __mock_items[3],
-    { label: 'Errors (24h)', value: liveKpi.errors.value, sub: liveKpi.errors.sub, href: '#audit', dot: (parseInt(liveKpi.errors.value)||0) === 0 ? 'var(--up)' : 'var(--warn)', live: true },
-  ] : __mock_items;
+    liveKpi.lastSignal ? { label: 'Last signal', value: liveKpi.lastSignal.value, sub: liveKpi.lastSignal.sub, href: '#signals', dot: 'var(--up)', live: true } : __empty_items[0],
+    liveKpi.lastOrder  ? { label: 'Last order',  value: liveKpi.lastOrder.value,  sub: liveKpi.lastOrder.sub,  href: '#trading', dot: 'var(--info)', live: true } : __empty_items[1],
+    liveKpi.autorun    ? { label: 'Autorun',     value: liveKpi.autorun.value,    sub: liveKpi.autorun.sub,    href: '#strategies', dot: 'var(--vio)', live: true } : __empty_items[2],
+    liveKpi.riskBudget ? { label: 'Cash · paper', value: liveKpi.riskBudget.value, sub: liveKpi.riskBudget.sub, href: '#paper', dot: 'var(--up)', live: true } : __empty_items[3],
+    liveKpi.errors ? { label: 'Errors (24h)', value: liveKpi.errors.value, sub: liveKpi.errors.sub, href: '#audit', dot: (parseInt(liveKpi.errors.value)||0) === 0 ? 'var(--up)' : 'var(--warn)', live: true } : __empty_items[4],
+  ] : __empty_items;
 
   return (
     <div style={{ display: "flex", gap: 0, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-md)", padding: "2px", marginBottom: 16, overflowX: "auto" }}>
