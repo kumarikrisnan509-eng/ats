@@ -365,22 +365,64 @@ const PlanTab = () => (
   </>
 );
 
-const ActivityTab = () => (
-  <Card title="Recent activity" sub="Your own actions — not system events">
-    <div style={{ fontSize: 12, fontFamily: "var(--mono)", color: "var(--text-2)", lineHeight: 1.9 }}>
-      <div><span className="muted">14:22</span>  you viewed Dashboard</div>
-      <div><span className="muted">14:18</span>  you promoted HDFCBANK signal to live  <Pill kind="up" dot>success</Pill></div>
-      <div><span className="muted">14:15</span>  you toggled Options mode OFF</div>
-      <div><span className="muted">13:48</span>  you changed AI source to claude-opus-4.6</div>
-      <div><span className="muted">11:12</span>  you edited Momentum AI · risk-per-trade from 1.0% to 1.2%</div>
-      <div><span className="muted">10:47</span>  you approved daily compliance report</div>
-      <div><span className="muted">09:02</span>  you logged in from Chennai · IP 103.87.xx.xx</div>
-      <div><span className="muted">yesterday · 18:40</span>  you exported portfolio CSV</div>
-      <div><span className="muted">yesterday · 16:22</span>  you rolled over NIFTY MAY-26 futures</div>
-      <div><span className="muted">yesterday · 14:05</span>  you paused Iron Condor Weekly strategy</div>
-    </div>
-  </Card>
-);
+// T99-T104: live Profile activity feed from /api/audit. Filters for user-
+// initiated events. Same pattern as T-100 (Risk events). Falls back to an
+// empty-state card when /api/audit returns no user-relevant rows yet.
+const ActivityTab = () => {
+  const [rows, setRows] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const j = await window.fetchApi('/api/audit?limit=100');
+        if (cancelled) return;
+        if (!j || !j.ok) { setRows([]); return; }
+        // User-initiated events: auth, prefs, broker connect, alert create,
+        // paper order, manual reauth, ai-keys edit, etc.
+        const USER_INIT = /^(auth\.|login\.|settings\.|prefs\.|alert\.|paper\.order|broker\.(connect|disconnect|reauth)|ai-keys\.|user\.|export\.|cas\.)/;
+        const matched = (j.rows || [])
+          .filter(r => USER_INIT.test(String(r.event || '')))
+          .slice(0, 12)
+          .map(r => {
+            const evt = String(r.event || '');
+            const when = r.ts ? new Date(r.ts).toLocaleString('en-IN', {
+              hour: '2-digit', minute: '2-digit',
+              month: 'short', day: 'numeric',
+            }) : '—';
+            const kind = /\.error|fail|reject/.test(evt) ? 'down'
+                       : /\.success|connect|paper\.order/.test(evt) ? 'up'
+                       : null;
+            return { when, evt, kind, data: r.data };
+          });
+        setRows(matched);
+      } catch { setRows([]); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  return (
+    <Card title="Recent activity" sub={rows == null ? 'Loading…' : (rows.length === 0 ? 'No recent user-initiated events' : 'Your own actions — from /api/audit')}>
+      {rows == null ? (
+        <div className="muted" style={{ padding: '12px 0', fontSize: 12 }}>Loading audit feed…</div>
+      ) : rows.length === 0 ? (
+        <div className="muted" style={{ padding: '24px 0', fontSize: 12, textAlign: 'center' }}>
+          No user-initiated events yet. Auth, broker connect, paper orders, alerts,
+          and CAS uploads will appear here as you use the app.
+        </div>
+      ) : (
+        <div style={{ fontSize: 12, fontFamily: 'var(--mono)', color: 'var(--text-2)', lineHeight: 1.9 }}>
+          {rows.map((r, i) => (
+            <div key={i}>
+              <span className="muted">{r.when}</span>{' '}
+              {r.evt}
+              {r.kind && <Pill kind={r.kind} dot>{r.kind === 'up' ? 'success' : 'failed'}</Pill>}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+};
 
 // Small KV row
 const KV = ({ label, value, tone, mono, verified }) => {
