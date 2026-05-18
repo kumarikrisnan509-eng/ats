@@ -9,7 +9,7 @@
 #   sudo docker compose --env-file .env up -d
 #
 # .env for staging:
-#   ATS_REPO_OWNER=mohanapriya63085
+#   ATS_REPO_OWNER=kumarikrisnan509-eng
 #   ATS_IMAGE_TAG=latest
 #   ATS_PORT_HOST=8081
 #   BROKER=mock

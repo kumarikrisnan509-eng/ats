@@ -7,6 +7,6 @@
 #   Copy-Item deploy\scripts\secrets.local.example.ps1 deploy\scripts\secrets.local.ps1
 #   notepad deploy\scripts\secrets.local.ps1
 
-$RepoOwner = "mohanapriya63085"
+$RepoOwner = "kumarikrisnan509-eng"
 $Pat       = "ghp_PUT_YOUR_REPO_PAT_HERE"
 $GhcrPat   = "ghp_PUT_YOUR_GHCR_PULL_PAT_HERE"

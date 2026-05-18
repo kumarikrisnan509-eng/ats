@@ -18,12 +18,12 @@ sudo docker inspect ats-backend --format '{{.Config.Image}}' 2>&1
 
 echo
 echo "==> Try the NEW image directly and see what happens:"
-NEW_TAG=$(curl -sS -H "Authorization: Bearer $GH_PAT" "https://api.github.com/repos/mohanapriya63085/ats/actions/runs?per_page=1" 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['workflow_runs'][0]['head_sha'][:12])" 2>/dev/null)
+NEW_TAG=$(curl -sS -H "Authorization: Bearer $GH_PAT" "https://api.github.com/repos/kumarikrisnan509-eng/ats/actions/runs?per_page=1" 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['workflow_runs'][0]['head_sha'][:12])" 2>/dev/null)
 echo "  newer SHA: $NEW_TAG"
-NEW_IMAGE="ghcr.io/mohanapriya63085/ats-backend:${NEW_TAG}"
+NEW_IMAGE="ghcr.io/kumarikrisnan509-eng/ats-backend:${NEW_TAG}"
 echo
 echo "==> Inspecting new image (was the build pushed?):"
-sudo docker image ls --filter=reference="ghcr.io/mohanapriya63085/ats-backend:*" --format '{{.Repository}}:{{.Tag}}  size={{.Size}}  created={{.CreatedAt}}' | head -5
+sudo docker image ls --filter=reference="ghcr.io/kumarikrisnan509-eng/ats-backend:*" --format '{{.Repository}}:{{.Tag}}  size={{.Size}}  created={{.CreatedAt}}' | head -5
 
 echo
 echo "==> Pulling and inspecting the new image's metadata:"

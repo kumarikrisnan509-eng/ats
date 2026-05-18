@@ -9,7 +9,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$Message,
     [Parameter(Mandatory=$true)][string[]]$Files,
-    [string]$Owner   = "mohanapriya63085",
+    [string]$Owner   = "kumarikrisnan509-eng",
     [string]$Repo    = "ats",
     [string]$Branch  = "main",
     [string]$Pat     = "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"

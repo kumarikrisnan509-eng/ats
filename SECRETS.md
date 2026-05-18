@@ -8,7 +8,7 @@ secret material -- only locations, rotation procedures, and pointers.
 
 | Secret | Locations | Risk | Rotation |
 | --- | --- | --- | --- |
-| `Pat` (GitHub PAT, scope=repo) | every `deploy/scripts/deploy-tier*.ps1`, every `RECOVER-*.ps1` | Allows push to mohanapriya63085/ats and read of GH Actions runs | https://github.com/settings/tokens -> revoke -> generate new -> sed-replace in all .ps1 |
+| `Pat` (GitHub PAT, scope=repo) | every `deploy/scripts/deploy-tier*.ps1`, every `RECOVER-*.ps1` | Allows push to kumarikrisnan509-eng/ats and read of GH Actions runs | https://github.com/settings/tokens -> revoke -> generate new -> sed-replace in all .ps1 |
 | `GhcrPat` (GitHub PAT, scope=read:packages) | every `deploy/scripts/deploy-tier*.ps1` | Allows pulling private ats-backend container images from GHCR | Same flow, separate token |
 | Telegram bot token | `deploy/backend/notify.js` reads from env `TELEGRAM_BOT_TOKEN` | None in source (env-only) | https://core.telegram.org/bots#botfather -> /revoke -> set new env on VM |
 | Zerodha API secret | `/opt/ats/compose/.env` on VM (NOT in git) | Already env-only | Kite Connect console -> regenerate -> update VM .env -> restart |
@@ -23,7 +23,7 @@ shared environment. Hardcoding the PAT in each .ps1 keeps the user's
 
 This is acceptable because:
 
-1. The repo is private (mohanapriya63085/ats).
+1. The repo is private (kumarikrisnan509-eng/ats).
 2. The PATs are scoped to `repo` and `read:packages` -- they cannot exfiltrate
    funds or place trades.
 3. The kill switch (`KILL_SWITCH=true`) means even with full repo access an
@@ -40,7 +40,7 @@ It becomes unacceptable the moment:
 Single-file approach. Create `deploy/scripts/secrets.local.ps1` (gitignored):
 
 ```powershell
-$RepoOwner = "mohanapriya63085"
+$RepoOwner = "kumarikrisnan509-eng"
 $Pat       = "ghp_..."
 $GhcrPat   = "ghp_..."
 ```

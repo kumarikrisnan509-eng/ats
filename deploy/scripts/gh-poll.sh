@@ -2,7 +2,7 @@
 # gh-poll.sh -- wait for CI + deploy of a specific commit SHA, then verify health.
 # Usage: ./gh-poll.sh <commit-sha-prefix>
 set -uo pipefail
-OWNER="${OWNER:-mohanapriya63085}"
+OWNER="${OWNER:-kumarikrisnan509-eng}"
 REPO="${REPO:-ats}"
 PAT="${PAT:-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}"
 SHA="${1:?provide commit sha prefix}"

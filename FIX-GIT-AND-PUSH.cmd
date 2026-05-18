@@ -6,7 +6,7 @@ REM   3. Stage all changes, commit
 REM   4. Push using PAT
 
 cd /d "%~dp0"
-set REPO_OWNER=mohanapriya63085
+set REPO_OWNER=kumarikrisnan509-eng
 set REPO_NAME=ats
 set PAT=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
 

@@ -27,7 +27,7 @@ sudo cat /opt/ats/compose/.current-tag 2>&1 || echo "(no file)"
 echo
 echo "--- Pinning ATS_IMAGE_TAG=$NEW_TAG ---"
 sudo bash -c "cat > $ENV_COMPOSE" <<EOF
-ATS_REPO_OWNER=mohanapriya63085
+ATS_REPO_OWNER=kumarikrisnan509-eng
 ATS_IMAGE_TAG=$NEW_TAG
 EOF
 sudo cat "$ENV_COMPOSE"
@@ -43,7 +43,7 @@ echo
 echo "============================================================"
 echo "  Verify the new image has the fix (no throw at line 101)"
 echo "============================================================"
-sudo docker run --rm "ghcr.io/mohanapriya63085/ats-backend:$NEW_TAG" sh -c "grep -A 2 'async start' /app/brokers/zerodha-broker.js | head -10"
+sudo docker run --rm "ghcr.io/kumarikrisnan509-eng/ats-backend:$NEW_TAG" sh -c "grep -A 2 'async start' /app/brokers/zerodha-broker.js | head -10"
 
 echo
 echo "============================================================"

@@ -82,5 +82,5 @@ CMD ["node","server.js"]
 # OCI image labels (consumed by GHCR + tooling)
 LABEL org.opencontainers.image.title="ats-backend"
 LABEL org.opencontainers.image.description="ATS (rajasekarselvam.com) — Node backend + static cockpit prototype."
-LABEL org.opencontainers.image.source="https://github.com/mohanapriya63085/ats"
+LABEL org.opencontainers.image.source="https://github.com/kumarikrisnan509-eng/ats"
 LABEL org.opencontainers.image.licenses="UNLICENSED"

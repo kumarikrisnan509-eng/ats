@@ -28,7 +28,7 @@ sudo cp /opt/ats/deploy/staging/nginx.conf /etc/nginx/sites-available/staging.at
 
 # Create staging .env
 sudo tee /opt/ats/staging/.env > /dev/null <<'EOF'
-ATS_REPO_OWNER=mohanapriya63085
+ATS_REPO_OWNER=kumarikrisnan509-eng
 ATS_IMAGE_TAG=latest
 ATS_PORT_HOST=8081
 BROKER=mock
@@ -37,7 +37,7 @@ KILL_SWITCH=true
 EOF
 
 # Pull image + start
-echo "$GHCR_PAT" | sudo docker login ghcr.io -u mohanapriya63085 --password-stdin
+echo "$GHCR_PAT" | sudo docker login ghcr.io -u kumarikrisnan509-eng --password-stdin
 cd /opt/ats/staging
 sudo docker compose --env-file .env up -d
 
