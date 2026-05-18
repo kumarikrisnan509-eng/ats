@@ -2,6 +2,12 @@
 /* Backtest screen — walk-forward, out-of-sample */
 
 const BacktestScreen = () => {
+  // T99-T137: gate visible hardcoded KPIs (capital, trade-stats table)
+  // behind MockData.isDemoOn() so production users see empty states instead
+  // of fake numbers below the T-86 banner. Same pattern as T-136 (AI Review).
+  const _isDemo = !!(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
+  const __dash = '—';
+
   // ---- live /api/strategies + on-demand /api/backtest ----
   const [liveStrats, setLiveStrats] = React.useState(null);
   const [liveBacktest, setLiveBacktest] = React.useState(null);
@@ -261,14 +267,14 @@ const BacktestScreen = () => {
           </div>
           <div>
             <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>Capital</div>
-            <div className="mono" style={{ fontSize: 13 }}>₹10,00,000</div>
+            <div className="mono" style={{ fontSize: 13, color: _isDemo ? undefined : "var(--text-3)" }}>{_isDemo ? "₹10,00,000" : __dash}</div>
           </div>
           <div>
             <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>Mode constraints</div>
             <div className="mono" style={{ fontSize: 11, color: "var(--text-2)" }}>{constraints.assumption}</div>
           </div>
           <div style={{ marginLeft: "auto" }}>
-            <Pill kind="up" dot>Last run · 2h 14m ago · 3.8s compute</Pill>
+            {_isDemo ? <Pill kind="up" dot>Last run · 2h 14m ago · 3.8s compute</Pill> : <Pill>No runs yet</Pill>}
           </div>
         </div>
       </Card>
@@ -360,7 +366,7 @@ const BacktestScreen = () => {
           </div>
         </Card>
 
-        <Card title="Trade statistics" sub="Across 1,842 simulated trades">
+        <Card title="Trade statistics" sub={_isDemo ? "Across 1,842 simulated trades" : "Run a backtest to populate"}>
           <div className="grid grid-2" style={{ gap: 14 }}>
             {[
               { k: "Total trades",    v: "1,842" },
@@ -378,7 +384,7 @@ const BacktestScreen = () => {
             ].map((r,i) => (
               <div key={i} style={{ paddingBottom: 8, borderBottom: "1px solid var(--border)" }}>
                 <div className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 0.05, marginBottom: 2 }}>{r.k}</div>
-                <div className="mono" style={{ fontSize: 14, fontWeight: 500, color: r.c || "var(--text)" }}>{r.v}</div>
+                <div className="mono" style={{ fontSize: 14, fontWeight: 500, color: _isDemo ? (r.c || "var(--text)") : "var(--text-3)" }}>{_isDemo ? r.v : __dash}</div>
               </div>
             ))}
           </div>
