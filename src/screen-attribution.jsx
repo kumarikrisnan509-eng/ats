@@ -69,32 +69,13 @@ const AttributionScreen = () => {
     : __mock_byStrategy;
 
 
-  const byMode = [
-    { name: "Positional", pnl: 64800, pct: 52 },
-    { name: "Intraday",   pnl: 70600, pct: 57 },
-    { name: "Options",    pnl: -1800, pct: -1 },
-    { name: "Swing",      pnl: -8400, pct: -7 },
-  ];
-
-  const bySymbol = [
-    { sym: "RELIANCE",  pnl: 28400, trades: 42 },
-    { sym: "TCS",       pnl: 22800, trades: 28 },
-    { sym: "HDFCBANK", pnl: 18200, trades: 36 },
-    { sym: "INFY",      pnl: 14200, trades: 24 },
-    { sym: "ICICIBANK",pnl: 12800, trades: 22 },
-    { sym: "NIFTY",     pnl: 10400, trades: 18 },
-    { sym: "ADANIENT",  pnl: -4200, trades: 8 },
-    { sym: "PAYTM",     pnl: -6400, trades: 12 },
-  ];
-
-  const byAlpha = [
-    { src: "Technical (ML)",      pnl: 58400, pct: 47, desc: "RSI/MACD + order-flow patterns" },
-    { src: "News sentiment (AI)", pnl: 24600, pct: 20, desc: "Claude-analyzed news impact" },
-    { src: "Options flow",         pnl: 18200, pct: 15, desc: "Unusual OI buildup signals" },
-    { src: "Cross-asset",          pnl: 14800, pct: 12, desc: "USD/INR, crude, gold correlations" },
-    { src: "Earnings surprise",    pnl: 8800, pct: 7, desc: "Pre-earnings AI analysis" },
-    { src: "Macro events",         pnl: -800, pct: -1, desc: "RBI, Fed, budget reactions" },
-  ];
+  // T99-T112: emptied previously-hardcoded byMode/bySymbol/byAlpha arrays.
+  // T-73 banner already discloses these lenses are demo. When per-mode/per-
+  // symbol/per-alpha attribution endpoints ship, replace with fetched state.
+  // 'byStrategy' is wired to /api/pnl/by-strategy (live) — see liveByStrat.
+  const byMode = [];
+  const bySymbol = [];
+  const byAlpha = [];
 
   return (
     <>
@@ -220,59 +201,70 @@ const AttributionScreen = () => {
 
         {lens === "mode" && (
           <Card title="By trading mode" sub="Which modes are your breadwinners">
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
-              {byMode.map((m, i) => (
-                <div key={i} style={{ padding: 18, background: m.pnl >= 0 ? "var(--up-soft)" : "var(--down-soft)", borderRadius: "var(--r-md)", border: `1px solid ${m.pnl >= 0 ? "var(--up)" : "var(--down)"}20` }}>
-                  <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>{m.name}</div>
-                  <div className="mono" style={{ fontSize: 22, fontWeight: 700, marginTop: 8, color: m.pnl >= 0 ? "var(--up)" : "var(--down)" }}>
-                    {m.pnl >= 0 ? "+" : ""}₹{(m.pnl / 1000).toFixed(1)}k
+            {byMode.length === 0 ? (
+              <div className="muted" style={{ padding: '32px 0', fontSize: 12, textAlign: 'center' }}>
+                Per-mode attribution not wired — needs aggregation endpoint over per-trade ledger.
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+                {byMode.map((m, i) => (
+                  <div key={i} style={{ padding: 18, background: m.pnl >= 0 ? "var(--up-soft)" : "var(--down-soft)", borderRadius: "var(--r-md)", border: `1px solid ${m.pnl >= 0 ? "var(--up)" : "var(--down)"}20` }}>
+                    <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>{m.name}</div>
+                    <div className="mono" style={{ fontSize: 22, fontWeight: 700, marginTop: 8, color: m.pnl >= 0 ? "var(--up)" : "var(--down)" }}>
+                      {m.pnl >= 0 ? "+" : ""}₹{(m.pnl / 1000).toFixed(1)}k
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--text-2)", marginTop: 6 }}>{m.pct > 0 ? "+" : ""}{m.pct}% of net</div>
                   </div>
-                  <div style={{ fontSize: 11, color: "var(--text-2)", marginTop: 6 }}>{m.pct > 0 ? "+" : ""}{m.pct}% of net</div>
-                </div>
-              ))}
-            </div>
-            <div style={{ marginTop: 16, padding: 14, background: "var(--bg-soft)", borderRadius: "var(--r-md)", fontSize: 12, lineHeight: 1.6 }}>
-              <strong>AI insight:</strong> Intraday and Positional are carrying the book. Options turned negative due to Iron Condor losses — see AI Review for recommendation. Swing underperforming — retune recommended.
-            </div>
+                ))}
+              </div>
+            )}
           </Card>
         )}
 
         {lens === "symbol" && (
           <Card title="By symbol" sub="Your top contributors and detractors">
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-              <div>
-                <div style={{ fontSize: 11, color: "var(--up)", fontWeight: 600, textTransform: "uppercase", marginBottom: 8 }}>Top gainers</div>
-                {bySymbol.filter(s => s.pnl > 0).slice(0, 6).map((s, i) => (
-                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: i < 5 ? "1px solid var(--border)" : "none" }}>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>{s.sym}</div>
-                      <div style={{ fontSize: 10, color: "var(--text-3)" }}>{s.trades} trades</div>
-                    </div>
-                    <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: "var(--up)" }}>+₹{(s.pnl / 1000).toFixed(1)}k</div>
-                  </div>
-                ))}
+            {bySymbol.length === 0 ? (
+              <div className="muted" style={{ padding: '32px 0', fontSize: 12, textAlign: 'center' }}>
+                Per-symbol attribution not wired — needs aggregation endpoint over per-trade ledger.
               </div>
-              <div>
-                <div style={{ fontSize: 11, color: "var(--down)", fontWeight: 600, textTransform: "uppercase", marginBottom: 8 }}>Detractors</div>
-                {bySymbol.filter(s => s.pnl < 0).map((s, i) => (
-                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>{s.sym}</div>
-                      <div style={{ fontSize: 10, color: "var(--text-3)" }}>{s.trades} trades</div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <div>
+                  <div style={{ fontSize: 11, color: "var(--up)", fontWeight: 600, textTransform: "uppercase", marginBottom: 8 }}>Top gainers</div>
+                  {bySymbol.filter(s => s.pnl > 0).slice(0, 6).map((s, i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: i < 5 ? "1px solid var(--border)" : "none" }}>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{s.sym}</div>
+                        <div style={{ fontSize: 10, color: "var(--text-3)" }}>{s.trades} trades</div>
+                      </div>
+                      <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: "var(--up)" }}>+₹{(s.pnl / 1000).toFixed(1)}k</div>
                     </div>
-                    <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: "var(--down)" }}>₹{(s.pnl / 1000).toFixed(1)}k</div>
-                  </div>
-                ))}
-                <div style={{ marginTop: 16, padding: 12, background: "var(--warn-soft)", borderRadius: "var(--r-sm)", fontSize: 11, color: "oklch(40% 0.12 80)" }}>
-                  Both detractors share a high-volatility profile. AI suggests adding a volatility filter to signal gen.
+                  ))}
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: "var(--down)", fontWeight: 600, textTransform: "uppercase", marginBottom: 8 }}>Detractors</div>
+                  {bySymbol.filter(s => s.pnl < 0).map((s, i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{s.sym}</div>
+                        <div style={{ fontSize: 10, color: "var(--text-3)" }}>{s.trades} trades</div>
+                      </div>
+                      <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: "var(--down)" }}>₹{(s.pnl / 1000).toFixed(1)}k</div>
+                    </div>
+                  ))}
                 </div>
               </div>
-            </div>
+            )}
           </Card>
         )}
 
         {lens === "alpha" && (
           <Card title="By alpha source" sub="Where is your edge actually coming from">
+            {byAlpha.length === 0 ? (
+              <div className="muted" style={{ padding: '32px 0', fontSize: 12, textAlign: 'center' }}>
+                Per-alpha-source attribution not wired — needs strategy→source tag schema.
+              </div>
+            ) : null}
             {byAlpha.map((a, i) => (
               <div key={i} style={{ padding: "14px 0", borderBottom: i < byAlpha.length - 1 ? "1px solid var(--border)" : "none" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
@@ -292,9 +284,9 @@ const AttributionScreen = () => {
                 </div>
               </div>
             ))}
-            <div style={{ marginTop: 16, padding: 14, background: "var(--acc-soft)", color: "var(--acc-ink)", borderRadius: "var(--r-md)", fontSize: 12, lineHeight: 1.6 }}>
+            {byAlpha.length > 0 && <div style={{ marginTop: 16, padding: 14, background: "var(--acc-soft)", color: "var(--acc-ink)", borderRadius: "var(--r-md)", fontSize: 12, lineHeight: 1.6 }}>
               <strong>Claude insight:</strong> 47% of alpha is Technical/ML. News sentiment is the 2nd-largest contributor (20%) — your AI edge is real and measurable. Consider doubling News workers during earnings seasons.
-            </div>
+            </div>}
           </Card>
         )}
       </div>
