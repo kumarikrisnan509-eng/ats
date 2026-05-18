@@ -16,10 +16,32 @@ const ModesScreen = () => {
     setPendingToggle(id);
   };
 
-  // Total capital — in production would come from /user/margins
-  const TOTAL_CAPITAL = 4500000; // ₹45 L
+  // T99-T134: total capital pulled from /api/me/dashboard-summary
+  // (portfolioValue from live broker holdings + cashPaper from the paper
+  // wallet). Falls back to 0 when the user has no broker connected — in
+  // that case the per-mode capital slider math returns 0 too, which the UI
+  // renders as "—" via the existing isFiniteNumber check. We never silently
+  // substitute a fake number like the previous ₹45L hardcode.
+  const [liveCapital, setLiveCapital] = React.useState(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch('/api/me/dashboard-summary', { credentials: 'include' });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (cancelled || !j || !j.ok) return;
+        const portfolio = Number(j.portfolioValue || 0);
+        const paperCash = Number(j.cashPaper || 0);
+        setLiveCapital(portfolio + paperCash);
+      } catch (_) { /* leave liveCapital null -> falls back below */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  const TOTAL_CAPITAL = (liveCapital != null && Number.isFinite(liveCapital)) ? liveCapital : 0;
+  const HAS_LIVE_CAPITAL = TOTAL_CAPITAL > 0;
   const CASH_BUFFER_PCT = Math.max(0, 100 - totalCapitalPct);
-  const capitalFor = (id) => (TOTAL_CAPITAL * state[id].capitalPct) / 100;
+  const capitalFor = (id) => HAS_LIVE_CAPITAL ? (TOTAL_CAPITAL * state[id].capitalPct) / 100 : 0;
 
   // Simulated per-mode runtime state (would come from backend)
   // T99-T111: zeroed out per-mode RUNTIME demo numbers. T-82 banner already
@@ -66,23 +88,28 @@ const ModesScreen = () => {
         <div style={{ fontSize: 11, color: "var(--text-3)" }}>Disabling a mode <strong>hard-gates</strong> both signal pipeline and broker adapter</div>
       </div>
 
-      {/* T99-T82: honest banner — per-mode runtime numbers (open positions,
-          utilized, today's PnL, strategies running) and TOTAL_CAPITAL ₹45L
-          are still demo until per-mode position aggregation backend ships.
-          Mode-enable toggles and capital-percent sliders ARE live and
-          persisted to user prefs. Same disclosure pattern as T-73 attribution
-          banner / T-74 tax banner / T-75 audit banner. */}
+      {/* T99-T82 / T99-T134: honest banner — Mode toggles, capital sliders,
+          AND total capital (from /api/me/dashboard-summary) are now live.
+          Per-mode runtime numbers (open positions, utilized, today's PnL,
+          strategies running) remain demo until per-mode position aggregation
+          backend ships. */}
       <div role="note" style={{
         padding: '8px 12px', marginBottom: 20, borderRadius: 6,
         border: '1px solid color-mix(in oklab, var(--warn, #d97706) 35%, var(--border))',
         background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
         fontSize: 12, color: 'var(--text-2)',
       }}>
-        <strong>Mode toggles and capital sliders are live;</strong>{' '}
-        per-mode runtime numbers (open positions, utilized, today's PnL,
-        strategies running) and total capital ₹45L are demo data — pending the
-        per-mode position aggregation endpoint. Ignore those numbers when
-        making allocation decisions.
+        <strong>
+          {HAS_LIVE_CAPITAL
+            ? 'Mode toggles, capital sliders, and total capital are live;'
+            : 'Connect a broker to enable live capital allocation;'}
+        </strong>{' '}
+        {HAS_LIVE_CAPITAL
+          ? <>per-mode runtime numbers (open positions, utilized, today's PnL,
+             strategies running) remain demo data until per-mode position
+             aggregation ships.</>
+          : <>total capital reads as ₹0 until a broker connection or a paper
+             starting balance is set. Mode toggles still persist.</>}
       </div>
 
       {/* Mode cards — 4 wide */}
