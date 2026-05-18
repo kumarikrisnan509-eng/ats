@@ -31,6 +31,20 @@ jobs:
         run: |
           if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
+      - name: Dependency vulnerability scan (npm audit -- non-blocking, T-169 P0 #4)
+        working-directory: deploy/backend
+        continue-on-error: true
+        run: |
+          # Surface high & critical CVEs. Non-blocking for now so we can review
+          # the baseline before flipping to blocking. Once the audit is clean
+          # (or all known advisories are explicitly accepted), remove
+          # `continue-on-error` and bump `--audit-level=critical` if too noisy.
+          echo "=== npm audit (high+) ==="
+          npm audit --audit-level=high || true
+          echo ""
+          echo "=== npm audit summary (machine-readable) ==="
+          npm audit --json | python3 -c "import sys, json; d=json.load(sys.stdin); m=d.get('metadata',{}).get('vulnerabilities',{}); print('counts:', m); total=sum(m.values()); print('::notice::npm audit total vulnerabilities:', total)" || true
+
       - name: Syntax-check backend JS
         run: |
           set -e
@@ -119,7 +133,11 @@ jobs:
           if [ -f package.json ]; then
             npm install --silent --no-audit --no-fund
             npx playwright install --with-deps chromium
-            npx playwright test || echo "::warning::playwright smoke had failures (non-blocking)"
+            # T-169: do not swallow failures with `|| echo`. The step is still
+            # non-blocking (continue-on-error above) but failures now mark red
+            # in the Actions UI so they are visible. 10 specs are known-stale
+            # as of T-168 -- see deploy/docs/TESTING-PLAN.md "P0 #1 follow-up".
+            npx playwright test --reporter=list
           fi
 
       - name: Secret-leak guard
