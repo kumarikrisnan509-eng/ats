@@ -66,6 +66,14 @@ const AIReviewScreen = () => {
     { p: "GPT-5",            calls: 12480, tokens: "5.8M",  cost: 1940, share: 22 },
   ];
 
+  // T99-T136: gate visible hardcoded KPIs behind MockData.isDemoOn() so
+  // production users see honest empty states instead of large prominent
+  // fake numbers (+₹1,24,800 / -₹18,400 / ₹8,900). The T-85 banner already
+  // discloses the screen is demo until per-month aggregation ships; this
+  // change brings the visible RENDER in line with the disclosure for the
+  // most prominent values.
+  const _isDemo = !!(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
+  const __dash = '—';
   const highlights = [
     { icon: "✓", kind: "up",   t: "Net PnL ₹1,24,800", d: "+11.2% of deployed capital, best month since Dec 2025." },
     { icon: "⚠", kind: "warn", t: "Iron Condor underwater", d: "3 max-loss events. AI recommends deactivation until VIX drops below 18." },
@@ -137,27 +145,27 @@ const AIReviewScreen = () => {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, padding: 16, background: "var(--bg-soft)", borderRadius: "var(--r-md)" }}>
           <div>
             <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Net PnL</div>
-            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: "var(--up)" }}>+₹1,24,800</div>
+            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: _isDemo ? "var(--up)" : "var(--text-3)" }}>{_isDemo ? "+₹1,24,800" : __dash}</div>
             <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>+11.2% of capital</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Trades</div>
-            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>654</div>
+            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: _isDemo ? undefined : "var(--text-3)" }}>{_isDemo ? "654" : __dash}</div>
             <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>across 6 strategies</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Win rate</div>
-            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>58.4%</div>
+            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: _isDemo ? undefined : "var(--text-3)" }}>{_isDemo ? "58.4%" : __dash}</div>
             <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>vs 3mo avg 56.2%</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Sharpe</div>
-            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>1.72</div>
+            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: _isDemo ? undefined : "var(--text-3)" }}>{_isDemo ? "1.72" : __dash}</div>
             <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>vs 3mo 1.64</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Max DD</div>
-            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: "var(--down)" }}>-₹18,400</div>
+            <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: _isDemo ? "var(--down)" : "var(--text-3)" }}>{_isDemo ? "-₹18,400" : __dash}</div>
             <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>Mar 14, recovered 2d</div>
           </div>
         </div>
@@ -267,7 +275,7 @@ const AIReviewScreen = () => {
             </div>
             <div style={{ padding: 16, background: "var(--bg-soft)", borderRadius: "var(--r-md)" }}>
               <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.4 }}>TOTAL AI SPEND</div>
-              <div className="mono" style={{ fontSize: 28, fontWeight: 700, marginTop: 4 }}>₹8,900</div>
+              <div className="mono" style={{ fontSize: 28, fontWeight: 700, marginTop: 4, color: _isDemo ? undefined : "var(--text-3)" }}>{_isDemo ? "₹8,900" : __dash}</div>
               <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>of ₹15,000 budget · 59% used</div>
               <div style={{ marginTop: 16, padding: 10, background: "var(--up-soft)", color: "var(--up)", borderRadius: "var(--r-sm)", fontSize: 11 }}>
                 <strong>Cost per ₹ PnL:</strong> ₹0.0713 (vs ₹0.0831 last mo) — 14% more efficient
