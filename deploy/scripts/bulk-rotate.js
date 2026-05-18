@@ -38,8 +38,10 @@
 
 const { chromium } = require('playwright');
 const { totp } = require('otplib');
-const crypto = require('crypto');
 const fetch = require('node-fetch');
+// T-145: pure-logic helpers extracted into bulk-rotate-helpers.js so they
+// can be unit-tested without requiring playwright/otplib/node-fetch.
+const { checksum } = require('./bulk-rotate-helpers');
 
 const BASE_URL = process.env.ATS_BASE_URL || 'http://127.0.0.1:8080';
 const HEADERS  = { 'X-ATS-Internal': '1', 'Content-Type': 'application/json' };
@@ -49,12 +51,6 @@ const POST_TIMEOUT_MS = 15_000;
 
 // ---------- helpers ----------
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
-function checksum(apiKey, requestToken, apiSecret) {
-  return crypto.createHash('sha256')
-    .update(apiKey + requestToken + apiSecret)
-    .digest('hex');
-}
 
 async function postJson(url, body, timeoutMs = POST_TIMEOUT_MS) {
   const ctrl = new AbortController();
