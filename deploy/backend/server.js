@@ -3101,17 +3101,64 @@ function withAuth(handler) {
 }
 
 // Watchlist
+//
+// T-132 (Tier 75 Phase 3): mutation hooks. When a user adds/removes a symbol
+// from their watchlist, we (a) push subscribe/unsubscribe to all of their
+// currently-connected /ws clients so ws.symbolSet stays in sync without a
+// reconnect, and (b) tell the upstream broker to ensureSubscribed so the
+// Kite ticker actually starts streaming the new symbol.
+//
+// Hoisted as a module-scope-ish helper closure so all three routes use it.
+function _notifyWatchlistChange(userId, op /* 'add' | 'remove' */, symbol) {
+  if (!userId || !symbol) return;
+  let pushed = 0;
+  try {
+    for (const ws of wsClients) {
+      if (ws.userId !== userId) continue;
+      if (ws.readyState !== 1) continue;
+      if (ws.symbolSet) {
+        if (op === 'add') ws.symbolSet.add(symbol);
+        else if (op === 'remove') ws.symbolSet.delete(symbol);
+      }
+      try {
+        ws.send(JSON.stringify({ type: 'watchlist_update', op, symbol }));
+        pushed++;
+      } catch (_) {}
+    }
+  } catch (e) {
+    console.warn('[ws] notifyWatchlistChange fanout error:', e && e.message);
+  }
+  // On add: make sure upstream is subscribed so the tick stream includes it.
+  // On remove: deliberately leave upstream alone — other users may still
+  // want this symbol; the per-WS filter (T-131) handles isolation at zero
+  // upstream cost.
+  if (op === 'add') {
+    try {
+      if (broker && typeof broker.ensureSubscribed === 'function') {
+        broker.ensureSubscribed([symbol]).catch((err) =>
+          console.warn('[ws] upstream ensureSubscribed failed for', symbol, ':', err && err.message)
+        );
+      }
+    } catch (_) {}
+  }
+  audit('watchlist.notify', { userId, op, symbol, fanout: pushed });
+}
+
 app.get('/api/me/watchlist', withAuth((req, res) => {
   res.json({ ok:true, items: db.watchlist.list(req.user.id) });
 }));
 app.post('/api/me/watchlist', withAuth((req, res) => {
   const { symbol, exchange } = req.body || {};
   if (!symbol) return res.status(400).json({ ok:false, reason:'symbol required' });
-  db.watchlist.add(req.user.id, String(symbol).toUpperCase(), exchange || 'NSE');
+  const sym = String(symbol).toUpperCase();
+  db.watchlist.add(req.user.id, sym, exchange || 'NSE');
+  _notifyWatchlistChange(req.user.id, 'add', sym);
   res.json({ ok:true });
 }));
 app.delete('/api/me/watchlist/:symbol', withAuth((req, res) => {
-  db.watchlist.remove(req.user.id, req.params.symbol.toUpperCase());
+  const sym = req.params.symbol.toUpperCase();
+  db.watchlist.remove(req.user.id, sym);
+  _notifyWatchlistChange(req.user.id, 'remove', sym);
   res.json({ ok:true });
 }));
 
