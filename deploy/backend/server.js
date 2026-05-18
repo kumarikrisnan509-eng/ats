@@ -305,7 +305,11 @@ async function init() {
     // docker logs.)
     try {
       const { createCronReauth } = require('./cron-reauth');
-      _cronReauth = createCronReauth({ db, vault, audit, postTelegram });
+      // T99-T106: pass the global broker so cron-reauth can also resume
+      // the in-memory zerodha-broker singleton after a successful token
+      // rotation. Without this, the broker stays in _stalledOnToken state
+      // from the prior day even after the DB has a fresh token.
+      _cronReauth = createCronReauth({ db, vault, audit, postTelegram, broker });
       _cronReauth.start();
     } catch (e) {
       console.error('[server] cron-reauth init failed:', e && e.message);

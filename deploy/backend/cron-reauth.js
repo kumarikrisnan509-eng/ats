@@ -34,7 +34,7 @@ function nowIst() {
   };
 }
 
-function createCronReauth({ db, vault, audit, postTelegram }) {
+function createCronReauth({ db, vault, audit, postTelegram, broker }) {
   let _timer = null;
   let _lastRunDateKey = null;  // YYYY-MM-DD of last successful trigger -- prevents double-fire
   let _inFlight = false;
@@ -42,6 +42,31 @@ function createCronReauth({ db, vault, audit, postTelegram }) {
   let _runAutoReauth;
   try { _runAutoReauth = require('./me-broker')._runAutoReauth; }
   catch (e) { console.error('[cron-reauth] cannot import runAutoReauth:', e.message); return { start(){}, stop(){}, runNow: async () => ({ ok:false, reason:'no_runner' }) }; }
+
+  // T99-T106: after a successful reauth, refresh the global broker's
+  // in-memory access_token too. The cron writes the new sealed token to
+  // broker_accounts but the global zerodha-broker singleton only learned
+  // its token at boot via the rehydrate path — without this, the broker
+  // stays in the _stalledOnToken state from the prior day's expired
+  // session even though a fresh token is sitting in the DB.
+  async function _refreshGlobalBrokerToken(userId, brokerName) {
+    if (!broker || typeof broker.setAccessToken !== 'function') return;
+    if (brokerName && brokerName !== 'zerodha') return;
+    try {
+      const list = db.brokers.list(userId) || [];
+      const row = list.find(r => r.broker === 'zerodha' && r.is_default) ||
+                  list.find(r => r.broker === 'zerodha');
+      if (!row) return;
+      const fullRow = db.brokers.getFull(userId, row.id);
+      if (!fullRow || !fullRow.access_token) return;
+      const accessToken = await vault.open(fullRow.access_token);
+      if (!accessToken) return;
+      broker.setAccessToken(accessToken);
+      try { audit && audit('cron.reauth.broker-rehydrate', { userId }); } catch (_) {}
+    } catch (e) {
+      console.error('[cron-reauth] global broker rehydrate failed:', e && e.message);
+    }
+  }
 
   async function runForAllEligible(triggerLabel) {
     if (_inFlight) return { ok: false, reason: 'already_running' };
@@ -61,6 +86,12 @@ function createCronReauth({ db, vault, audit, postTelegram }) {
         }
         const elapsed = Date.now() - t0;
         try { db.cron.addHistory(row.user_id, row.broker, !!result.ok, result.reason || (result.ok ? null : 'unknown'), elapsed); } catch (_) {}
+        // T99-T106: on success, also resume the global broker if it stalled
+        // on the previous day's expired token. No-op if broker not provided
+        // (multi-tenant future / non-zerodha brokers).
+        if (result && result.ok) {
+          try { await _refreshGlobalBrokerToken(row.user_id, row.broker); } catch (_) {}
+        }
         if (!result.ok && typeof postTelegram === 'function') {
           // Best-effort user notification. We don't have per-user TG handles yet, so this just goes
           // to the global TG channel with the user_id called out.
