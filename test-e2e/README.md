@@ -36,6 +36,7 @@ npx playwright test happy-path
 | `request-id-error.spec.js`  | T-79 x-request-id propagation |
 | `callback-state-absent.spec.js` | OAuth callback rejects missing `state` |
 | `internal-header-strip.spec.js` | Nginx strips internal-token from external requests |
+| `internal-bulk-rotate.spec.js` | **T-141** — T-133 internal routes (bulk-rotate, seal-token) reject public 403 |
 | `ai-trace.spec.js`          | T-122 admin LLM trace viewer |
 | `attribution-fake-pnl.spec.js` | T-80 honest-data sweep (no fake ₹1,24,800) |
 | `signals-fake-kpis.spec.js` | T-81 honest-data sweep (no fake 47/28%/71%) |
