@@ -225,21 +225,25 @@ const SecurityTab = () => (
         Sign out of all other sessions
       </button>
     </Card>
-    <Card title="Withdrawal protection" sub="Limits beyond which a trade requires manual confirmation — even in auto mode">
-      <KV label="Single-order value cap"   value="₹2,00,000"/>
-      <KV label="Daily order-count cap"    value="500 orders"/>
-      <KV label="Options notional cap"     value="₹10,00,000"/>
-      <KV label="Unusual-volume halt"      value="Enabled · 5×"/>
-      <KV label="Confirm SMS OTP > cap"    value="Enabled"/>
+    {/* T99-T105: withdrawal caps were hardcoded (₹2L single-order, 500/day,
+        ₹10L options notional). Per-user withdrawal-protection storage hasn't
+        shipped — replaced values with '—'. Audit trail likewise was 6 fake
+        security events; replaced with empty state pointing at the Activity
+        tab where /api/audit-backed user events live (T-104). */}
+    <Card title="Withdrawal protection" sub="Per-user caps not wired yet — pending settings storage">
+      <KV label="Single-order value cap"   value="—"/>
+      <KV label="Daily order-count cap"    value="—"/>
+      <KV label="Options notional cap"     value="—"/>
+      <KV label="Unusual-volume halt"      value="—"/>
+      <KV label="Confirm SMS OTP > cap"    value="—"/>
     </Card>
-    <Card title="Audit trail" sub="Security events — last 30 days">
-      <div style={{ fontSize: 12, fontFamily: "var(--mono)", color: "var(--text-3)", lineHeight: 1.9 }}>
-        <div>✓ password changed · 12 Mar 2025 · 14:22 IST · self-initiated</div>
-        <div>✓ 2FA enabled · 12 Mar 2025 · 14:24 IST · Google Authenticator</div>
-        <div>✓ backup codes viewed · 28 Mar 2025 · 11:40 IST</div>
-        <div>✓ api token rotated · 14 Apr 2026 · 09:00 IST · auto-30d</div>
-        <div>✓ new device logged in · 22 Apr 2026 · 07:18 IST · iPhone 15</div>
-        <div>✗ failed login · 23 Apr 2026 · 03:12 IST · IP 51.xx.xx.xx (blocked)</div>
+    <Card title="Security audit trail" sub="Per-user security events not yet tracked">
+      <div className="muted" style={{ padding: '16px 0', fontSize: 12, textAlign: 'center', lineHeight: 1.6 }}>
+        Password changes, 2FA toggles, backup code views, and device sign-ins
+        will appear here when per-user security event logging ships.
+        <div style={{ marginTop: 6, fontSize: 11 }}>
+          For now, see the <b>Activity</b> tab for /api/audit-backed user events.
+        </div>
       </div>
     </Card>
   </div>
