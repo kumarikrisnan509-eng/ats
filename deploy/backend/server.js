@@ -3358,6 +3358,56 @@ app.get('/api/me/pnl', withAuth((req, res) => {
   res.json({ ok:true, rows: db.pnl.recent(req.user.id, n) });
 }));
 
+// T-156: per-month historical PnL aggregation. Foundation for ungating the
+// AI Review screen's KPI band (T-136/T-139 gated visible numbers behind
+// MockData.isDemoOn() until this endpoint shipped).
+//
+// Query params:
+//   from   YYYY-MM   inclusive lower bound (default = 12 months ago)
+//   to     YYYY-MM   inclusive upper bound (default = current month)
+//
+// Response shape:
+//   { ok:true, summary:{...}, months:[{month, net_pnl, trades, wins,
+//     losses, win_rate, avg_win_inr, avg_loss_inr, max_drawdown_inr}] }
+app.get('/api/me/pnl/monthly', withAuth((req, res) => {
+  if (!db || !db._conn) return res.status(503).json({ ok: false, reason: 'db_not_ready' });
+  try {
+    const { aggregateMonthly, summarize } = require('./pnl-monthly');
+
+    // Parse from/to (YYYY-MM). Defaults: last 12 months ending this month.
+    const now = new Date();
+    const thisMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+    const m12Ago = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1));
+    const defaultFrom = `${m12Ago.getUTCFullYear()}-${String(m12Ago.getUTCMonth() + 1).padStart(2, '0')}`;
+
+    const fromMonth = /^\d{4}-\d{2}$/.test(req.query.from || '') ? req.query.from : defaultFrom;
+    const toMonth   = /^\d{4}-\d{2}$/.test(req.query.to   || '') ? req.query.to   : thisMonth;
+
+    // SQLite text comparison works correctly because exited_at is 'YYYY-MM-DD HH:MM:SS'.
+    const rows = db._conn.prepare(`
+      SELECT pnl, exited_at, strategy_tag
+      FROM paper_closed_trades
+      WHERE user_id = ?
+        AND substr(exited_at, 1, 7) >= ?
+        AND substr(exited_at, 1, 7) <= ?
+      ORDER BY exited_at ASC
+    `).all(req.user.id, fromMonth, toMonth);
+
+    const months = aggregateMonthly(rows);
+    const summary = summarize(rows);
+    res.json({
+      ok: true,
+      from: fromMonth,
+      to: toMonth,
+      summary,
+      months,
+    });
+  } catch (e) {
+    console.error('[/api/me/pnl/monthly] error:', e && e.message);
+    res.status(500).json({ ok: false, reason: 'aggregation_failed', detail: String(e && e.message || e).slice(0, 200) });
+  }
+}));
+
 // Tier 69b: per-user factor exposure (momentum / volatility / drawdown / concentration)
 // Uses real Kite historical candles for each holding. Sector mapping comes from the
 // instrument master (best-effort -- defaults to 'Unclassified').
