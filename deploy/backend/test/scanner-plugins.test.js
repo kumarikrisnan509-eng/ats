@@ -38,6 +38,48 @@ test('listPlugins includes g1-momentum and g2-mean-reversion', () => {
   assert.ok(names.includes('g2-mean-reversion'));
 });
 
+test('listPlugins includes T-163 batch g3 through g10', () => {
+  _resetForTests();
+  const names = listPlugins().map(p => p.name);
+  for (const expected of [
+    'g3-gap-fade',
+    'g4-nr7',
+    'g5-inside-bar',
+    'g6-fiftytwo-week-high',
+    'g7-fiftytwo-week-low-bounce',
+    'g8-vwap-reclaim',
+    'g9-bollinger-squeeze',
+    'g10-atr-expansion',
+  ]) {
+    assert.ok(names.includes(expected), `expected plugin ${expected} not loaded; got ${names.join(', ')}`);
+  }
+});
+
+test('listPlugins returns at least 10 plugins (G0-G10 coverage gate)', () => {
+  _resetForTests();
+  const plugins = listPlugins();
+  assert.ok(plugins.length >= 10, `expected >=10 plugins; got ${plugins.length}`);
+});
+
+test('every plugin handles empty bars without throwing', () => {
+  _resetForTests();
+  for (const p of listPlugins()) {
+    let r;
+    assert.doesNotThrow(() => { r = p.evaluate([], { symbol: 'X' }); }, `${p.name} threw on empty bars`);
+    assert.ok(r === null || r === undefined || r.hit === undefined || typeof r.hit === 'boolean',
+      `${p.name} returned wrong shape on empty bars`);
+  }
+});
+
+test('every plugin handles short bars (5) without throwing', () => {
+  _resetForTests();
+  const shortBars = [];
+  for (let i = 0; i < 5; i++) shortBars.push({ t: i, o: 100, h: 101, l: 99, c: 100, v: 1000 });
+  for (const p of listPlugins()) {
+    assert.doesNotThrow(() => p.evaluate(shortBars, { symbol: 'X' }), `${p.name} threw on 5 bars`);
+  }
+});
+
 test('runAll returns [] when no bars (every plugin returns null)', () => {
   _resetForTests();
   const hits = runAll([], { symbol: 'TCS' });
