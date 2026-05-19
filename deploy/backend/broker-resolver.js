@@ -72,7 +72,65 @@ async function buildBroker(row, vault, deps = {}) {
     return b;
   }
 
-  // TODO: dhan, angelone, upstox -- adapters exist server-side; wire them when needed
+  // T-230 (CODE-AUDIT §F.5 M3.1): per-user Upstox. Adapter expects the same
+  // shape as Zerodha (apiKey/apiSecret/accessToken + a redirect URL). The
+  // me-broker.js upsert path stores apiSecret in `refresh_token` and
+  // accessToken in `access_token` (same convention as Zerodha).
+  if (broker === 'upstox') {
+    const { UpstoxBroker } = deps.UpstoxBroker
+      ? { UpstoxBroker: deps.UpstoxBroker }
+      : require('./brokers/upstox-broker');
+    const b = new UpstoxBroker({
+      apiKey,
+      apiSecret: apiSecret || '',
+      accessToken: accessToken || '',
+      redirectUrl: process.env.UPSTOX_REDIRECT_URL || '',
+    });
+    return b;
+  }
+
+  // T-230 (CODE-AUDIT §F.5 M3.1): per-user DhanHQ. Dhan uses long-lived API
+  // tokens (no daily refresh) -- the constructor only needs accessToken +
+  // clientId. clientId is stored as `broker_user_id` (string, not sealed).
+  if (broker === 'dhan') {
+    const { DhanBroker } = deps.DhanBroker
+      ? { DhanBroker: deps.DhanBroker }
+      : require('./brokers/dhan-broker');
+    const b = new DhanBroker({
+      accessToken: accessToken || '',
+      clientId: row.broker_user_id || '',
+    });
+    return b;
+  }
+
+  // T-230 (CODE-AUDIT §F.5 M3.1): per-user AngelOne SmartAPI. Storage layout
+  // (from me-broker.js):
+  //   api_key       -> apiKey       (sealed)
+  //   broker_user_id-> clientCode   (plaintext column)
+  //   feed_token    -> password     (sealed; column name is historical -- the
+  //                    `has_password` SELECT alias in db.js:243 confirms this)
+  //   totp_seed     -> totpSeed     (sealed)
+  //   access_token  -> jwtToken     (sealed; obtained via /auth/loginByPassword,
+  //                    set via setAccessToken if the adapter exposes it)
+  if (broker === 'angelone' || broker === 'angel') {
+    const { AngelOneBroker } = deps.AngelOneBroker
+      ? { AngelOneBroker: deps.AngelOneBroker }
+      : require('./brokers/angelone-broker');
+    const password = row.feed_token ? await vault.open(row.feed_token) : null;
+    const totpSeed = row.totp_seed  ? await vault.open(row.totp_seed)  : null;
+    const b = new AngelOneBroker({
+      apiKey,
+      clientCode: row.broker_user_id || '',
+      password: password || '',
+      totpSeed: totpSeed || '',
+    });
+    if (accessToken && typeof b.setAccessToken === 'function') {
+      b.setAccessToken(accessToken);
+    }
+    return b;
+  }
+
+  // Unknown broker -- caller handles null as "no broker connected"
   return null;
 }
 
