@@ -33,6 +33,8 @@ const { mountAuthRoutes } = require('./routes/auth');
 const { STRATEGIES, mountStrategiesRoutes } = require('./routes/strategies');
 // T-223 (CODE-AUDIT F.5 M1.4 piece 6a): /api/orders/dry-run extracted.
 const { mountOrdersRoutes } = require('./routes/orders');
+// T-226 (CODE-AUDIT F.5 M1.4 piece 7a): broker tick fan-out + upstream-state broadcaster.
+const { attachUpstreamFanout } = require('./services/tick-fanout');
 const http    = require('http');
 const fs      = require('fs');
 const path    = require('path');
@@ -4659,88 +4661,18 @@ const wss = new WebSocketServer({
 
 // Single shared subscription against the broker. Adapter does the heavy lifting.
 const wsClients = new Set(); // Set<WebSocket>
-let brokerUnsubscribe = null;
-
-async function startBrokerFanout() {
-  if (brokerUnsubscribe) return;
-  brokerUnsubscribe = await broker.subscribeTicks(DEFAULT_SYMBOLS, (tick) => {
-    // 1. Evaluate alerts (synchronous, no I/O).
-    try { if (alerts) alerts.evaluate(tick); } catch (e) { /* keep loop alive */ }
-    // 2. Drive paper trading fills (synchronous, debounced persist).
-    try { if (paper) paper.onTick(tick); } catch (e) { /* keep loop alive */ }
-    // 3. Fan out to /ws clients.
-    //
-    // T-131 (Tier 75 Phase 2): per-WS tick filtering. Each client carries a
-    // ws.symbolSet (Set<string>) built on connect from DEFAULT_SYMBOLS plus
-    // their persisted watchlist, mutated by subscribe/unsubscribe messages.
-    // If a client has no symbolSet (defensive, shouldn't happen) they fall
-    // through to the legacy "everyone gets every tick" behavior so we never
-    // drop traffic by accident.
-    const sym = tick && tick.symbol;
-    const payload = JSON.stringify({ type: 'tick', ...tick });
-    for (const ws of wsClients) {
-      if (ws.readyState !== 1) continue;
-      if (ws.symbolSet && sym && !ws.symbolSet.has(sym)) continue;
-      ws.send(payload);
-    }
-  });
-}
-
-// T99-T44: upstream-state broadcaster. Polls broker.health() every 10s and
-// broadcasts {type:'upstream_state', ...} to all /ws clients when any of the
-// connected/stalledOnToken/tickStale flags flip. Frontends use this to show
-// 'data feed frozen' banners without waiting for a missed tick to expose the
-// problem. Cheap: one in-process function call per 10s.
-let _lastUpstreamState = null;
-function _broadcastUpstreamStateIfChanged() {
-  try {
-    const bh = (typeof broker.health === 'function') ? broker.health() : null;
-    if (!bh) return;
-    const cur = {
-      connected: !!bh.connected,
-      stalledOnToken: !!bh.stalledOnToken,
-      tickStale: !!bh.tickStale,
-    };
-    if (!_lastUpstreamState
-        || _lastUpstreamState.connected !== cur.connected
-        || _lastUpstreamState.stalledOnToken !== cur.stalledOnToken
-        || _lastUpstreamState.tickStale !== cur.tickStale) {
-      const prev = _lastUpstreamState;
-      _lastUpstreamState = cur;
-      const payload = JSON.stringify({ type: 'upstream_state', ...cur });
-      for (const ws of wsClients) {
-        if (ws.readyState === 1) {
-          try { ws.send(payload); } catch (e) { console.warn('[server] swallowed:', e && e.message); }
-        }
-      }
-      console.log('[ws] upstream_state changed:', cur, '->', wsClients.size, 'clients');
-
-      // T99-T64: Telegram notification on stall/recovery transitions. We
-      // only alert on the binary stalledOnToken flip — tickStale alone is
-      // less urgent (often resolves in seconds) and would be noisy. Skip
-      // the very first poll where `prev` is null (boot-time state isn't
-      // a transition, just an initial read).
-      try {
-        if (prev !== null && prev.stalledOnToken !== cur.stalledOnToken) {
-          if (cur.stalledOnToken) {
-            notify('error', 'ATS broker stalled on token', {
-              body: 'Kite WS rejected 3 consecutive reconnects (HTTP 403). Live data feed is OFFLINE. Reconnect from the Brokers screen or run sudo bash /opt/ats/scripts/morning-check.sh on the VM.',
-              fields: { time: new Date().toISOString() },
-              url: 'https://ats.rajasekarselvam.com/#brokers',
-            }).catch(e => console.warn('[server] promise rejected:', e && e.message));
-          } else {
-            notify('success', 'ATS broker recovered', {
-              body: 'Live data feed is back online. Ticker reconnecting + subscribing.',
-              fields: { time: new Date().toISOString() },
-            }).catch(e => console.warn('[server] promise rejected:', e && e.message));
-          }
-        }
-      } catch (_) { /* notify must never throw from the broadcaster */ }
-    }
-  } catch (e) { /* never throw from the interval */ }
-}
-const _upstreamStateTimer = setInterval(_broadcastUpstreamStateIfChanged, 10_000);
-if (_upstreamStateTimer.unref) _upstreamStateTimer.unref();
+// T-226 (CODE-AUDIT F.5 M1.4 piece 7a): tick fan-out + broker-health broadcaster
+// extracted to services/tick-fanout.js. broker/alerts/paper passed as getters (T-228 pattern).
+// Returns { startBrokerFanout } -- the boot IIFE awaits it after init() populates broker.
+const _tickFanout = attachUpstreamFanout({
+  wsClients,
+  DEFAULT_SYMBOLS,
+  getBroker: () => broker,
+  getAlerts: () => alerts,
+  getPaper:  () => paper,
+  notify,
+});
+const startBrokerFanout = _tickFanout.startBrokerFanout;
 
 // T99-T47: session janitor. db.sessions.purgeExpired() existed but was never
 // called anywhere — expired user_sessions rows accumulated forever (every
