@@ -1123,6 +1123,68 @@ app.use('/api', (req, res, next) => {
   return res.status(403).json({ ok: false, reason: 'cross_origin_rejected' });
 });
 
+// ---------- T-205 (CODE-AUDIT F.5 M2.1): CSRF token defense-in-depth ----------
+//
+// The Origin/Referer check above is a strong defense, but adds defense-in-depth
+// by also requiring an X-CSRF-Token header on authed mutating requests. The
+// token is derived from the session id via HMAC(SESSION_SECRET, 'csrf:' + sid),
+// so:
+//   - No DB schema change needed.
+//   - The token is unforgeable without SESSION_SECRET.
+//   - The token rotates whenever the session rotates.
+//
+// SOFT-FAIL phase: this commit only AUDITS missing or mismatched tokens
+// (audit events: csrf.token.missing, csrf.token.mismatch). It does NOT reject
+// the request. This gives the frontend a transition window to start sending
+// the header on every mutating fetch via window.fetchApi. A follow-up commit
+// flips to hard-fail (403 reason:'csrf_token_invalid') once `grep audit.log`
+// shows the token is being sent consistently.
+
+function _csrfToken(sid) {
+  if (!sid) return null;
+  return crypto.createHmac('sha256', SESSION_SECRET).update('csrf:' + sid).digest('base64url');
+}
+
+// GET /api/csrf-token: auth-gated route that returns the token derived from
+// the caller's session. Frontend reads this on app boot, caches in memory,
+// includes in X-CSRF-Token header on every mutating fetch.
+app.get('/api/csrf-token', (req, res) => {
+  const sid = readSessionCookie(req);
+  if (!sid) return res.status(401).json({ ok: false, reason: 'auth_required' });
+  const token = _csrfToken(sid);
+  return res.json({ ok: true, csrfToken: token });
+});
+
+// Middleware: audit (don't reject) on mutating requests whose X-CSRF-Token
+// doesn't match the expected HMAC. Applied to /api/* after the Origin gate.
+app.use('/api', (req, res, next) => {
+  const m = req.method;
+  if (m !== 'POST' && m !== 'PUT' && m !== 'PATCH' && m !== 'DELETE') return next();
+  // Skip bearer auth + internal callers (same logic as Origin check above).
+  if ((req.headers['authorization'] || '').startsWith('Bearer ')) return next();
+  if (req.headers['x-ats-internal'] === '1') return next();
+  if (!req.headers['x-forwarded-for']) return next();
+  // OAuth callback path can't carry headers from the broker -- skip explicitly.
+  if (req.path === '/brokers/zerodha/callback') return next();
+  if (req.path === '/v1/oauth/zerodha/callback') return next();
+  // Anonymous requests: auth check will fail first; no point in CSRF noise.
+  const sid = readSessionCookie(req);
+  if (!sid) return next();
+
+  const expected = _csrfToken(sid);
+  const got = req.headers['x-csrf-token'] || '';
+  if (!got) {
+    audit('csrf.token.missing', { path: req.path, method: m, ip: req.ip });
+    // SOFT-FAIL: let through. Flip to res.status(403) in the hard-fail commit.
+    return next();
+  }
+  if (got !== expected) {
+    audit('csrf.token.mismatch', { path: req.path, method: m, ip: req.ip });
+    return next();
+  }
+  return next();
+});
+
 // ---------- Optional bearer-token auth (env-gated) ----------
 // If ATS_OPS_KEY is set in /etc/ats/backend.env, the following routes require
 // Authorization: Bearer <ATS_OPS_KEY>. Internal IPs are exempt (auto-login flows).
