@@ -63,7 +63,7 @@ class SessionStore {
 
   async forgetTokens(userId) {
     const p = this._tokenPath(userId);
-    try { fs.unlinkSync(p); } catch {}
+    try { fs.unlinkSync(p); } catch (e) { console.debug('[sessions] swallowed:', e && e.message); }
   }
 
   listAllUserIds() {

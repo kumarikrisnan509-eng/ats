@@ -25,7 +25,7 @@ function StrategyLabAiPanel() {
           if (!stratId && j.strategies[0]) setStratId(j.strategies[0].id);
         }
       })
-      .catch(() => {});
+      .catch(e => console.warn('[screen-strategy-lab] promise rejected:', e && e.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -135,7 +135,7 @@ const StrategyLabScreen = () => {
 
   const go = (id) => {
     setTab(id);
-    try { localStorage.setItem('ats.lab.tab', id); } catch {}
+    try { localStorage.setItem('ats.lab.tab', id); } catch (e) { console.debug('[screen-strategy-lab] swallowed:', e && e.message); }
   };
 
   const ChildScreen = (

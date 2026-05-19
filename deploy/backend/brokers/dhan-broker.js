@@ -81,7 +81,7 @@ class DhanBroker {
     catch (e) { console.error('[dhan] REST probe failed:', e.message); }
   }
   async stop() {
-    try { if (this._ws) this._ws.close(); } catch (_) {}
+    try { if (this._ws) this._ws.close(); } catch (e) { console.debug('[dhan-broker] swallowed:', e && e.message); }
     this._ws = null;
     this._connected = false;
   }
@@ -225,10 +225,10 @@ class DhanBroker {
         const j = JSON.parse(data);
         if (j && j.SecurityId) tick = { instrument_token: Number(j.SecurityId), last_price: Number(j.LTP || j.LastPrice || 0), ts: this._lastTickAt };
       }
-    } catch (_) {}
+    } catch (e) { console.warn('[dhan-broker] swallowed:', e && e.message); }
     if (!tick) return;
     this._lastTicks.set(tick.instrument_token, tick);
-    for (const sub of this._tickSubscribers) { try { sub(tick); } catch (_) {} }
+    for (const sub of this._tickSubscribers) { try { sub(tick); } catch (e) { console.warn('[dhan-broker] swallowed:', e && e.message); } }
   }
   async ensureSubscribed(symbols) {
     const securityIds = (symbols || []).map(s => this._symbolToSecurityId.get(s)).filter(Boolean);

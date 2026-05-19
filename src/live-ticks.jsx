@@ -82,7 +82,7 @@
     const fallbackTimer = setTimeout(() => {
       if (!gotData) {
         // /ws unreachable or backend in mock mode without responses — keep simulator.
-        try { realSocket && realSocket.close(); } catch {}
+        try { realSocket && realSocket.close(); } catch (e) { console.debug('[live-ticks] swallowed:', e && e.message); }
       }
     }, 3000);
 
@@ -111,7 +111,7 @@
         const union = Array.from(new Set([...backendSymbols, ...Object.keys(SYMBOLS)]));
         try {
           realSocket.send(JSON.stringify({ type: "subscribe", symbols: union }));
-        } catch {}
+        } catch (e) { console.warn('[live-ticks] swallowed:', e && e.message); }
 
         // Snapshot prices NOW so the UI doesn't sit on hardcoded seeds while
         // we wait for the first live tick (which during market-closed hours
@@ -150,10 +150,10 @@
               lastTickAt = Date.now();
               tickCount += hits;
               window.dispatchEvent(new CustomEvent("tick", { detail: state() }));
-              try { console.log(`[live-ticks] snapshot from /api/quotes: ${hits} symbols`); } catch {}
+              try { console.log(`[live-ticks] snapshot from /api/quotes: ${hits} symbols`); } catch (e) { console.warn('[live-ticks] swallowed:', e && e.message); }
             }
           } catch (e) {
-            try { console.warn("[live-ticks] snapshot fetch failed:", e.message); } catch {}
+            try { console.warn("[live-ticks] snapshot fetch failed:", e.message); } catch (e) { console.warn('[live-ticks] swallowed:', e && e.message); }
           }
         })();
         return;
@@ -163,7 +163,7 @@
         upstreamConnected = !!msg.connected;
         upstreamStalledOnToken = !!msg.stalledOnToken;
         upstreamTickStale = !!msg.tickStale;
-        try { console.log("[live-ticks] upstream_state:", { connected: upstreamConnected, stalledOnToken: upstreamStalledOnToken, tickStale: upstreamTickStale }); } catch {}
+        try { console.log("[live-ticks] upstream_state:", { connected: upstreamConnected, stalledOnToken: upstreamStalledOnToken, tickStale: upstreamTickStale }); } catch (e) { console.warn('[live-ticks] swallowed:', e && e.message); }
         window.dispatchEvent(new CustomEvent("upstream-state", { detail: state().upstream }));
         return;
       }
@@ -188,13 +188,13 @@
         };
         orderUpdates.push(entry);
         if (orderUpdates.length > ORDER_UPDATES_MAX) orderUpdates.shift();
-        try { console.log("[live-ticks] order_update:", entry.status, entry.symbol, entry.orderId); } catch {}
+        try { console.log("[live-ticks] order_update:", entry.status, entry.symbol, entry.orderId); } catch (e) { console.warn('[live-ticks] swallowed:', e && e.message); }
         window.dispatchEvent(new CustomEvent("order-update", { detail: entry }));
         return;
       }
       if (msg.type === "subscribed") {
         // backend ack — log so it's visible in DevTools
-        try { console.log("[live-ticks] subscribed:", msg); } catch {}
+        try { console.log("[live-ticks] subscribed:", msg); } catch (e) { console.warn('[live-ticks] swallowed:', e && e.message); }
         return;
       }
       if (msg.type === "tick" && typeof msg.symbol === "string" && typeof msg.ltp === "number") {
@@ -496,7 +496,7 @@ const StaleIndicator = ({ compact = false }) => {
   // Read upstream state directly from LiveTicks — useConnectionState only
   // exposes the local socket fields. Cheap (one object access per render).
   let upstream = null;
-  try { upstream = window.LiveTicks && window.LiveTicks.state && window.LiveTicks.state().upstream; } catch (_) {}
+  try { upstream = window.LiveTicks && window.LiveTicks.state && window.LiveTicks.state().upstream; } catch (e) { console.warn('[live-ticks] swallowed:', e && e.message); }
   if (upstream && upstream.stalledOnToken) {
     return <span style={{ fontSize: 9, color: "var(--down)", marginLeft: 4 }} title="Broker token expired — reconnect from Brokers screen">⚠ feed offline</span>;
   }

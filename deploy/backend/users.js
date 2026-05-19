@@ -86,9 +86,9 @@ function createUsers({ db, emailAlerts, audit, secureCookie }) {
     if (first) {
       // Bootstrap: first user is admin + auto-verified (the operator).
       db.users.promoteFirstToAdmin();
-      if (audit) try { audit('user.bootstrap_admin', { userId, email }); } catch (_) {}
+      if (audit) try { audit('user.bootstrap_admin', { userId, email }); } catch (e) { console.warn('[users] swallowed:', e && e.message); }
     }
-    if (audit) try { audit('user.signup', { userId, email, bootstrap: first }); } catch (_) {}
+    if (audit) try { audit('user.signup', { userId, email, bootstrap: first }); } catch (e) { console.warn('[users] swallowed:', e && e.message); }
 
     return {
       user: db.users.byId(userId),
@@ -114,7 +114,7 @@ function createUsers({ db, emailAlerts, audit, secureCookie }) {
     const ok = await bcrypt.compare(password, u.password_hash);
     if (!ok) {
       db.users.bumpFailed(u.id);
-      if (audit) try { audit('user.login.failed', { userId: u.id, email }); } catch (_) {}
+      if (audit) try { audit('user.login.failed', { userId: u.id, email }); } catch (e) { console.warn('[users] swallowed:', e && e.message); }
       if ((u.failed_logins || 0) + 1 >= MAX_FAILED) {
         db.users.lock(u.id, _later(LOCK_DURATION_MS));
         throw new Error('too many failed attempts -- account locked 15 minutes');
@@ -127,14 +127,14 @@ function createUsers({ db, emailAlerts, audit, secureCookie }) {
     const expiresAt = _later(SESSION_TTL_MS);
     db.sessions.create(sessionId, u.id, expiresAt, ip || '', (ua || '').slice(0, 256));
 
-    if (audit) try { audit('user.login.ok', { userId: u.id, email, ip }); } catch (_) {}
+    if (audit) try { audit('user.login.ok', { userId: u.id, email, ip }); } catch (e) { console.warn('[users] swallowed:', e && e.message); }
     return { sessionId, user: db.users.byId(u.id), expiresAt };
   }
 
   function logout(sessionId) {
     if (!sessionId) return;
     db.sessions.delete(sessionId);
-    if (audit) try { audit('user.logout', { sessionId: sessionId.slice(0, 8) + '...' }); } catch (_) {}
+    if (audit) try { audit('user.logout', { sessionId: sessionId.slice(0, 8) + '...' }); } catch (e) { console.warn('[users] swallowed:', e && e.message); }
   }
 
   function getSession(sessionId) {
@@ -173,7 +173,7 @@ function createUsers({ db, emailAlerts, audit, secureCookie }) {
     if (!u) throw new Error('invalid or expired verification token');
     if (u.is_verified) return { user: u, alreadyVerified: true };
     db.users.markVerified(u.id);
-    if (audit) try { audit('user.verified', { userId: u.id, email: u.email }); } catch (_) {}
+    if (audit) try { audit('user.verified', { userId: u.id, email: u.email }); } catch (e) { console.warn('[users] swallowed:', e && e.message); }
     return { user: db.users.byId(u.id), alreadyVerified: false };
   }
 
@@ -181,11 +181,11 @@ function createUsers({ db, emailAlerts, audit, secureCookie }) {
     email = String(email || '').toLowerCase().trim();
     const u = db.users.byEmail(email);
     // Always return ok to avoid email enumeration (404 leaks signal whether email exists).
-    if (!u) { if (audit) try { audit('user.reset.unknownEmail', { email }); } catch (_) {} return { ok: true, sent: false }; }
+    if (!u) { if (audit) try { audit('user.reset.unknownEmail', { email }); } catch (e) { console.warn('[users] swallowed:', e && e.message); } return { ok: true, sent: false }; }
     const token = _hex(32);
     const exp = _later(60 * 60 * 1000);   // 1-hour TTL
     db.users.setReset(u.id, token, exp);
-    if (audit) try { audit('user.reset.requested', { userId: u.id, email }); } catch (_) {}
+    if (audit) try { audit('user.reset.requested', { userId: u.id, email }); } catch (e) { console.warn('[users] swallowed:', e && e.message); }
     if (emailAlerts && typeof emailAlerts.send === 'function') {
       const resetUrl = `${(baseUrl || 'https://ats.rajasekarselvam.com').replace(/\/$/, '')}/reset-password?token=${token}`;
       try {
@@ -195,7 +195,7 @@ function createUsers({ db, emailAlerts, audit, secureCookie }) {
           text: `Reset link (expires 1 hour): ${resetUrl}`,
           html: `<p>Click to reset your password (link expires in 1 hour):</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>If you didn't request this, ignore this email.</p>`,
         });
-      } catch (e) { if (audit) try { audit('user.reset.emailFailed', { msg: e.message }); } catch (_) {} }
+      } catch (e) { if (audit) try { audit('user.reset.emailFailed', { msg: e.message }); } catch (e) { console.warn('[users] swallowed:', e && e.message); } }
     }
     return { ok: true, sent: true, token };   // token in response only for tests; in prod it's email-only
   }
@@ -212,7 +212,7 @@ function createUsers({ db, emailAlerts, audit, secureCookie }) {
     db.users.clearReset(u.id, hash);
     // Invalidate all existing sessions for this user (force re-login)
     db._conn.prepare('DELETE FROM user_sessions WHERE user_id = ?').run(u.id);
-    if (audit) try { audit('user.reset.completed', { userId: u.id }); } catch (_) {}
+    if (audit) try { audit('user.reset.completed', { userId: u.id }); } catch (e) { console.warn('[users] swallowed:', e && e.message); }
     return { ok: true, user: db.users.byId(u.id) };
   }
 

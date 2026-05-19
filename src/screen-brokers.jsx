@@ -338,7 +338,7 @@ const BrokersScreen = () => {
           tickLagSec: j.checks.brokerTickLagSec ?? null,
           loaded: true,
         });
-      } catch (_) {}
+      } catch (e) { console.warn('[screen-brokers] swallowed:', e && e.message); }
     };
     tick();
     const id = setInterval(tick, 30000);
@@ -349,7 +349,7 @@ const BrokersScreen = () => {
   React.useEffect(() => {
     fetch('/api/v1/me/orders/by-mode', { credentials: 'include' })
       .then(r => r.json()).then(j => { if (j.ok) setRoutingCounts({ ...j.byMode, total: j.total, source: j.source }); })
-      .catch(() => {});
+      .catch(e => console.warn('[screen-brokers] promise rejected:', e && e.message));
   }, []);
   const [myBrokers, setMyBrokers] = React.useState([]);
   const [modalState, setModalState] = React.useState({ open: false, mode: 'connect', brokerName: 'Zerodha', existing: null });
@@ -362,7 +362,7 @@ const BrokersScreen = () => {
       if (!res.ok) return;
       const j = await res.json();
       if (j.ok) setMyBrokers(j.brokers || []);
-    } catch (_) {}
+    } catch (e) { console.warn('[screen-brokers] swallowed:', e && e.message); }
   }, []);
   React.useEffect(() => { refreshMyBrokers(); }, [refreshMyBrokers]);
 

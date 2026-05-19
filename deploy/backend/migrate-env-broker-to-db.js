@@ -117,7 +117,7 @@ const explicitUserId = arg('--user-id') ? parseInt(arg('--user-id'), 10) : null;
         const j = JSON.parse(fs.readFileSync(tokenFile, 'utf8'));
         return j.user_id || j.userId || '';
       }
-    } catch (_) {}
+    } catch (e) { console.warn('[migrate-env-broker-to-db] swallowed:', e && e.message); }
     return '';
   })();
 

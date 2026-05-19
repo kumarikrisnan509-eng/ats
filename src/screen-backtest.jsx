@@ -19,7 +19,7 @@ const BacktestScreen = () => {
       try {
         const d = await window.fetchApi('/api/strategies');
         if (!cancelled && d && d.ok) setLiveStrats(d.strategies || []);
-      } catch (e) {}
+      } catch (e) { console.warn('[screen-backtest] error:', e && e.message); }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -34,7 +34,7 @@ const BacktestScreen = () => {
           params: { period:14, entryRsi:30, exitRsi:65 }}),
       });
       if (d && d.ok) setLiveBacktest(d);
-    } catch (e) {} finally { setLiveBusy(false); }
+    } catch (e) { console.warn('[screen-backtest] error:', e && e.message); } finally { setLiveBusy(false); }
   };
   const [strat, setStrat] = useState("Momentum AI");
   const [, bump] = useState(0);

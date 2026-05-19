@@ -56,7 +56,7 @@ const AlertsBuilderScreen = () => {
     } catch (e) { setCreateErr(e.message); }
   };
   window.atsDeleteAlert = async (id) => {
-    try { await fetch('/api/alerts/' + encodeURIComponent(id), { method: 'DELETE', credentials: 'include' }); await refreshAlerts(); } catch {}
+    try { await fetch('/api/alerts/' + encodeURIComponent(id), { method: 'DELETE', credentials: 'include' }); await refreshAlerts(); } catch (e) { console.warn('[screen-alerts-builder] swallowed:', e && e.message); }
   };
 
   const [builderRules, setBuilderRules] = React.useState([

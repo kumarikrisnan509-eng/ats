@@ -34,7 +34,7 @@ function createMarketMeta({ db, broker }) {
     try {
       const row = get.get('holidays_nse');
       if (row && row.json) return { holidays: JSON.parse(row.json), fetchedAt: row.fetched_at, source: row.source };
-    } catch (_) {}
+    } catch (e) { console.warn('[market-meta] swallowed:', e && e.message); }
     return { holidays: STATIC_FALLBACK_HOLIDAYS, fetchedAt: null, source: 'static_fallback' };
   }
 
@@ -66,9 +66,9 @@ function createMarketMeta({ db, broker }) {
 
   // Auto-refresh once on boot + daily at 06:00 IST.
   function scheduleDailyRefresh() {
-    refreshFromBroker().catch(() => {});
+    refreshFromBroker().catch(e => console.warn('[market-meta] promise rejected:', e && e.message));
     setInterval(() => {
-      refreshFromBroker().catch(() => {});
+      refreshFromBroker().catch(e => console.warn('[market-meta] promise rejected:', e && e.message));
     }, 24 * 60 * 60 * 1000);
   }
 

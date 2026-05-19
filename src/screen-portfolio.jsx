@@ -286,11 +286,11 @@ const PortfolioScreen = () => {
       try {
         const j = await window.fetchApi('/api/me/portfolio/mf');
         if (!cancelled && j && j.ok) setMf(j.holdings || []);
-      } catch (_) {}
+      } catch (e) { console.warn('[screen-portfolio] swallowed:', e && e.message); }
       try {
         const j2 = await window.fetchApi('/api/me/portfolio/etf');
         if (!cancelled && j2 && j2.ok) setEtf(j2.holdings || []);
-      } catch (_) {}
+      } catch (e) { console.warn('[screen-portfolio] swallowed:', e && e.message); }
     })();
     return () => { cancelled = true; };
   }, []);

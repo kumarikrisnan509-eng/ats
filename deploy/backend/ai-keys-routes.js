@@ -140,7 +140,7 @@ function createAiKeysRouter({ db, vault, requireAuth, brokerResolver }) {
       const alreadySpent = db.ai.dailySpend(req.user.id);
       const budget = estimateCostBudget({ provider, model: resolvedModel, expectedInTokens: 20, expectedOutTokens: 20 });
       if (alreadySpent + budget > cap) {
-        try { db.ai.logCall({ user_id: req.user.id, workflow: 'test', provider, model: resolvedModel, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'blocked_by_cap', error: `daily cap ₹${cap} reached (spent ₹${alreadySpent.toFixed(2)})` }); } catch (_) {}
+        try { db.ai.logCall({ user_id: req.user.id, workflow: 'test', provider, model: resolvedModel, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'blocked_by_cap', error: `daily cap ₹${cap} reached (spent ₹${alreadySpent.toFixed(2)})` }); } catch (e) { console.warn('[ai-keys-routes] swallowed:', e && e.message); }
         return res.status(429).json({ ok: false, reason: 'spend_cap_exceeded', cap_inr: cap, spent_inr: +alreadySpent.toFixed(2), detail: `Daily AI spend cap of ₹${cap} reached. Raise it in Settings to continue today.` });
       }
 
@@ -175,7 +175,7 @@ function createAiKeysRouter({ db, vault, requireAuth, brokerResolver }) {
                   : /timeout/i.test(msg) ? 'timeout'
                   : 'send_failed';
       // T99-A3: log error to ai_calls (cost=0, status=error)
-      try { db.ai.logCall({ user_id: req.user.id, workflow: 'test', provider: req.body && req.body.provider, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: `${reason}: ${msg.slice(0,200)}` }); } catch (_) {}
+      try { db.ai.logCall({ user_id: req.user.id, workflow: 'test', provider: req.body && req.body.provider, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: `${reason}: ${msg.slice(0,200)}` }); } catch (e) { console.warn('[ai-keys-routes] swallowed:', e && e.message); }
       res.status(400).json({ ok: false, provider: req.body && req.body.provider, reason, detail: msg });
     }
   });
@@ -198,7 +198,7 @@ function createAiKeysRouter({ db, vault, requireAuth, brokerResolver }) {
               out[r.provider] = { calls: r.calls, cost_inr: +Number(r.cost || 0).toFixed(4), prompt_tokens: r.prompt_tokens, completion_tokens: r.completion_tokens };
             }
           }
-        } catch (_) {}
+        } catch (e) { console.warn('[ai-keys-routes] swallowed:', e && e.message); }
         byPeriod[name] = out;
       }
       const cap_inr = db.ai.dailyCapInr(req.user.id);
@@ -215,7 +215,7 @@ function createAiKeysRouter({ db, vault, requireAuth, brokerResolver }) {
             out[wf].cost_inr += Number(r.cost || 0);
             out[wf].providers[r.provider] = (out[wf].providers[r.provider] || 0) + r.calls;
           }
-        } catch (_) {}
+        } catch (e) { console.warn('[ai-keys-routes] swallowed:', e && e.message); }
         return Object.values(out).map(v => ({ ...v, cost_inr: +v.cost_inr.toFixed(4) })).sort((a,b) => b.cost_inr - a.cost_inr);
       })();
       res.json({
@@ -358,7 +358,7 @@ function createAdvisorAnalyzeRouter({ db, vault, requireAuth, brokerResolver }) 
       const alreadySpent = db.ai.dailySpend(req.user.id);
       const budget = estimateCostBudget({ provider, model, expectedInTokens: 1500, expectedOutTokens: 1500 });
       if (alreadySpent + budget > cap) {
-        try { db.ai.logCall({ user_id: req.user.id, workflow: 'analyze', provider, model, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'blocked_by_cap', error: `daily cap ₹${cap} reached (spent ₹${alreadySpent.toFixed(2)})` }); } catch (_) {}
+        try { db.ai.logCall({ user_id: req.user.id, workflow: 'analyze', provider, model, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'blocked_by_cap', error: `daily cap ₹${cap} reached (spent ₹${alreadySpent.toFixed(2)})` }); } catch (e) { console.warn('[ai-keys-routes] swallowed:', e && e.message); }
         return res.status(429).json({ ok: false, reason: 'spend_cap_exceeded', cap_inr: cap, spent_inr: +alreadySpent.toFixed(2), detail: `Daily AI spend cap of ₹${cap} reached. Raise it in Settings to continue today.` });
       }
 
@@ -388,7 +388,7 @@ function createAdvisorAnalyzeRouter({ db, vault, requireAuth, brokerResolver }) 
             topHoldings = fx.perHolding.slice(0, 10);
           }
         }
-      } catch (_) {}
+      } catch (e) { console.warn('[ai-keys-routes] swallowed:', e && e.message); }
 
       // H5: redact rupee + holdings counts before sending to LLM if user opted in
       const _prefs = (() => { try { return db.prefs.get(req.user.id); } catch (_) { return { redact_pii: 1 }; } })();
@@ -430,7 +430,7 @@ function createAdvisorAnalyzeRouter({ db, vault, requireAuth, brokerResolver }) 
         },
       });
     } catch (e) {
-      try { db.ai.logCall({ user_id: req.user.id, workflow: 'analyze', provider: req.body && req.body.provider, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e && e.message || 'analyze_failed').slice(0,200) }); } catch (_) {}
+      try { db.ai.logCall({ user_id: req.user.id, workflow: 'analyze', provider: req.body && req.body.provider, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e && e.message || 'analyze_failed').slice(0,200) }); } catch (e) { console.warn('[ai-keys-routes] swallowed:', e && e.message); }
       res.status(500).json({ ok: false, reason: 'analyze_failed', detail: e.message });
     }
   });

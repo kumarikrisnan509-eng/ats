@@ -31,7 +31,7 @@ const TickerStallBanner = ({ setRoute }) => {
       try {
         const s = window.LiveTicks && window.LiveTicks.state && window.LiveTicks.state().upstream;
         if (s) setUpstream(s);
-      } catch (_) {}
+      } catch (e) { console.warn('[ticker-stall-banner] swallowed:', e && e.message); }
     }, 1000);
     return () => {
       window.removeEventListener('upstream-state', onUpstream);

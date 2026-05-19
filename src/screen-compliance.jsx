@@ -23,7 +23,7 @@ const IpAllowlistCard = () => {
         if (cancelled) return;
         if (a) setState(a);
         if (b) setMyIp(b);
-      } catch (_) {}
+      } catch (e) { console.warn('[screen-compliance] swallowed:', e && e.message); }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -33,7 +33,7 @@ const IpAllowlistCard = () => {
       navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch (_) {}
+    } catch (e) { console.warn('[screen-compliance] swallowed:', e && e.message); }
   };
 
   const cardStyle = { padding: 14, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8 };
@@ -103,7 +103,7 @@ const TwoFactorCard = () => {
       try {
         const r = await window.fetchApi('/api/security/two-factor').catch(() => null);
         if (!cancelled && r) setS(r);
-      } catch (_) {}
+      } catch (e) { console.warn('[screen-compliance] swallowed:', e && e.message); }
     })();
     return () => { cancelled = true; };
   }, []);

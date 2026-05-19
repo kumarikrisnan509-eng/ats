@@ -174,7 +174,7 @@ const NavOverflow = ({ items, route, setRoute, groupKey }) => {
   const toggle = () => {
     const next = !expanded;
     setOpen(next);
-    try { localStorage.setItem(storageKey, next ? "1" : "0"); } catch {}
+    try { localStorage.setItem(storageKey, next ? "1" : "0"); } catch (e) { console.debug('[shell] swallowed:', e && e.message); }
   };
   return (
     <>
@@ -454,7 +454,7 @@ const NotificationsBell = ({ setRoute }) => {
     const all = new Set(items.map(i => i.id));
     const merged = new Set([...readIds, ...all]);
     setReadIds(merged);
-    try { localStorage.setItem('ats.notify.read', JSON.stringify([...merged].slice(-200))); } catch {}
+    try { localStorage.setItem('ats.notify.read', JSON.stringify([...merged].slice(-200))); } catch (e) { console.debug('[shell] swallowed:', e && e.message); }
   };
 
   const sevColor = {

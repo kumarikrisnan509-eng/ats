@@ -12,7 +12,7 @@ const AuditScreen = () => {
       try {
         const d = await window.fetchApi('/api/audit?limit=50');
         if (!cancelled && d && d.ok) setLiveAudit(d);
-      } catch (e) {}
+      } catch (e) { console.warn('[screen-audit] error:', e && e.message); }
     })();
     return () => { cancelled = true; };
   }, []);

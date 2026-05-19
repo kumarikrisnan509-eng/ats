@@ -71,7 +71,7 @@ class MockBroker extends BrokerGateway {
     this._subs.add(onTick);
     // Immediate snapshot so the UI doesn't show blank for the first 800ms.
     for (const [sym, s] of Object.entries(this._state)) {
-      try { onTick({ symbol: sym, ltp: s.ltp, ts: s.lastTs, change: 0, changePct: 0 }); } catch {}
+      try { onTick({ symbol: sym, ltp: s.ltp, ts: s.lastTs, change: 0, changePct: 0 }); } catch (e) { console.warn('[mock-broker] swallowed:', e && e.message); }
     }
     return () => { this._subs.delete(onTick); };
   }

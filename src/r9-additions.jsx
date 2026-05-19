@@ -42,7 +42,7 @@ const useSavedViews = (key, initial) => {
     try { return JSON.parse(localStorage.getItem(k)) || { current: "default", views: { default: { name: "Default", filters: initial } } }; }
     catch { return { current: "default", views: { default: { name: "Default", filters: initial } } }; }
   });
-  React.useEffect(() => { try { localStorage.setItem(k, JSON.stringify(data)); } catch {} }, [data]);
+  React.useEffect(() => { try { localStorage.setItem(k, JSON.stringify(data)); } catch (e) { console.debug('[r9-additions] swallowed:', e && e.message); } }, [data]);
   const setCurrent = (id) => setData(d => ({ ...d, current: id }));
   const saveView = (name, filters) => {
     const id = "v" + Date.now();

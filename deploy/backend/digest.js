@@ -51,16 +51,16 @@ class Digest {
     try {
       if (this.autorun && typeof this.autorun.state === 'function') autorunHistory = (this.autorun.state().history || []).slice(-50);
       else if (this.autorun && this.autorun.history) autorunHistory = this.autorun.history.slice(-50);
-    } catch (_) {}
+    } catch (e) { console.warn('[digest] swallowed:', e && e.message); }
 
     let wormState = {};
-    try { if (this.wormAudit && typeof this.wormAudit.root === 'function') wormState = this.wormAudit.root(); } catch (_) {}
+    try { if (this.wormAudit && typeof this.wormAudit.root === 'function') wormState = this.wormAudit.root(); } catch (e) { console.warn('[digest] swallowed:', e && e.message); }
 
     let newsTop = [];
     try {
       if (this.news && typeof this.news.top === 'function') newsTop = this.news.top(8) || [];
       else if (this.news && this.news.items) newsTop = this.news.items.slice(-8);
-    } catch (_) {}
+    } catch (e) { console.warn('[digest] swallowed:', e && e.message); }
 
     const totalPnl = paperStats.totalEquity != null && paperStats.cash != null
       ? (paperStats.realizedPnl || 0) + (paperStats.unrealizedPnl || 0)
@@ -153,7 +153,7 @@ WORM: ${wormState.count != null ? wormState.count + ' entries, head ' + (wormSta
     const { subject, html, text } = this.build({ kind });
     const r = await this.emailAlerts.send({ to: target, subject, text, html });
     if (this.audit) {
-      try { this.audit('digest.sent', { kind, to: target, ok: r && r.ok }); } catch (_) {}
+      try { this.audit('digest.sent', { kind, to: target, ok: r && r.ok }); } catch (e) { console.warn('[digest] swallowed:', e && e.message); }
     }
     return r;
   }

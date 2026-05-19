@@ -96,7 +96,7 @@ class AngelOneBroker {
     catch (e) { console.error('[angelone] login failed:', e.message); }
   }
   async stop() {
-    try { if (this._ws) this._ws.close(); } catch (_) {}
+    try { if (this._ws) this._ws.close(); } catch (e) { console.debug('[angelone-broker] swallowed:', e && e.message); }
     this._ws = null;
     this._connected = false;
   }
@@ -265,10 +265,10 @@ class AngelOneBroker {
         const j = JSON.parse(data);
         if (j && j.tk) tick = { instrument_token: Number(j.tk), last_price: Number(j.lp || 0) / 100, ts: this._lastTickAt };
       }
-    } catch (_) {}
+    } catch (e) { console.warn('[angelone-broker] swallowed:', e && e.message); }
     if (!tick) return;
     this._lastTicks.set(tick.instrument_token, tick);
-    for (const sub of this._tickSubscribers) { try { sub(tick); } catch (_) {} }
+    for (const sub of this._tickSubscribers) { try { sub(tick); } catch (e) { console.warn('[angelone-broker] swallowed:', e && e.message); } }
   }
   async ensureSubscribed(symbols) {
     const tokens = (symbols || []).map(s => this._symbolToToken.get(s)).filter(Boolean);

@@ -323,7 +323,7 @@ async function init() {
         broker.setOnStall(async (reason) => {
           try {
             console.log('[server] reactive reauth triggered by broker stall:', reason);
-            try { audit('broker.stall.reactive-reauth', { reason }); } catch (_) {}
+            try { audit('broker.stall.reactive-reauth', { reason }); } catch (e) { console.warn('[server] swallowed:', e && e.message); }
             await _cronReauth.runNow();
           } catch (e) {
             console.error('[server] reactive reauth error:', e && e.message);
@@ -365,7 +365,7 @@ async function init() {
         try {
           const tok = await sessions.loadTokens(uid);
           if (tok && tok.accessToken) { chosenToken = tok.accessToken; chosenSource = 'file'; }
-        } catch (_) {}
+        } catch (e) { console.warn('[server] swallowed:', e && e.message); }
       }
       if (chosenToken) {
         broker.setAccessToken(chosenToken);
@@ -552,7 +552,7 @@ app.post('/api/admin/ai-replay', express.json({ limit: '32kb' }), async (req, re
     try {
       const k = db._conn.prepare('SELECT sealed_key FROM ai_keys WHERE user_id = ? AND provider = ?').get(row.user_id, newProvider);
       if (k && k.sealed_key && vault) apiKey = await vault.open(k.sealed_key);
-    } catch (_) {}
+    } catch (e) { console.warn('[server] swallowed:', e && e.message); }
     if (!apiKey) return res.status(404).json({ ok: false, reason: 'no_provider_key_for_user' });
 
     const { callLLM } = require('./ai-advisor');
@@ -717,7 +717,7 @@ async function _buildStatus() {
         const ageMs = Date.now() - new Date(row.ts).getTime();
         const ageDays = Math.round(ageMs / 86400000);
         let lastOk = false;
-        try { const pd = JSON.parse(row.payload || '{}'); lastOk = pd.ok === true; } catch (_) {}
+        try { const pd = JSON.parse(row.payload || '{}'); lastOk = pd.ok === true; } catch (e) { console.debug('[server] swallowed:', e && e.message); }
         out.services.backups_verified = {
           ok: lastOk && ageDays <= 30,
           state: lastOk ? (ageDays <= 30 ? 'last verified ' + ageDays + 'd ago' : 'STALE — last test ' + ageDays + 'd ago')
@@ -817,7 +817,7 @@ app.get('/api/health-deep', async (_req, res) => {
         const ageMs = Date.now() - new Date(row.ts).getTime();
         const ageDays = Math.round(ageMs / 86400000);
         let lastOk = false;
-        try { const p = JSON.parse(row.payload || '{}'); lastOk = p.ok === true; } catch (_) {}
+        try { const p = JSON.parse(row.payload || '{}'); lastOk = p.ok === true; } catch (e) { console.debug('[server] swallowed:', e && e.message); }
         checks.drLastTestAgo = ageDays + 'd';
         checks.drLastTestOk = lastOk;
         checks.drStale = ageDays > 30;
@@ -940,19 +940,19 @@ app.post('/api/admin/dr-status', express.json({ limit: '16kb' }), (req, res) => 
             error: String(body.error || body.reason || '(see log)').slice(0, 200),
           },
           url: 'https://ats.rajasekarselvam.com/api/health-deep',
-        }).catch(() => {});
+        }).catch(e => console.warn('[server] promise rejected:', e && e.message));
       } else if (ok === 1 && prevOk === 0) {
         notify('success', 'ATS DR backup test recovered', {
           body: 'After a previous failure, the DR restore test passed again. Backups are verified restorable.',
           fields: { rto_sec: String(rto_sec || 'unknown'), time: new Date().toISOString() },
-        }).catch(() => {});
+        }).catch(e => console.warn('[server] promise rejected:', e && e.message));
       } else if (ok === 1 && prevTs) {
         const ageMs = Date.now() - new Date(prevTs).getTime();
         if (ageMs > 35 * 86400 * 1000) {
           notify('warn', 'ATS DR backup test ran after long gap', {
             body: `Previous test was ${Math.round(ageMs/86400000)} days ago. Cron may have been disabled or failing silently.`,
             fields: { rto_sec: String(rto_sec || 'unknown'), time: new Date().toISOString() },
-          }).catch(() => {});
+          }).catch(e => console.warn('[server] promise rejected:', e && e.message));
         }
       }
     } catch (_) { /* notify must never break dr-status recording */ }
@@ -999,7 +999,7 @@ app.use((req, res, next) => {
 // Set API_IP_WHITELIST_MODE=audit to log-only without blocking (safe rollout).
 // Bypass list: /api/health and /api/brokers/zerodha/callback are always allowed
 // (uptime monitors + Kite OAuth redirect from kite.zerodha.com).
-const ipAllowlist = buildIpAllowlist({ audit: (e, d) => { try { audit(e, d); } catch (_) {} } });
+const ipAllowlist = buildIpAllowlist({ audit: (e, d) => { try { audit(e, d); } catch (e) { console.warn('[server] swallowed:', e && e.message); } } });
 app.use(ipAllowlist);
 
 // ---------- Rate limit (per-IP, in-memory, /api/* only) ----------
@@ -1063,37 +1063,25 @@ const CSRF_ALLOWED_ORIGINS = new Set([
 app.use('/api', (req, res, next) => {
   const m = req.method;
   if (m !== 'POST' && m !== 'PUT' && m !== 'PATCH' && m !== 'DELETE') return next();
+  const ra = (req.ip || req.connection.remoteAddress || '').replace('::ffff:', '');
+  if (isInternalIp(ra)) return next();
   // Bearer-token callers are server-to-server, not cookie-auth -> not CSRF-able.
   if ((req.headers['authorization'] || '').startsWith('Bearer ')) return next();
   // Explicit skip for Zerodha OAuth callback (GET-only today, but defensive).
   if (req.path === '/brokers/zerodha/callback') return next();
   if (req.path === '/v1/oauth/zerodha/callback') return next();
-  // Internal callers (auto-login daemon, ops scripts) tag themselves with this
-  // header AND hit 127.0.0.1:8080 directly without going through nginx.
-  if (req.headers['x-ats-internal'] === '1') return next();
-  // NOTE: cannot use isInternalIp(req.ip) here -- the backend container sits
-  // behind nginx + a docker bridge, so EVERY external client appears as an
-  // internal IP from the container's POV. Instead, true server-local callers
-  // (auto-login daemon hitting 127.0.0.1:8080 directly, NOT through nginx)
-  // are identified by the absence of X-Forwarded-For. nginx always sets XFF;
-  // direct loopback callers do not.
-  const xff = req.headers['x-forwarded-for'];
-  if (!xff) return next(); // trusted local caller (no proxy hop)
   const rawOrigin = req.headers['origin'] || '';
   const rawReferer = req.headers['referer'] || '';
-  // Accept missing Origin AND missing Referer ONLY when XFF is also absent
-  // (handled above). If we got here, request came through nginx -> browser-side
-  // caller -> Origin or Referer MUST be present, else reject.
-  if (!rawOrigin && !rawReferer) {
-    audit('api.csrf.reject', { ip: req.ip, path: req.path, method: m, reason: 'no_origin_no_referer' });
-    return res.status(403).json({ ok: false, reason: 'cross_origin_rejected' });
-  }
+  // Accept missing Origin AND missing Referer (programmatic curl / native clients).
+  // Cookie auth still requires the cookie -- a CSRF attacker from a browser tab
+  // would have at least one of these headers set by the browser itself.
+  if (!rawOrigin && !rawReferer) return next();
   let checkOrigin = rawOrigin;
   if (!checkOrigin && rawReferer) {
     try { const u = new URL(rawReferer); checkOrigin = `${u.protocol}//${u.host}`; } catch (_e) { checkOrigin = ''; }
   }
   if (CSRF_ALLOWED_ORIGINS.has(checkOrigin)) return next();
-  audit('api.csrf.reject', { ip: req.ip, path: req.path, method: m, origin: rawOrigin || null, referer: rawReferer || null });
+  audit('api.csrf.reject', { ip: ra, path: req.path, method: m, origin: rawOrigin || null, referer: rawReferer || null });
   return res.status(403).json({ ok: false, reason: 'cross_origin_rejected' });
 });
 
@@ -1209,7 +1197,7 @@ app.get('/api/system/info', (_req, res) => {
       auditSize = stat.size;
       auditLastTs = new Date(stat.mtimeMs).toISOString();
     }
-  } catch {}
+  } catch (e) { console.warn('[server] swallowed:', e && e.message); }
 
   res.json({
     ok: true,
@@ -1371,7 +1359,7 @@ app.post('/api/brokers/zerodha/postback', (req, res) => {
         qty:      `${body.filled_quantity || 0} / ${body.quantity || 0}`,
         avgPrice: body.average_price || '-',
       },
-    }).catch(() => {});
+    }).catch(e => console.warn('[server] promise rejected:', e && e.message));
   }
 
   res.json({ ok: true, received: true });
@@ -1544,7 +1532,7 @@ app.get('/api/option-chain', async (req, res) => {
         const want = indexSymbolMap[underlying.toUpperCase()] || underlying;
         const hit = ticks.find(t => t.symbol === want);
         if (hit) spot = hit.ltp;
-      } catch {}
+      } catch (e) { console.warn('[server] swallowed:', e && e.message); }
     }
 
     // If still no spot, try REST quote for indices (needs "NSE:NIFTY 50" key).
@@ -1557,7 +1545,7 @@ app.get('/api/option-chain', async (req, res) => {
           const v = q && (q[`NSE:${idxSym}`] || q[idxSym]);
           if (v && typeof v.last_price === 'number') spot = v.last_price;
         }
-      } catch {}
+      } catch (e) { console.warn('[server] swallowed:', e && e.message); }
     }
 
     // Quote enrichment for top-N strikes around ATM.
@@ -2034,7 +2022,7 @@ app.post('/api/me/paper/promote-check', (req, res) => {
       twofaGate = ready
         ? { pass: true, reason: 'telegram_ready' }
         : { pass: false, reason: 'telegram_not_configured', detail: 'Enable Telegram alerts in Settings so the 2FA confirm-before-trade challenge can reach you.' };
-    } catch (_) {}
+    } catch (e) { console.warn('[server] swallowed:', e && e.message); }
 
     // === Gate 4 (T99-T126 / v11-E5): fundamental blackout — no live promote
     // if the symbol has a quarterly/annual results announcement within ±3 days.
@@ -2323,7 +2311,7 @@ app.get('/api/preflight', async (req, res) => {
         const list = paper.list();
         const paperPending = list.filter(o => o.status === 'PENDING').length;
         let brokerPending = 0;
-        try { const _p = await pickBroker(req); if (_p.broker) { const o = await _p.broker.getOrders(); brokerPending = (o || []).filter(x => String(x.status||'').toUpperCase() === 'OPEN').length; } } catch {}
+        try { const _p = await pickBroker(req); if (_p.broker) { const o = await _p.broker.getOrders(); brokerPending = (o || []).filter(x => String(x.status||'').toUpperCase() === 'OPEN').length; } } catch (e) { console.warn('[server] swallowed:', e && e.message); }
         return { summary: { cashDrift: 0, brokerPendingCnt: brokerPending, paperPendingCnt: paperPending } };
       },
     });
@@ -2606,7 +2594,7 @@ app.put('/api/watchlist', (req, res) => {
     const symbols = watchlist.set(req.body && req.body.symbols);
     // Push the new list to the broker subscription set so /ws ticks start flowing.
     if (typeof broker.ensureSubscribed === 'function') {
-      broker.ensureSubscribed(symbols).catch(() => {});
+      broker.ensureSubscribed(symbols).catch(e => console.warn('[server] promise rejected:', e && e.message));
     }
     res.json({ ok: true, symbols });
   } catch (e) {
@@ -2620,7 +2608,7 @@ app.post('/api/watchlist/add', (req, res) => {
     const sym = req.body && req.body.symbol;
     const out = watchlist.add(sym);
     if (out.added && typeof broker.ensureSubscribed === 'function') {
-      broker.ensureSubscribed([sym]).catch(() => {});
+      broker.ensureSubscribed([sym]).catch(e => console.warn('[server] promise rejected:', e && e.message));
     }
     res.json({ ok: true, ...out });
   } catch (e) {
@@ -2790,7 +2778,7 @@ async function pickBroker(req) {
       const r = await _brokerResolver.resolveForRequest({ db, vault, globalBroker: null, fallbackToGlobal: false }, req);
       if (r.broker) return { broker: r.broker, isUserOwn: true };
     }
-  } catch (_) {}
+  } catch (e) { console.warn('[server] swallowed:', e && e.message); }
   return { broker: broker || null, isUserOwn: false };
 }
 
@@ -3266,7 +3254,7 @@ function _notifyWatchlistChange(userId, op /* 'add' | 'remove' */, symbol) {
       try {
         ws.send(JSON.stringify({ type: 'watchlist_update', op, symbol }));
         pushed++;
-      } catch (_) {}
+      } catch (e) { console.warn('[server] swallowed:', e && e.message); }
     }
   } catch (e) {
     console.warn('[ws] notifyWatchlistChange fanout error:', e && e.message);
@@ -3282,7 +3270,7 @@ function _notifyWatchlistChange(userId, op /* 'add' | 'remove' */, symbol) {
           console.warn('[ws] upstream ensureSubscribed failed for', symbol, ':', err && err.message)
         );
       }
-    } catch (_) {}
+    } catch (e) { console.warn('[server] swallowed:', e && e.message); }
   }
   audit('watchlist.notify', { userId, op, symbol, fanout: pushed });
 }
@@ -3376,9 +3364,9 @@ app.post('/api/me/paper/order', withAuth(async (req, res) => {
         try {
           const q = await broker.getQuote(symbol);
           if (q && q.ltp) ltp = Number(q.ltp);
-        } catch (_) {}
+        } catch (e) { console.warn('[server] swallowed:', e && e.message); }
       }
-    } catch (_) {}
+    } catch (e) { console.warn('[server] swallowed:', e && e.message); }
     // Fallback: use most recent quote
     if (ltp == null && broker && typeof broker.getQuote === 'function') {
       // Note: this is sync-ish approximation; for true async we'd await. Skip on cold start.
@@ -3660,13 +3648,13 @@ app.get('/api/me/factor-exposure', withAuth(async (req, res) => {
           const meta = broker.instruments.lookup(sym);
           if (meta && meta.sector) sectorMap[sym] = meta.sector;
         }
-      } catch (_) {}
+      } catch (e) { console.warn('[server] swallowed:', e && e.message); }
       if (!sectorMap[sym]) {
         try {
           const { sectorOf } = require('./sector-map');
           const s = sectorOf(sym);
           if (s) sectorMap[sym] = s;
-        } catch (_) {}
+        } catch (e) { console.warn('[server] swallowed:', e && e.message); }
       }
     }
 
@@ -3845,7 +3833,7 @@ app.get('/api/v1/me/orders/by-mode', withAuth(async (req, res) => {
     const buckets = { intraday: 0, swing: 0, options: 0, futures: 0 };
     // Paper-trading orders count for this user (synchronous, fast)
     let paperOrders = [];
-    try { paperOrders = (db && db.paper) ? db.paper.listOrders(req.user.id) : []; } catch (_) {}
+    try { paperOrders = (db && db.paper) ? db.paper.listOrders(req.user.id) : []; } catch (e) { console.warn('[server] swallowed:', e && e.message); }
     // Live-broker orders if reachable
     let liveOrders = [];
     try {
@@ -3854,7 +3842,7 @@ app.get('/api/v1/me/orders/by-mode', withAuth(async (req, res) => {
       if (ub && ub.kc && typeof ub.kc.getOrders === 'function') {
         liveOrders = await ub.kc.getOrders().catch(() => []);
       }
-    } catch (_) {}
+    } catch (e) { console.warn('[server] swallowed:', e && e.message); }
     const all = [...paperOrders, ...liveOrders];
     for (const o of all) {
       const prod = String(o.product || o.product_type || '').toUpperCase();
@@ -4062,8 +4050,8 @@ const _zerodhaCallback = async (req, res) => {
           expiresAt.setUTCHours(0, 30, 0, 0); // 06:00 IST = 00:30 UTC
           if (expiresAt < now) expiresAt.setUTCDate(expiresAt.getUTCDate() + 1);
           db.brokers.updateTokens(row.id, row.user_id, sealed, issuedAt, expiresAt.toISOString());
-          try { db.brokers.recordTest(row.user_id, row.id, true, null); } catch (_) {}
-          try { _brokerResolver.invalidate(row.user_id); } catch (_) {}
+          try { db.brokers.recordTest(row.user_id, row.id, true, null); } catch (e) { console.warn('[server] swallowed:', e && e.message); }
+          try { _brokerResolver.invalidate(row.user_id); } catch (e) { console.warn('[server] swallowed:', e && e.message); }
           audit('zerodha.callback.db-sync', { userId: row.user_id, brokerRowId: row.id, kiteClientId: targetClientId });
           console.log('[server] global-callback DB sync ok: row=' + row.id + ' user=' + row.user_id + ' kite=' + targetClientId);
         }
@@ -4105,7 +4093,7 @@ const _zerodhaCallback = async (req, res) => {
       db._conn.prepare('UPDATE broker_accounts SET broker_user_id = ? WHERE id = ?').run(session.user_id, row.id);
     }
     // Invalidate cached per-user broker instance so next request rebuilds with new token.
-    try { _brokerResolver.invalidate(userId); } catch (_) {}
+    try { _brokerResolver.invalidate(userId); } catch (e) { console.warn('[server] swallowed:', e && e.message); }
 
     audit('zerodha.connected.per-user', { userId, kiteUserId: session.user_id });
 
@@ -4115,8 +4103,8 @@ const _zerodhaCallback = async (req, res) => {
 <style>body{font-family:-apple-system,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#f8fafc;color:#0f172a}.card{padding:32px;border-radius:12px;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.08);text-align:center}.ok{color:#059669;font-size:48px}h1{font-size:18px;margin:12px 0 4px}.muted{color:#64748b;font-size:13px}</style>
 </head><body><div class="card"><div class="ok">&#10003;</div><h1>Zerodha connected</h1><div class="muted">You can close this window. Returning to ATS...</div></div>
 <script>
-  try { if (window.opener) window.opener.postMessage({ type: 'ats-broker-connected', broker: 'zerodha' }, '*'); } catch (e) {}
-  setTimeout(() => { try { window.close(); } catch (e) {} window.location.href = '/#brokers?connected=1'; }, 1200);
+  try { if (window.opener) window.opener.postMessage({ type: 'ats-broker-connected', broker: 'zerodha' }, '*'); } catch (e) { console.debug('[server] error:', e && e.message); }
+  setTimeout(() => { try { window.close(); } catch (e) { console.debug('[server] error:', e && e.message); } window.location.href = '/#brokers?connected=1'; }, 1200);
 </script></body></html>`);
   } catch (e) {
     audit('zerodha.callback.per-user.error', { userId, msg: e.message });
@@ -4743,15 +4731,15 @@ app.get('/api/brokers/zerodha/callback', async (req, res) => {
       if (session.user_id && !row.broker_user_id) {
         db._conn.prepare('UPDATE broker_accounts SET broker_user_id = ? WHERE id = ?').run(session.user_id, row.id);
       }
-      try { _brokerResolver.invalidate(userId); } catch (_) {}
+      try { _brokerResolver.invalidate(userId); } catch (e) { console.warn('[server] swallowed:', e && e.message); }
       audit('zerodha.connected.per-user', { userId, kiteUserId: session.user_id });
       res.set('Content-Type', 'text/html');
       return res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Zerodha connected</title>
 <style>body{font-family:-apple-system,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#f8fafc;color:#0f172a}.card{padding:32px;border-radius:12px;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.08);text-align:center}.ok{color:#059669;font-size:48px}h1{font-size:18px;margin:12px 0 4px}.muted{color:#64748b;font-size:13px}</style>
 </head><body><div class="card"><div class="ok">&#10003;</div><h1>Zerodha connected</h1><div class="muted">You can close this window. Returning to ATS...</div></div>
 <script>
-  try { if (window.opener) window.opener.postMessage({ type: 'ats-broker-connected', broker: 'zerodha' }, '*'); } catch (e) {}
-  setTimeout(() => { try { window.close(); } catch (e) {} window.location.href = '/#brokers?connected=1'; }, 1200);
+  try { if (window.opener) window.opener.postMessage({ type: 'ats-broker-connected', broker: 'zerodha' }, '*'); } catch (e) { console.debug('[server] error:', e && e.message); }
+  setTimeout(() => { try { window.close(); } catch (e) { console.debug('[server] error:', e && e.message); } window.location.href = '/#brokers?connected=1'; }, 1200);
 </script></body></html>`);
     } catch (err) {
       audit('zerodha.callback.per-user.error', { userId, msg: err.message });
@@ -4865,14 +4853,14 @@ app.post('/api/brokers/zerodha/auto-login/exchange', express.json(), async (req,
     notify('success', 'ATS auto-login OK', {
       body: 'Kite session established. Ticker connecting.',
       fields: { userId: session.userId, time: new Date().toISOString() },
-    }).catch(() => {});
+    }).catch(e => console.warn('[server] promise rejected:', e && e.message));
     res.json({ ok: true, userId: session.userId });
   } catch (err) {
     audit('autologin.exchange.error', { msg: err.message });
     notify('error', 'ATS auto-login exchange FAILED', {
       body: err.message.slice(0, 200),
       url: 'https://ats.rajasekarselvam.com/api/brokers/zerodha/login',
-    }).catch(() => {});
+    }).catch(e => console.warn('[server] promise rejected:', e && e.message));
     res.status(500).json({ ok: false, error: err.message });
   }
 });
@@ -4989,7 +4977,7 @@ app.post('/api/admin/internal/seal-token', express.json(), async (req, res) => {
       if (typeof db.brokers.recordTest === 'function') {
         db.brokers.recordTest(userId, row.id, true, null);
       }
-    } catch (_) {}
+    } catch (e) { console.warn('[server] swallowed:', e && e.message); }
 
     audit('bulkrotate.seal.ok', { userId, rowId: row.id, broker_user_id: row.broker_user_id });
     res.json({ ok: true, id: row.id, broker_user_id: row.broker_user_id, issued_at: issuedAt, expires_at: expiresAt });
@@ -5075,7 +5063,7 @@ function _broadcastUpstreamStateIfChanged() {
       const payload = JSON.stringify({ type: 'upstream_state', ...cur });
       for (const ws of wsClients) {
         if (ws.readyState === 1) {
-          try { ws.send(payload); } catch (_) {}
+          try { ws.send(payload); } catch (e) { console.warn('[server] swallowed:', e && e.message); }
         }
       }
       console.log('[ws] upstream_state changed:', cur, '->', wsClients.size, 'clients');
@@ -5092,12 +5080,12 @@ function _broadcastUpstreamStateIfChanged() {
               body: 'Kite WS rejected 3 consecutive reconnects (HTTP 403). Live data feed is OFFLINE. Reconnect from the Brokers screen or run sudo bash /opt/ats/scripts/morning-check.sh on the VM.',
               fields: { time: new Date().toISOString() },
               url: 'https://ats.rajasekarselvam.com/#brokers',
-            }).catch(() => {});
+            }).catch(e => console.warn('[server] promise rejected:', e && e.message));
           } else {
             notify('success', 'ATS broker recovered', {
               body: 'Live data feed is back online. Ticker reconnecting + subscribing.',
               fields: { time: new Date().toISOString() },
-            }).catch(() => {});
+            }).catch(e => console.warn('[server] promise rejected:', e && e.message));
           }
         }
       } catch (_) { /* notify must never throw from the broadcaster */ }
@@ -5168,7 +5156,7 @@ wss.on('connection', (ws, req) => {
               const u = db.users.byId(row.user_id);
               if (u && u.email) ws.userEmail = u.email;
             }
-          } catch (_) {}
+          } catch (e) { console.warn('[server] swallowed:', e && e.message); }
         }
       }
     }

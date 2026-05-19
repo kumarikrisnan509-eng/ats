@@ -12,7 +12,7 @@ const HarvestScreen = () => {
       try {
         const d = await window.fetchApi('/api/tax/harvest');
         if (!cancelled && d && d.ok) setLiveHarvest(d);
-      } catch (e) {}
+      } catch (e) { console.warn('[screen-harvest] error:', e && e.message); }
     })();
     return () => { cancelled = true; };
   }, []);

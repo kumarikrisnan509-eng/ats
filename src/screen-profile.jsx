@@ -13,15 +13,15 @@ const ProfileScreen = () => {
       try {
         const d = await window.fetchApi('/api/profile');
         if (!cancelled && d && d.ok) setLiveProfile(d.profile || null);
-      } catch (e) {}
+      } catch (e) { console.warn('[screen-profile] error:', e && e.message); }
       try {
         const d2 = await window.fetchApi('/api/me/identity');
         if (!cancelled && d2 && d2.ok) setMe(d2.user || null);
-      } catch (e) {}
+      } catch (e) { console.warn('[screen-profile] error:', e && e.message); }
       try {
         const d3 = await window.fetchApi('/api/me/prefs');
         if (!cancelled && d3 && d3.ok) setPrefs(d3.prefs || null);
-      } catch (e) {}
+      } catch (e) { console.warn('[screen-profile] error:', e && e.message); }
     })();
     return () => { cancelled = true; };
   }, []);

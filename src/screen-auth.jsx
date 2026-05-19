@@ -223,7 +223,7 @@ const LoginScreen = ({ onAuth, go }) => {
     try {
       const r = await post('/api/auth/login', { email, password });
       if (r && r.ok) {
-        try { localStorage.setItem('rc_session', JSON.stringify({ authed: true, onboarded: true, user: r.user })); } catch (_) {}
+        try { localStorage.setItem('rc_session', JSON.stringify({ authed: true, onboarded: true, user: r.user })); } catch (e) { console.debug('[screen-auth] swallowed:', e && e.message); }
         if (typeof onAuth === 'function') onAuth(r.user);
         location.hash = 'dashboard';
         location.reload();

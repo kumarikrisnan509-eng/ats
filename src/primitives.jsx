@@ -241,7 +241,7 @@ const isDemoMode = () => {
 // T83: demo mode killed. setDemoMode and useDemoMode return stable no-ops
 // so any screen that still calls them gets [false, noop] -- always live data.
 // Old localStorage key cleared on load so any leftover flag is reset.
-try { localStorage.removeItem(DEMO_KEY); } catch (_) {}
+try { localStorage.removeItem(DEMO_KEY); } catch (e) { console.debug('[primitives] swallowed:', e && e.message); }
 const setDemoMode = (_on) => { /* no-op */ };
 const useDemoMode = () => [false, () => {}];
 

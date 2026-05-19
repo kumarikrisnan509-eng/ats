@@ -90,7 +90,7 @@ function createObservability({ db }) {
           (err && err.stack ? err.stack : '').slice(0, 4000)
         );
       }
-    } catch (_) {}
+    } catch (e) { console.warn('[observability] swallowed:', e && e.message); }
     if (!res.headersSent) {
       res.status(status).json({
         ok: false,

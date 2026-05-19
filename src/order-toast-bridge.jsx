@@ -34,7 +34,7 @@ const OrderToastBridge = () => {
             title: 'Order filled',
             sub,
           });
-        } catch (_) {}
+        } catch (e) { console.warn('[order-toast-bridge] swallowed:', e && e.message); }
         return;
       }
       if (status === 'REJECTED') {
@@ -44,7 +44,7 @@ const OrderToastBridge = () => {
             title: 'Order rejected',
             sub: sub + (d.statusMsg ? ` — ${String(d.statusMsg).slice(0, 60)}` : ''),
           });
-        } catch (_) {}
+        } catch (e) { console.warn('[order-toast-bridge] swallowed:', e && e.message); }
         return;
       }
       if (status === 'CANCELLED') {
@@ -54,7 +54,7 @@ const OrderToastBridge = () => {
             title: 'Order cancelled',
             sub,
           });
-        } catch (_) {}
+        } catch (e) { console.warn('[order-toast-bridge] swallowed:', e && e.message); }
         return;
       }
       // Other statuses (OPEN, TRIGGER_PENDING, etc.) — silent.

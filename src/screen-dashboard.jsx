@@ -216,7 +216,7 @@ const TodaysRun = () => {
             ? { value: (realized >= 0 ? '+' : '') + 'INR ' + safeFix(realized, 0, '0'), sub: 'realized P&L (paper)' }
             : null,
         });
-      } catch (e) {}
+      } catch (e) { console.warn('[screen-dashboard] error:', e && e.message); }
     };
     refresh();
     const id = setInterval(refresh, 30000);
@@ -568,7 +568,7 @@ const DashboardScreen = () => {
         if (!r.ok || cancelled) return;
         const j = await r.json();
         if (!cancelled && j && j.checks) setSysHealth(j.checks);
-      } catch (_) {}
+      } catch (e) { console.warn('[screen-dashboard] swallowed:', e && e.message); }
     };
     load();
     const id = setInterval(load, 30000);
@@ -585,7 +585,7 @@ const DashboardScreen = () => {
         if (cancelled) return;
         if (r.status === 200) setLiveSummary(await r.json());
         else if (r.status === 401) setLiveSummary({ ok: false, reason: 'auth_required' });
-      } catch (e) {}
+      } catch (e) { console.warn('[screen-dashboard] error:', e && e.message); }
     };
     load();
     const id = setInterval(load, 30000);
@@ -651,7 +651,7 @@ const DashboardScreen = () => {
             : []
         });
         if (profile && profile.ok) setLiveProfile(profile.profile);
-      } catch (e) {}
+      } catch (e) { console.warn('[screen-dashboard] error:', e && e.message); }
     };
     refresh();
     const id = setInterval(refresh, 30000);
@@ -768,7 +768,7 @@ const DashboardScreen = () => {
   const [showMore, setShowMore] = React.useState(() => {
     try { return localStorage.getItem("ats.dash.more") === "1"; } catch { return false; }
   });
-  React.useEffect(() => { try { localStorage.setItem("ats.dash.more", showMore ? "1" : "0"); } catch {} }, [showMore]);
+  React.useEffect(() => { try { localStorage.setItem("ats.dash.more", showMore ? "1" : "0"); } catch (e) { console.debug('[screen-dashboard] swallowed:', e && e.message); } }, [showMore]);
 
   // Live activity feed — synthetic events generated on ticks
   const [activity, setActivity] = useState([

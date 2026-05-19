@@ -364,7 +364,7 @@ class ZerodhaBroker extends BrokerGateway {
 
   async stop() {
     if (this.ticker) {
-      try { this.ticker.disconnect(); } catch {}
+      try { this.ticker.disconnect(); } catch (e) { console.debug('[zerodha-broker] swallowed:', e && e.message); }
       this.ticker = null;
     }
     if (this._heartbeatTimer) {

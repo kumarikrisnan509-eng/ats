@@ -21,7 +21,7 @@ const OptionsBuilderScreen = () => {
             } catch (e2) {}
           }
         }
-      } catch (e) {}
+      } catch (e) { console.warn('[screen-options-builder] error:', e && e.message); }
     })();
     return () => { cancelled = true; };
   }, []);

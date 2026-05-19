@@ -22,7 +22,7 @@ const AttributionScreen = () => {
         ]);
         if (!cancelled && a && a.ok) setLiveByStrat(a.strategies || []);
         if (!cancelled && b && b.ok) setLiveDaily({ rows: b.rows || [], stats: b.stats });
-      } catch (e) {}
+      } catch (e) { console.warn('[screen-attribution] error:', e && e.message); }
       try {
         const me = await window.fetchApi('/api/me/pnl?n=30');
         if (!cancelled) setMePnl({ loading: false, rows: (me && me.rows) || [], error: null });

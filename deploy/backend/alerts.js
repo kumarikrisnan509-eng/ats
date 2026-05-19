@@ -205,7 +205,7 @@ class Alerts {
       ltp: tick.ltp,
       triggers: a.triggerCount,
     };
-    this.notify('warn', title, { body, fields }).catch(() => {});
+    this.notify('warn', title, { body, fields }).catch(e => console.warn('[alerts] promise rejected:', e && e.message));
     this.audit('alert.fire', { id: a.id, symbol: a.symbol, condition: a.condition, threshold: a.threshold, ltp: tick.ltp });
   }
 

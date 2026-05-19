@@ -31,7 +31,7 @@ const AIReviewScreen = () => {
         const j = await r.json();
         if (cancelled || !j || !j.ok) return;
         setLiveRisk(j);
-      } catch (_) {}
+      } catch (e) { console.warn('[screen-ai-review] swallowed:', e && e.message); }
     })();
     return () => { cancelled = true; };
   }, []);

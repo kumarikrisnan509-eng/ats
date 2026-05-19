@@ -106,7 +106,7 @@ const MoneyScreen = () => {
       if (sw && sw.ok) setSweepData(sw);
       if (ev && ev.ok) setEvalData(ev);
       if (bk && bk.ok && bk.buckets) setBuckets(bk.buckets);
-    } catch (e) {}
+    } catch (e) { console.warn('[screen-money] error:', e && e.message); }
   }, []);
 
   React.useEffect(() => {

@@ -25,7 +25,7 @@ const OnboardingWizard = ({ onComplete }) => {
         if (me && me.ok) setUser(me.user);
         const h  = await window.fetchApi('/api/health').catch(()=>null);
         if (h && h.broker) setBroker(h.broker);
-      } catch (_) {}
+      } catch (e) { console.warn('[screen-onboarding] swallowed:', e && e.message); }
     })();
   }, []);
 

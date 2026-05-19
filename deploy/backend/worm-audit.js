@@ -87,7 +87,7 @@ class WormAudit {
 
   /** Read the existing file (if any), advance _lastSeq + _lastHash, validate continuity. */
   init() {
-    try { fs.mkdirSync(path.dirname(this.path), { recursive: true }); } catch (_) {}
+    try { fs.mkdirSync(path.dirname(this.path), { recursive: true }); } catch (e) { console.warn('[worm-audit] swallowed:', e && e.message); }
 
     if (!fs.existsSync(this.path)) {
       this._initialized = true;

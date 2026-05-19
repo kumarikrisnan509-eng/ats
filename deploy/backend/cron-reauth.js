@@ -84,7 +84,7 @@ function createCronReauth({ db, vault, audit, postTelegram, broker, sessions }) 
       const accessToken = await vault.open(fullRow.access_token);
       if (!accessToken) return;
       broker.setAccessToken(accessToken);
-      try { audit && audit('cron.reauth.broker-rehydrate', { userId }); } catch (_) {}
+      try { audit && audit('cron.reauth.broker-rehydrate', { userId }); } catch (e) { console.warn('[cron-reauth] swallowed:', e && e.message); }
       // T99-T106b: ALSO refresh the file-based token store. The boot rehydrate
       // path (server.js init()) reads from sessions.loadTokens (filesystem),
       // not from DB. Without this update, a container restart between cron
@@ -111,7 +111,7 @@ function createCronReauth({ db, vault, audit, postTelegram, broker, sessions }) 
     try {
       const rows = db.brokers.listEligible();
       const startedAt = new Date().toISOString();
-      try { audit && audit('cron.reauth.start', { trigger: triggerLabel, count: rows.length }); } catch (_) {}
+      try { audit && audit('cron.reauth.start', { trigger: triggerLabel, count: rows.length }); } catch (e) { console.warn('[cron-reauth] swallowed:', e && e.message); }
       const results = [];
       for (const row of rows) {
         const t0 = Date.now();
@@ -130,7 +130,7 @@ function createCronReauth({ db, vault, audit, postTelegram, broker, sessions }) 
         const reasonForLog = result.ok ? null : (result.detail
           ? String(result.reason || 'unknown') + ': ' + String(result.detail).slice(0, 160)
           : String(result.reason || 'unknown'));
-        try { db.cron.addHistory(row.user_id, row.broker, !!result.ok, reasonForLog, elapsed); } catch (_) {}
+        try { db.cron.addHistory(row.user_id, row.broker, !!result.ok, reasonForLog, elapsed); } catch (e) { console.warn('[cron-reauth] swallowed:', e && e.message); }
         if (!result.ok) {
           console.error('[cron-reauth] user', row.user_id, 'failed:', reasonForLog);
           if (result.timings) {
@@ -148,7 +148,7 @@ function createCronReauth({ db, vault, audit, postTelegram, broker, sessions }) 
               timings: result.timings || null,
               kite: result.kite || null,
             });
-          } catch (_) {}
+          } catch (e) { console.warn('[cron-reauth] swallowed:', e && e.message); }
         } else if (result.timings) {
           // On success, log timings at info level so weekly reports can spot
           // trend regressions (e.g. daemon slowing down before it breaks).
@@ -158,12 +158,12 @@ function createCronReauth({ db, vault, audit, postTelegram, broker, sessions }) 
         // on the previous day's expired token. No-op if broker not provided
         // (multi-tenant future / non-zerodha brokers).
         if (result && result.ok) {
-          try { await _refreshGlobalBrokerToken(row.user_id, row.broker); } catch (_) {}
+          try { await _refreshGlobalBrokerToken(row.user_id, row.broker); } catch (e) { console.warn('[cron-reauth] swallowed:', e && e.message); }
         }
         if (!result.ok && typeof postTelegram === 'function') {
           // Best-effort user notification. We don't have per-user TG handles yet, so this just goes
           // to the global TG channel with the user_id called out.
-          try { postTelegram(`ATS auto-reauth failed for user_id=${row.user_id} broker=${row.broker} reason=${result.reason || 'unknown'}`); } catch (_) {}
+          try { postTelegram(`ATS auto-reauth failed for user_id=${row.user_id} broker=${row.broker} reason=${result.reason || 'unknown'}`); } catch (e) { console.warn('[cron-reauth] swallowed:', e && e.message); }
         }
         results.push({ user_id: row.user_id, broker: row.broker, ok: !!result.ok, reason: result.reason, elapsed_ms: elapsed });
         // Spacing between users to respect Kite rate limit + give the headless browser time to reset.
@@ -172,9 +172,9 @@ function createCronReauth({ db, vault, audit, postTelegram, broker, sessions }) 
         }
       }
       const okCount = results.filter(r => r.ok).length;
-      try { audit && audit('cron.reauth.done', { trigger: triggerLabel, ok: okCount, total: results.length, results }); } catch (_) {}
+      try { audit && audit('cron.reauth.done', { trigger: triggerLabel, ok: okCount, total: results.length, results }); } catch (e) { console.warn('[cron-reauth] swallowed:', e && e.message); }
       if (typeof postTelegram === 'function' && results.length > 0) {
-        try { postTelegram(`ATS daily auto-reauth: ${okCount}/${results.length} ok at ${startedAt}`); } catch (_) {}
+        try { postTelegram(`ATS daily auto-reauth: ${okCount}/${results.length} ok at ${startedAt}`); } catch (e) { console.warn('[cron-reauth] swallowed:', e && e.message); }
       }
       return { ok: true, total: results.length, okCount, results };
     } finally {
@@ -202,7 +202,7 @@ function createCronReauth({ db, vault, audit, postTelegram, broker, sessions }) 
       if (allOk) {
         if (attemptIdx > 1) {
           console.log(`[cron-reauth] retry chain succeeded on attempt ${attemptIdx}`);
-          try { audit && audit('cron.reauth.retry-recovered', { attempt: attemptIdx, trigger: triggerLabel }); } catch (_) {}
+          try { audit && audit('cron.reauth.retry-recovered', { attempt: attemptIdx, trigger: triggerLabel }); } catch (e) { console.warn('[cron-reauth] swallowed:', e && e.message); }
         }
         return;
       }
@@ -210,15 +210,15 @@ function createCronReauth({ db, vault, audit, postTelegram, broker, sessions }) 
       const backoffIdx = attemptIdx - 1; // attempt 1 just ran; next backoff is index 0
       if (backoffIdx >= RETRY_BACKOFF_MS.length) {
         console.error(`[cron-reauth] retry chain exhausted after ${attemptIdx} attempts — giving up until next scheduled cycle`);
-        try { audit && audit('cron.reauth.retry-exhausted', { attempts: attemptIdx, trigger: triggerLabel }); } catch (_) {}
+        try { audit && audit('cron.reauth.retry-exhausted', { attempts: attemptIdx, trigger: triggerLabel }); } catch (e) { console.warn('[cron-reauth] swallowed:', e && e.message); }
         if (typeof postTelegram === 'function') {
-          try { postTelegram(`ATS auto-reauth retry chain exhausted (${attemptIdx} attempts). Manual reauth needed via Brokers card.`); } catch (_) {}
+          try { postTelegram(`ATS auto-reauth retry chain exhausted (${attemptIdx} attempts). Manual reauth needed via Brokers card.`); } catch (e) { console.warn('[cron-reauth] swallowed:', e && e.message); }
         }
         return;
       }
       const delay = RETRY_BACKOFF_MS[backoffIdx];
       console.log(`[cron-reauth] scheduling retry ${attemptIdx} -> in ${Math.round(delay / 60000)}min`);
-      try { audit && audit('cron.reauth.retry-scheduled', { attempt: attemptIdx, delayMs: delay, trigger: triggerLabel }); } catch (_) {}
+      try { audit && audit('cron.reauth.retry-scheduled', { attempt: attemptIdx, delayMs: delay, trigger: triggerLabel }); } catch (e) { console.warn('[cron-reauth] swallowed:', e && e.message); }
       _retryTimer = setTimeout(() => { attempt().catch(e => console.error('[cron-reauth] retry error:', e.message)); }, delay);
       if (_retryTimer.unref) _retryTimer.unref();
     };

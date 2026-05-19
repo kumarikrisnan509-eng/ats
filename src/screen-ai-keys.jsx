@@ -102,17 +102,17 @@ const AiKeysScreen = () => {
           setAiMode(pr.preferences.ai_mode || 'balanced');
           setRedactPii(pr.preferences.redact_pii !== 0);
         }
-      } catch (_) {}
+      } catch (e) { console.warn('[screen-ai-keys] swallowed:', e && e.message); }
       // T99-H2: fetch router preview (what model gets picked for each workflow)
       try {
         const rp = await fetch('/api/me/ai-keys/router-preview', { credentials: 'include' }).then(r => r.json()).catch(() => null);
         if (rp && rp.ok) setRouterPreview({ workflows: rp.workflows || [], availableProviders: rp.availableProviders || [], mode: rp.mode || 'balanced' });
-      } catch (_) {}
+      } catch (e) { console.warn('[screen-ai-keys] swallowed:', e && e.message); }
       // H4: AI verdict-backtest (does following the critic make money?)
       try {
         const bt = await fetch('/api/me/ai-workflows/verdict-backtest?days=30', { credentials: 'include' }).then(r => r.json()).catch(() => null);
         if (bt && bt.ok) setRoi(bt);
-      } catch (_) {}
+      } catch (e) { console.warn('[screen-ai-keys] swallowed:', e && e.message); }
       // H8: experiments list
       try {
         const ex = await fetch('/api/me/ai-workflows/experiments', { credentials: 'include' }).then(r => r.json()).catch(() => null);
@@ -123,10 +123,10 @@ const AiKeysScreen = () => {
             fetch(`/api/me/ai-workflows/experiments/${e.id}/results?days=30`, { credentials: 'include' })
               .then(r => r.json())
               .then(j => { if (j.ok) setExpResults(prev => ({ ...prev, [e.id]: j })); })
-              .catch(() => {});
+              .catch(e => console.warn('[screen-ai-keys] promise rejected:', e && e.message));
           }
         }
-      } catch (_) {}
+      } catch (e) { console.warn('[screen-ai-keys] swallowed:', e && e.message); }
     } catch (e) { console.warn('[ai-keys] refresh failed:', e.message); }
   }, []);
   React.useEffect(() => { refresh(); }, [refresh]);
@@ -945,4 +945,4 @@ const _akRelTime = (s) => {
 };
 
 Object.assign(window, { AiKeysScreen });
-try { window.dispatchEvent(new Event('screens-changed')); } catch (_) {}
+try { window.dispatchEvent(new Event('screens-changed')); } catch (e) { console.debug('[screen-ai-keys] swallowed:', e && e.message); }

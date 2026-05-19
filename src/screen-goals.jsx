@@ -13,7 +13,7 @@ const GoalsScreen = () => {
       try {
         const d = await window.fetchApi('/api/tax/goals');
         if (!cancelled && d && d.ok) setLiveGoals(d.goals || []);
-      } catch (e) {}
+      } catch (e) { console.warn('[screen-goals] error:', e && e.message); }
     })();
     return () => { cancelled = true; };
   }, []);

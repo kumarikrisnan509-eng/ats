@@ -12,7 +12,7 @@ const ReconScreen = () => {
       try {
         const d = await window.fetchApi('/api/reconcile');
         if (!cancelled && d && d.ok) setLiveRecon(d);
-      } catch (e) {}
+      } catch (e) { console.warn('[screen-recon] error:', e && e.message); }
     })();
     return () => { cancelled = true; };
   }, []);

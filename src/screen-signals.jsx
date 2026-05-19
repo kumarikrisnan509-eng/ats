@@ -268,7 +268,7 @@ const SignalsScreen = () => {
           total_months: Array.isArray(j.months) ? j.months.length : 0,
           total_swept: (j.months || []).reduce((s, m) => s + (Number(m.total_inr) || 0), 0),
         });
-      } catch (_) {}
+      } catch (e) { console.warn('[screen-signals] swallowed:', e && e.message); }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -284,7 +284,7 @@ const SignalsScreen = () => {
   }
 
   const triggerScan = async () => {
-    try { await fetch('/api/scanner/run', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body:'{}' }); } catch {}
+    try { await fetch('/api/scanner/run', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body:'{}' }); } catch (e) { console.warn('[screen-signals] swallowed:', e && e.message); }
   };
   window.atsTriggerScan = triggerScan;
   window.atsScannerStats = scannerStats;

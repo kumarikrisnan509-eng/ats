@@ -166,7 +166,7 @@ const useUrlState = (key, defaultValue) => {
       if (v == null || v === "" || v === defaultValue) u.searchParams.delete(key);
       else u.searchParams.set(key, v);
       window.history.replaceState({}, "", u.toString());
-    } catch {}
+    } catch (e) { console.warn('[r11-additions] swallowed:', e && e.message); }
   };
   return [val, update];
 };

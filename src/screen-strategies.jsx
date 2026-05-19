@@ -41,7 +41,7 @@ const AutorunPanel = () => {
       if (Array.isArray(sList)) {
         setStrategies(sList.map(x => (typeof x === 'string' ? x : (x.id || x.name))).filter(Boolean));
       }
-    } catch (_) {}
+    } catch (e) { console.warn('[screen-strategies] swallowed:', e && e.message); }
   }, []);
   React.useEffect(() => { load(); }, [load]);
 
@@ -186,11 +186,11 @@ const StrategiesScreen = () => {
       try {
         const j = await window.fetchApi('/api/strategies');
         if (!cancelled) setBackendStrats((j && j.strategies) || []);
-      } catch {}
+      } catch (e) { console.warn('[screen-strategies] swallowed:', e && e.message); }
       try {
         const r = await window.fetchApi('/api/me/risk-metrics?days=30');
         if (!cancelled && r && r.ok) setRiskMetrics(r);
-      } catch {}
+      } catch (e) { console.warn('[screen-strategies] swallowed:', e && e.message); }
     })();
     return () => { cancelled = true; };
   }, []);

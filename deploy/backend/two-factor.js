@@ -99,12 +99,12 @@ class TwoFactor {
   consume(token) {
     const e = this._pending.get(token);
     if (!e) {
-      if (this.audit) { try { this.audit('order.2fa.consumeMiss', { token }); } catch (_) {} }
+      if (this.audit) { try { this.audit('order.2fa.consumeMiss', { token }); } catch (e) { console.warn('[two-factor] swallowed:', e && e.message); } }
       return { ok: false, reason: 'unknown_or_used' };
     }
     if (Date.now() > e.exp) {
       this._pending.delete(token);
-      if (this.audit) { try { this.audit('order.2fa.expired', { token, userId: e.userId }); } catch (_) {} }
+      if (this.audit) { try { this.audit('order.2fa.expired', { token, userId: e.userId }); } catch (e) { console.warn('[two-factor] swallowed:', e && e.message); } }
       return { ok: false, reason: 'expired' };
     }
     // Consume + mark today's pair confirmed
@@ -142,7 +142,7 @@ class TwoFactor {
   reject(token) {
     const e = this._pending.get(token);
     if (!e) {
-      if (this.audit) { try { this.audit('order.2fa.rejectMiss', { token }); } catch (_) {} }
+      if (this.audit) { try { this.audit('order.2fa.rejectMiss', { token }); } catch (e) { console.warn('[two-factor] swallowed:', e && e.message); } }
       return { ok: false, reason: 'unknown_or_used' };
     }
     this._pending.delete(token);

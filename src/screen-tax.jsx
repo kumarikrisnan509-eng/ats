@@ -18,7 +18,7 @@ const TaxScreen = () => {
           opportunities: (h && h.opportunities) || [],
           rules: (h && h.rules) || {},
         });
-      } catch (e) {}
+      } catch (e) { console.warn('[screen-tax] error:', e && e.message); }
     })();
     return () => { cancelled = true; };
   }, []);

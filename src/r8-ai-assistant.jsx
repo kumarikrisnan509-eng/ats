@@ -210,7 +210,7 @@ const TodaysPlan = () => {
   }, []);
   if (dismissed) return null;
   const dismiss = () => {
-    try { localStorage.setItem("ats.plan.dismissed", new Date().toDateString()); } catch {}
+    try { localStorage.setItem("ats.plan.dismissed", new Date().toDateString()); } catch (e) { console.debug('[r8-ai-assistant] swallowed:', e && e.message); }
     setDismissed(true);
   };
   const fmtInr = (n) => (n == null) ? '—' : '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');

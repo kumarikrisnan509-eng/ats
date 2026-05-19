@@ -100,7 +100,7 @@ async function exchangeRequestToken({ apiKey, apiSecret, requestToken }) {
         const httpStatus = res.statusCode;
         const elapsedMs = Date.now() - t0;
         let parsed = null;
-        try { parsed = JSON.parse(buf); } catch (_) {}
+        try { parsed = JSON.parse(buf); } catch (e) { console.debug('[me-broker] swallowed:', e && e.message); }
         if (parsed && parsed.status === 'success' && parsed.data && parsed.data.access_token) {
           resolve({ ok: true, accessToken: parsed.data.access_token, elapsedMs, httpStatus });
         } else {
@@ -418,7 +418,7 @@ async function runAutoReauth({ db, vault, userId, brokerRow }) {
   });
   timings.daemon_ms = Date.now() - tDaemon;
   if (!daemonResp.ok) {
-    try { db.brokers.recordTest(userId, brokerRow.id, false, daemonResp.reason || 'daemon_failed'); } catch (_) {}
+    try { db.brokers.recordTest(userId, brokerRow.id, false, daemonResp.reason || 'daemon_failed'); } catch (e) { console.warn('[me-broker] swallowed:', e && e.message); }
     return { ...daemonResp, timings };
   }
   const requestToken = daemonResp.request_token;
@@ -438,8 +438,8 @@ async function runAutoReauth({ db, vault, userId, brokerRow }) {
     // OAuth callback path already exchanged & persisted. Read fresh row to
     // get issued_at + expires_at for the return payload.
     const fresh = db.brokers.getFull(userId, brokerRow.id);
-    try { db.brokers.recordTest(userId, brokerRow.id, true, null); } catch (_) {}
-    try { require('./broker-resolver').invalidate(userId); } catch (_) {}
+    try { db.brokers.recordTest(userId, brokerRow.id, true, null); } catch (e) { console.warn('[me-broker] swallowed:', e && e.message); }
+    try { require('./broker-resolver').invalidate(userId); } catch (e) { console.warn('[me-broker] swallowed:', e && e.message); }
     return {
       ok: true,
       issuedAt: fresh && fresh.issued_at,
@@ -456,7 +456,7 @@ async function runAutoReauth({ db, vault, userId, brokerRow }) {
   } catch (e) {
     timings.exchange_ms = Date.now() - tExchange;
     // Network / timeout level errors throw.
-    try { db.brokers.recordTest(userId, brokerRow.id, false, 'exchange_failed: ' + e.message); } catch (_) {}
+    try { db.brokers.recordTest(userId, brokerRow.id, false, 'exchange_failed: ' + e.message); } catch (e) { console.warn('[me-broker] swallowed:', e && e.message); }
     return { ok: false, reason: 'exchange_failed', detail: e.message, timings };
   }
   timings.exchange_ms = Date.now() - tExchange;
@@ -470,7 +470,7 @@ async function runAutoReauth({ db, vault, userId, brokerRow }) {
       kite_raw_body:  exchangeResp.kiteRawBody,
     };
     const summary = `kite_${exchangeResp.kiteErrorType || 'unknown'}: ${exchangeResp.kiteMessage || 'no message'}`;
-    try { db.brokers.recordTest(userId, brokerRow.id, false, 'exchange_failed: ' + summary); } catch (_) {}
+    try { db.brokers.recordTest(userId, brokerRow.id, false, 'exchange_failed: ' + summary); } catch (e) { console.warn('[me-broker] swallowed:', e && e.message); }
     return { ok: false, reason: 'exchange_failed', detail: summary, kite, timings };
   }
   const accessToken = exchangeResp.accessToken;
@@ -482,7 +482,7 @@ async function runAutoReauth({ db, vault, userId, brokerRow }) {
     const expiresAt = nextTokenExpiry(issuedAt).toISOString();
     db.brokers.updateTokens(brokerRow.id, userId, sealed, issuedAt, expiresAt);
     db.brokers.recordTest(userId, brokerRow.id, true, null);
-    try { require('./broker-resolver').invalidate(userId); } catch (_) {}
+    try { require('./broker-resolver').invalidate(userId); } catch (e) { console.warn('[me-broker] swallowed:', e && e.message); }
     timings.persist_ms = Date.now() - tPersist;
     return { ok: true, issuedAt, expiresAt, timings };
   } catch (e) {

@@ -154,7 +154,7 @@ const loadModeState = () => {
   try {
     const raw = localStorage.getItem(MODE_STORAGE_KEY);
     if (raw) return JSON.parse(raw);
-  } catch {}
+  } catch (e) { console.warn('[trading-modes] swallowed:', e && e.message); }
   // Default: take each mode's defaults
   const out = {};
   MODE_IDS.forEach(id => { out[id] = { ...MODE_META[id].defaults }; });
@@ -164,8 +164,8 @@ const loadModeState = () => {
 const useModeState = () => {
   const [state, setState] = React.useState(loadModeState);
   React.useEffect(() => {
-    try { localStorage.setItem(MODE_STORAGE_KEY, JSON.stringify(state)); } catch {}
-    try { window.dispatchEvent(new CustomEvent("modes-changed")); } catch {}
+    try { localStorage.setItem(MODE_STORAGE_KEY, JSON.stringify(state)); } catch (e) { console.debug('[trading-modes] swallowed:', e && e.message); }
+    try { window.dispatchEvent(new CustomEvent("modes-changed")); } catch (e) { console.debug('[trading-modes] swallowed:', e && e.message); }
   }, [state]);
 
   const toggleMode = (id) => setState(s => ({ ...s, [id]: { ...s[id], enabled: !s[id].enabled }}));
@@ -209,7 +209,7 @@ const inferMode = (sym = "") => {
 // Used by Trading screen + Strategies "New" button so a stale default doesn't strand them.
 const getEffectiveDefaultMode = () => {
   let stored = "intraday";
-  try { stored = localStorage.getItem("ats.defaultMode") || "intraday"; } catch {}
+  try { stored = localStorage.getItem("ats.defaultMode") || "intraday"; } catch (e) { console.debug('[trading-modes] swallowed:', e && e.message); }
   if (isModeActive(stored)) return stored;
   const fallback = MODE_IDS.find(id => isModeActive(id));
   return fallback || stored;
@@ -217,8 +217,8 @@ const getEffectiveDefaultMode = () => {
 
 // Persist user-chosen default
 const setDefaultMode = (id) => {
-  try { localStorage.setItem("ats.defaultMode", id); } catch {}
-  try { window.dispatchEvent(new CustomEvent("default-mode-changed", { detail: id })); } catch {}
+  try { localStorage.setItem("ats.defaultMode", id); } catch (e) { console.debug('[trading-modes] swallowed:', e && e.message); }
+  try { window.dispatchEvent(new CustomEvent("default-mode-changed", { detail: id })); } catch (e) { console.debug('[trading-modes] swallowed:', e && e.message); }
 };
 
 Object.assign(window, {

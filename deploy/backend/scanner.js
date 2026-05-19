@@ -289,7 +289,7 @@ class Scanner {
           this.notify('info', `${arrow} ${s.symbol}`, {
             body: s.message,
             fields: { signal: s.signal, value: s.value, scanRunMode: manual ? 'manual' : 'scheduled' },
-          }).catch(() => {});
+          }).catch(e => console.warn('[scanner] promise rejected:', e && e.message));
           this.audit('scanner.signal', { symbol: s.symbol, signal: s.signal, value: s.value });
         }
       }

@@ -55,7 +55,7 @@ function App() {
       return cached && cached.authed ? cached : { authed: false, onboarded: false };
     } catch { return { authed: false, onboarded: false }; }
   });
-  const persist = (s) => { try { localStorage.setItem("rc_session", JSON.stringify(s)); } catch (_) {} setSession(s); };
+  const persist = (s) => { try { localStorage.setItem("rc_session", JSON.stringify(s)); } catch (e) { console.debug('[app] swallowed:', e && e.message); } setSession(s); };
 
   // Boot probe: ask the server who we are. If 401, drop to login screen.
   // Tier 59: also expose user globally + broker connection status so screens
@@ -78,7 +78,7 @@ function App() {
                 ? { connected: true, hasAccessToken: !!b.brokers[0].has_access_token, broker: b.brokers[0] }
                 : { connected: false };
               window.dispatchEvent(new CustomEvent('ats-auth-changed', { detail: { user: j.user, broker: window.atsBrokerStatus } }));
-            }).catch(() => {});
+            }).catch(e => console.warn('[app] promise rejected:', e && e.message));
         } else {
           persist({ authed: false, onboarded: false });
           window.atsCurrentUser = null;

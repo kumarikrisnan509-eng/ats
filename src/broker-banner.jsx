@@ -59,7 +59,7 @@ const BrokerNotConnectedBanner = ({ setRoute }) => {
         aria-label="dismiss"
         onClick={() => {
           setDismissed(true);
-          try { sessionStorage.setItem('ats_broker_banner_dismissed', '1'); } catch (_) {}
+          try { sessionStorage.setItem('ats_broker_banner_dismissed', '1'); } catch (e) { console.debug('[broker-banner] swallowed:', e && e.message); }
         }}
       >×</button>
     </div>

@@ -74,7 +74,7 @@ function _capCheck(db, userId, workflow, provider, model, est_cost_inr) {
   const cap = db.ai.dailyCapInr(userId);
   const spent = db.ai.dailySpend(userId);
   if (spent + est_cost_inr > cap) {
-    try { db.ai.logCall({ user_id: userId, workflow, provider, model, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'blocked_by_cap', error: `cap Rs${cap} (spent Rs${spent.toFixed(2)})` }); } catch (_) {}
+    try { db.ai.logCall({ user_id: userId, workflow, provider, model, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'blocked_by_cap', error: `cap Rs${cap} (spent Rs${spent.toFixed(2)})` }); } catch (e) { console.warn('[ai-workflows-routes] swallowed:', e && e.message); }
     return { blocked: true, cap_inr: cap, spent_inr: +spent.toFixed(2) };
   }
   return { blocked: false };
@@ -122,7 +122,7 @@ function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES, brokerRes
       _cachePut(cacheKey, { ts: Date.now(), response: norm, cost_inr, provider: routed.provider, model: routed.model, call_id });
       res.json({ ok: true, cached: false, ...norm, provider: routed.provider, model: routed.model, cost_inr, usage, call_id });
     } catch (e) {
-      try { db.ai.logCall({ user_id: req.user.id, workflow: 'intraday_critic', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e && e.message || 'critique_failed').slice(0,200) }); } catch (_) {}
+      try { db.ai.logCall({ user_id: req.user.id, workflow: 'intraday_critic', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e && e.message || 'critique_failed').slice(0,200) }); } catch (e) { console.warn('[ai-workflows-routes] swallowed:', e && e.message); }
       res.status(500).json({ ok: false, reason: 'critique_failed', detail: e.message });
     }
   });
@@ -164,7 +164,7 @@ function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES, brokerRes
       _cachePut(cacheKey, { ts: Date.now(), response: norm, cost_inr, provider: routed.provider, model: routed.model, call_id });
       res.json({ ok: true, cached: false, ...norm, provider: routed.provider, model: routed.model, cost_inr, usage, call_id });
     } catch (e) {
-      try { db.ai.logCall({ user_id: req.user.id, workflow: 'strategy_explain', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e && e.message || 'explain_failed').slice(0,200) }); } catch (_) {}
+      try { db.ai.logCall({ user_id: req.user.id, workflow: 'strategy_explain', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e && e.message || 'explain_failed').slice(0,200) }); } catch (e) { console.warn('[ai-workflows-routes] swallowed:', e && e.message); }
       res.status(500).json({ ok: false, reason: 'explain_failed', detail: e.message });
     }
   });
@@ -199,7 +199,7 @@ function createAiWorkflowsRouter({ db, vault, requireAuth, STRATEGIES, brokerRes
           winners: ranked.filter(r => r.pnl > 0).slice(0, 5),
           losers: ranked.filter(r => r.pnl < 0).slice(-5).reverse(),
         };
-      } catch (_) {}
+      } catch (e) { console.warn('[ai-workflows-routes] swallowed:', e && e.message); }
 
       // AI spend summary
       const spend30d = (() => {
@@ -274,7 +274,7 @@ Return JSON review only.`,
       _cachePut(cacheKey, { ts: Date.now(), response: norm, cost_inr, provider: routed.provider, model: routed.model, call_id });
       res.json({ ok: true, cached: false, ...norm, provider: routed.provider, model: routed.model, cost_inr, usage, call_id });
     } catch (e) {
-      try { db.ai.logCall({ user_id: req.user.id, workflow: 'monthly_review', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e && e.message || 'monthly_review_failed').slice(0,200) }); } catch (_) {}
+      try { db.ai.logCall({ user_id: req.user.id, workflow: 'monthly_review', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e && e.message || 'monthly_review_failed').slice(0,200) }); } catch (e) { console.warn('[ai-workflows-routes] swallowed:', e && e.message); }
       res.status(500).json({ ok: false, reason: 'monthly_review_failed', detail: e.message });
     }
   });
@@ -323,7 +323,7 @@ Return JSON review only.`,
       let surveillanceVerdict = null;
       try {
         if (surveillance) surveillanceVerdict = surveillance.classifySync(symbol);
-      } catch (_) {}
+      } catch (e) { console.warn('[ai-workflows-routes] swallowed:', e && e.message); }
 
       // 3b. Upcoming corporate events (E4)
       let earningsContext = null;
@@ -404,7 +404,7 @@ Return JSON review only.`,
           const v = series[series.length - 1];
           if (Number.isFinite(v)) rsi_now = +v.toFixed(2);
         }
-      } catch (_) {}
+      } catch (e) { console.warn('[ai-workflows-routes] swallowed:', e && e.message); }
 
       // 7a. T99-T127 (v11-E6): sector context. Useful for "TCS is IT, IT sector
       // has been weak vs broader market" kind of reasoning. Static lookup table
@@ -487,7 +487,7 @@ Return JSON verdict only.`;
       _cachePut(cacheKey, { ts: Date.now(), response: norm, cost_inr, provider: routed.provider, model: routed.model, call_id });
       res.json({ ok: true, cached: false, ...norm, provider: routed.provider, model: routed.model, cost_inr, usage, call_id });
     } catch (e) {
-      try { db.ai.logCall({ user_id: req.user.id, workflow: 'intraday_critic', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e && e.message || 'critique_rich_failed').slice(0, 200) }); } catch (_) {}
+      try { db.ai.logCall({ user_id: req.user.id, workflow: 'intraday_critic', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e && e.message || 'critique_rich_failed').slice(0, 200) }); } catch (e) { console.warn('[ai-workflows-routes] swallowed:', e && e.message); }
       res.status(500).json({ ok: false, reason: 'critique_rich_failed', detail: e.message });
     }
   });
@@ -623,7 +623,7 @@ Return JSON only.`,
       _cachePut(cacheKey, { ts: Date.now(), response: norm, cost_inr, provider: routed.provider, model: routed.model, call_id });
       res.json({ ok: true, cached: false, ...norm, provider: routed.provider, model: routed.model, cost_inr, usage, call_id });
     } catch (e) {
-      try { db.ai.logCall({ user_id: req.user.id, workflow: 'mf_pick', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e && e.message || 'mf_pick_failed').slice(0,200) }); } catch (_) {}
+      try { db.ai.logCall({ user_id: req.user.id, workflow: 'mf_pick', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e && e.message || 'mf_pick_failed').slice(0,200) }); } catch (e) { console.warn('[ai-workflows-routes] swallowed:', e && e.message); }
       res.status(500).json({ ok: false, reason: 'mf_pick_failed', detail: e.message });
     }
   });
@@ -657,7 +657,7 @@ Return JSON only.`,
       // Rough est: 3x the single-call STRONG budget
       const budget = 3 * (require('./ai-advisor').estimateCostBudget({ provider: 'anthropic', model: 'claude-sonnet-4-6', expectedInTokens: 800, expectedOutTokens: 500 }));
       if (alreadySpent + budget > cap) {
-        try { db.ai.logCall({ user_id: req.user.id, workflow: 'consensus', provider: 'multi', model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'blocked_by_cap', error: `cap Rs${cap}`, context_tag: symbol, verdict: null }); } catch (_) {}
+        try { db.ai.logCall({ user_id: req.user.id, workflow: 'consensus', provider: 'multi', model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'blocked_by_cap', error: `cap Rs${cap}`, context_tag: symbol, verdict: null }); } catch (e) { console.warn('[ai-workflows-routes] swallowed:', e && e.message); }
         return res.status(429).json({ ok: false, reason: 'spend_cap_exceeded', cap_inr: cap, spent_inr: +alreadySpent.toFixed(2) });
       }
 
@@ -676,10 +676,10 @@ Return JSON only.`,
           const cost_inr = estimateCost({ provider: keyRow.provider, model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens });
           const verdict = ['agree','caution','reject'].includes(String(advice && advice.verdict).toLowerCase()) ? String(advice.verdict).toLowerCase() : 'caution';
           let call_id = null;
-          try { call_id = db.ai.logCall({ user_id: req.user.id, workflow: 'consensus', provider: keyRow.provider, model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null, context_tag: symbol, verdict }); } catch (_) {}
+          try { call_id = db.ai.logCall({ user_id: req.user.id, workflow: 'consensus', provider: keyRow.provider, model, prompt_tokens: usage.prompt_tokens, completion_tokens: usage.completion_tokens, cost_inr, status: 'ok', error: null, context_tag: symbol, verdict }); } catch (e) { console.warn('[ai-workflows-routes] swallowed:', e && e.message); }
           return { provider: keyRow.provider, model, verdict, confidence: Math.max(0, Math.min(100, parseInt(advice && advice.confidence) || 50)), summary: String(advice && advice.summary || '').slice(0, 200), cost_inr, call_id, usage };
         } catch (e) {
-          try { db.ai.logCall({ user_id: req.user.id, workflow: 'consensus', provider: keyRow.provider, model, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e.message || 'failed').slice(0,200), context_tag: symbol, verdict: null }); } catch (_) {}
+          try { db.ai.logCall({ user_id: req.user.id, workflow: 'consensus', provider: keyRow.provider, model, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e.message || 'failed').slice(0,200), context_tag: symbol, verdict: null }); } catch (e) { console.warn('[ai-workflows-routes] swallowed:', e && e.message); }
           return { provider: keyRow.provider, model, error: e.message.slice(0, 200) };
         }
       };
@@ -837,7 +837,7 @@ Return JSON verdict only.`,
       _cachePut(cacheKey, { ts: Date.now(), response: norm, cost_inr, provider: routed.provider, model: routed.model, call_id });
       res.json({ ok: true, cached: false, ...norm, provider: routed.provider, model: routed.model, cost_inr, usage, call_id });
     } catch (e) {
-      try { db.ai.logCall({ user_id: req.user.id, workflow: 'strategy_autotune', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e.message || 'autotune_failed').slice(0,200), context_tag: strategy_id, verdict: null }); } catch (_) {}
+      try { db.ai.logCall({ user_id: req.user.id, workflow: 'strategy_autotune', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e.message || 'autotune_failed').slice(0,200), context_tag: strategy_id, verdict: null }); } catch (e) { console.warn('[ai-workflows-routes] swallowed:', e && e.message); }
       res.status(500).json({ ok: false, reason: 'autotune_failed', detail: e.message });
     }
   });
@@ -922,7 +922,7 @@ Rules:
       _cachePut(cacheKey, { ts: Date.now(), response: norm, cost_inr, provider: routed.provider, model: routed.model, call_id });
       res.json({ ok: true, cached: false, ...norm, provider: routed.provider, model: routed.model, cost_inr, usage, call_id });
     } catch (e) {
-      try { db.ai.logCall({ user_id: req.user.id, workflow: 'vision', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e.message || 'vision_failed').slice(0, 200), context_tag: null, verdict: null }); } catch (_) {}
+      try { db.ai.logCall({ user_id: req.user.id, workflow: 'vision', provider: null, model: null, prompt_tokens: 0, completion_tokens: 0, cost_inr: 0, status: 'error', error: (e.message || 'vision_failed').slice(0, 200), context_tag: null, verdict: null }); } catch (e) { console.warn('[ai-workflows-routes] swallowed:', e && e.message); }
       res.status(500).json({ ok: false, reason: 'vision_failed', detail: e.message });
     }
   });

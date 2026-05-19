@@ -59,7 +59,7 @@ async function _loadHolidays() {
         _holidaysCache = j.holidays;
       }
     }
-  } catch (_) {}
+  } catch (e) { console.warn('[market-data] swallowed:', e && e.message); }
   _holidaysLoaded = true;
 }
 if (typeof window !== 'undefined') _loadHolidays();

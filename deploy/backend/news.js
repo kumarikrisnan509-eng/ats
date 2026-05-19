@@ -237,10 +237,10 @@ class NewsFeed {
 
   start() {
     // Initial fetch on boot (don't block init)
-    this.refresh().catch(() => {});
+    this.refresh().catch(e => console.warn('[news] promise rejected:', e && e.message));
     if (this._timer) clearInterval(this._timer);
     this._timer = setInterval(() => {
-      this.refresh().catch(() => {});
+      this.refresh().catch(e => console.warn('[news] promise rejected:', e && e.message));
     }, FETCH_INTERVAL_MS);
     this._timer.unref();
   }

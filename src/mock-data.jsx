@@ -91,7 +91,7 @@ window.fetchApi = async (path, init = {}) => {
   try {
     const rid = res.headers.get('x-request-id');
     if (rid) window._lastRequestId = rid;
-  } catch (_) {}
+  } catch (e) { console.warn('[mock-data] swallowed:', e && e.message); }
   if (!res.ok) {
     const err = new Error(`${res.status} ${res.statusText}`);
     err.status = res.status;
@@ -103,7 +103,7 @@ window.fetchApi = async (path, init = {}) => {
       if (body && body.reason) err.reason = body.reason;
       if (body && body.detail) err.detail = body.detail;
       if (body && body.requestId && !err.requestId) err.requestId = body.requestId;
-    } catch (_) {}
+    } catch (e) { console.warn('[mock-data] swallowed:', e && e.message); }
     throw err;
   }
   return await res.json();
