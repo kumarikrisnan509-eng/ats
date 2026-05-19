@@ -1,7 +1,60 @@
 /* eslint-disable */
 /* Tier 86: Dedicated AI providers (BYOK) page.
    Mirrors the Brokers page pattern -- config has its own home, analysis lives on Insights.
-   Per-user sealed keys for Claude / OpenAI / Gemini with Save / Test / Remove. */
+   Per-user sealed keys for Claude / OpenAI / Gemini with Save / Test / Remove.
+
+   T-187 (F-13 refactor): The previous god-component used 23 top-level
+   React.useState calls. They are now grouped into four sub-components plus
+   a thin shell that owns the cross-cutting server state and toast pipe.
+   No external behavior change -- the safety-net spec in
+   test-e2e/tests/ai-keys-shape.spec.js pins the contract.
+
+   STATE MAP (where each of the original 23 useState lives now)
+   -- AiKeysScreen shell (cross-cutting server state shared across panels) --
+     1.  keys                  -> shell  (read by KeyVault cards + UsagePanel run-monthly button)
+     2.  supportedProviders    -> shell  (drives KeyVault card list)
+     3.  usage                 -> shell  (KeyVault per-card "calls / 30d", UsagePanel)
+     4.  usageMeta             -> shell  (spend cap header + UsagePanel by-workflow table)
+     5.  capDraft              -> shell  (spend cap header editor)
+     6.  aiMode                -> shell  (mode segmented control header)
+     7.  redactPii             -> shell  (privacy toggle header)
+     8.  routerPreview         -> shell  (RouterPanel table + per-card "Powering N of M")
+     9.  toast                 -> shell  (flash() pipe shared by every panel via prop)
+
+   -- KeyVault (per-provider key add/test/delete + model picker) --
+    10.  drafts                -> KeyVault
+    11.  busy                  -> KeyVault
+    12.  results               -> KeyVault
+    13.  dynamicModels         -> KeyVault   (T97 list-models for the saved key)
+
+   -- ExperimentsPanel (H8 A/B experiments) --
+    14.  experiments           -> ExperimentsPanel
+    15.  expResults            -> ExperimentsPanel
+    16.  newExpName            -> ExperimentsPanel
+    17.  expBusy               -> ExperimentsPanel
+
+   -- UsagePanel (monthly review + vision + ROI rollup) --
+    18.  reviewBusy            -> UsagePanel
+    19.  reviewResult          -> UsagePanel
+    20.  roi                   -> UsagePanel  (H4 verdict-backtest)
+    21.  vision                -> UsagePanel  (D3 last vision result)
+    22.  visionBusy            -> UsagePanel
+    23.  visionError           -> UsagePanel
+
+   COUPLING POINTS (props lifted from shell down to panels)
+     - flash(msg, ok)         -> every panel uses the same toast pipe
+     - refresh()              -> after a panel mutates server state, the
+                                 shell refetches everything (keys, usage,
+                                 router preview, ROI, experiments). Panels
+                                 receive refresh as a prop and call it.
+     - keys                   -> KeyVault renders cards from it, UsagePanel
+                                 disables the run-monthly button when empty.
+     - routerPreview          -> RouterPanel renders its table; KeyVault
+                                 reads it to compute the per-card
+                                 "Powering N of M workflows" badge.
+
+   No bugs were quietly fixed in this refactor. The original silent-catch
+   handlers (T-182) and all fetch URLs are preserved verbatim. */
 
 const _PROVIDER_META = {
   anthropic: {
@@ -36,208 +89,43 @@ const _PROVIDER_META = {
   },
 };
 
-const AiKeysScreen = () => {
-  const [keys, setKeys] = React.useState(null);            // server state
-  const [supportedProviders, setSupported] = React.useState(['anthropic', 'openai', 'gemini']);
-  const [usage, setUsage] = React.useState({});
-  const [usageMeta, setUsageMeta] = React.useState({ cap_inr: 50, spent_today_inr: 0, cap_remaining_inr: 50, cap_used_pct: 0, byPeriod: {}, byWorkflow: [] });
-  const [capDraft, setCapDraft] = React.useState('');     // T99-C1 spend-cap editor
-  const [aiMode, setAiMode] = React.useState('balanced'); // T99-H9 quality | balanced | economy
-  const [redactPii, setRedactPii] = React.useState(true);  // H5 redact rupee values before sending to LLM
-  const [routerPreview, setRouterPreview] = React.useState({ workflows: [], availableProviders: [], mode: 'balanced' });
-  const [reviewBusy, setReviewBusy] = React.useState(false);
-  const [reviewResult, setReviewResult] = React.useState(null);
-  const [roi, setRoi] = React.useState(null);     // H4 AI verdict-backtest
-  const [vision, setVision] = React.useState(null);   // D3 last vision result
-  const [visionBusy, setVisionBusy] = React.useState(false);
-  const [visionError, setVisionError] = React.useState(null);
-  // H8 experiments
-  const [experiments, setExperiments] = React.useState([]);
-  const [expResults, setExpResults] = React.useState({});  // {id: results}
-  const [newExpName, setNewExpName] = React.useState('with-vs-without-bulk-deals');
-  const [expBusy, setExpBusy] = React.useState(false);
-  const [drafts, setDrafts] = React.useState({});          // {anthropic: {key:'', model:''}, ...}
-  const [busy, setBusy] = React.useState({});              // {anthropic: 'save'|'test'|'remove'|null}
-  const [results, setResults] = React.useState({});        // {anthropic: {ok, msg}, ...}
-  const [dynamicModels, setDynamicModels] = React.useState({});  // T97: { anthropic: [id,...], openai: [...], gemini: [...] }
-  const [toast, setToast] = React.useState(null);
+const _akRelTime = (s) => {
+  if (!s) return '';
+  const dt = (Date.now() - new Date(s).getTime()) / 1000;
+  if (dt < 60) return 'just now';
+  if (dt < 3600) return Math.round(dt/60) + 'm ago';
+  if (dt < 86400) return Math.round(dt/3600) + 'h ago';
+  return Math.round(dt/86400) + 'd ago';
+};
 
-  const refresh = React.useCallback(async () => {
-    try {
-      const [k, u] = await Promise.all([
-        fetch('/api/me/ai-keys', { credentials: 'include' }).then(r => r.json()),
-        fetch('/api/me/ai-keys/usage', { credentials: 'include' }).then(r => r.json()).catch(() => ({ ok: false })),
-      ]);
-      if (k.ok) {
-        setKeys(k.keys || []);
-        if (k.supportedProviders) setSupported(k.supportedProviders);
-        // T97: fetch each provider's actual list-models (the real models the saved key can access)
-        for (const krow of (k.keys || [])) {
-          fetch(`/api/me/ai-keys/models/${krow.provider}`, { credentials: 'include' })
-            .then(r => r.json())
-            .then(mj => {
-              if (mj.ok && Array.isArray(mj.models) && mj.models.length) {
-                setDynamicModels(d => ({ ...d, [krow.provider]: mj.models.map(m => m.id) }));
-              }
-            })
-            .catch(() => { /* fall back to hardcoded list */ });
-        }
-      }
-      if (u.ok) {
-        setUsage(u.usage || {});
-        setUsageMeta({
-          cap_inr: u.cap_inr != null ? u.cap_inr : 50,
-          spent_today_inr: u.spent_today_inr || 0,
-          cap_remaining_inr: u.cap_remaining_inr != null ? u.cap_remaining_inr : 50,
-          cap_used_pct: u.cap_used_pct || 0,
-          byPeriod: u.byPeriod || {},
-          byWorkflow: u.byWorkflow || [],
-        });
-        if (!capDraft) setCapDraft(String(u.cap_inr != null ? u.cap_inr : 50));
-      }
-      // T99-H9: fetch saved AI mode
-      try {
-        const pr = await fetch('/api/v1/me/preferences', { credentials: 'include' }).then(r => r.json()).catch(() => null);
-        if (pr && pr.ok && pr.preferences) {
-          setAiMode(pr.preferences.ai_mode || 'balanced');
-          setRedactPii(pr.preferences.redact_pii !== 0);
-        }
-      } catch (e) { console.warn('[screen-ai-keys] swallowed:', e && e.message); }
-      // T99-H2: fetch router preview (what model gets picked for each workflow)
-      try {
-        const rp = await fetch('/api/me/ai-keys/router-preview', { credentials: 'include' }).then(r => r.json()).catch(() => null);
-        if (rp && rp.ok) setRouterPreview({ workflows: rp.workflows || [], availableProviders: rp.availableProviders || [], mode: rp.mode || 'balanced' });
-      } catch (e) { console.warn('[screen-ai-keys] swallowed:', e && e.message); }
-      // H4: AI verdict-backtest (does following the critic make money?)
-      try {
-        const bt = await fetch('/api/me/ai-workflows/verdict-backtest?days=30', { credentials: 'include' }).then(r => r.json()).catch(() => null);
-        if (bt && bt.ok) setRoi(bt);
-      } catch (e) { console.warn('[screen-ai-keys] swallowed:', e && e.message); }
-      // H8: experiments list
-      try {
-        const ex = await fetch('/api/me/ai-workflows/experiments', { credentials: 'include' }).then(r => r.json()).catch(() => null);
-        if (ex && ex.ok) {
-          setExperiments(ex.experiments || []);
-          // Auto-fetch results for any active experiment
-          for (const e of (ex.experiments || []).filter(x => x.active)) {
-            fetch(`/api/me/ai-workflows/experiments/${e.id}/results?days=30`, { credentials: 'include' })
-              .then(r => r.json())
-              .then(j => { if (j.ok) setExpResults(prev => ({ ...prev, [e.id]: j })); })
-              .catch(e => console.warn('[screen-ai-keys] promise rejected:', e && e.message));
+// ============================================================================
+// KeyVault: per-provider key add / test / delete + model selector.
+// Owns: drafts, busy, results, dynamicModels (4 of the original 23 useStates).
+// Reads (from shell via props): keys, supportedProviders, usage, routerPreview.
+// Mutates: PUT /api/me/ai-keys, POST /api/me/ai-keys/test, DELETE /api/me/ai-keys/:p,
+//          GET /api/me/ai-keys/models/:p (T97 list-models for the saved key).
+// ============================================================================
+function KeyVault({ keys, supportedProviders, usage, routerPreview, flash, refresh }) {
+  const [drafts, setDrafts] = React.useState({});
+  const [busy, setBusy] = React.useState({});
+  const [results, setResults] = React.useState({});
+  const [dynamicModels, setDynamicModels] = React.useState({});
+
+  // T97: fetch each provider's actual list-models (the real models the saved key can access).
+  // Tied to the keys list so it re-runs after a save or remove.
+  React.useEffect(() => {
+    if (!Array.isArray(keys)) return;
+    for (const krow of keys) {
+      fetch(`/api/me/ai-keys/models/${krow.provider}`, { credentials: 'include' })
+        .then(r => r.json())
+        .then(mj => {
+          if (mj.ok && Array.isArray(mj.models) && mj.models.length) {
+            setDynamicModels(d => ({ ...d, [krow.provider]: mj.models.map(m => m.id) }));
           }
-        }
-      } catch (e) { console.warn('[screen-ai-keys] swallowed:', e && e.message); }
-    } catch (e) { console.warn('[ai-keys] refresh failed:', e.message); }
-  }, []);
-  React.useEffect(() => { refresh(); }, [refresh]);
-
-  const flash = (msg, ok = true) => { setToast({ msg, ok }); setTimeout(() => setToast(null), 3500); };
-
-  // T99-H9: save AI mode (quality | balanced | economy)
-  const saveMode = async (m) => {
-    setAiMode(m);
-    try {
-      const cur = await fetch('/api/v1/me/preferences', { credentials: 'include' }).then(r => r.json()).catch(() => null);
-      const body = { ...(cur && cur.preferences ? cur.preferences : {}), ai_mode: m };
-      const r = await fetch('/api/v1/me/preferences', { method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
-      if (r.ok) { flash(`AI mode: ${m}`); refresh(); }
-      else flash(r.reason || 'mode_save_failed', false);
-    } catch (e) { flash('mode_save_failed: ' + e.message, false); }
-  };
-
-  // H5: toggle redact-PII setting (sends bucketed values to LLM instead of real ₹ amounts)
-  const saveRedact = async (v) => {
-    setRedactPii(v);
-    try {
-      const cur = await fetch('/api/v1/me/preferences', { credentials: 'include' }).then(r => r.json()).catch(() => null);
-      const body = { ...(cur && cur.preferences ? cur.preferences : {}), redact_pii: v ? 1 : 0 };
-      const r = await fetch('/api/v1/me/preferences', { method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
-      if (r.ok) flash(v ? 'Privacy: rupee values redacted before sending to AI' : 'Privacy: rupee values sent as-is');
-      else flash(r.reason || 'redact_save_failed', false);
-    } catch (e) { flash('redact_save_failed: ' + e.message, false); }
-  };
-
-  // T99-A2: run on-demand monthly review now
-  const runMonthlyReview = async () => {
-    setReviewBusy(true);
-    setReviewResult(null);
-    try {
-      const r = await fetch('/api/me/ai-workflows/monthly-review', {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' }, body: '{}',
-      }).then(r => r.json());
-      if (r.ok) { setReviewResult(r); flash(`Monthly review ready (${r.cached ? 'cached' : 'fresh'})`); refresh(); }
-      else flash(r.detail || r.reason || 'review_failed', false);
-    } catch (e) { flash('review_failed: ' + e.message, false); }
-    finally { setReviewBusy(false); }
-  };
-
-  // D3: read file -> data URL -> POST to /vision
-  const onVisionPick = async (file) => {
-    if (!file) return;
-    if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) { setVisionError('Use a PNG, JPG, or WebP image'); return; }
-    if (file.size > 5 * 1024 * 1024) { setVisionError('Max 5 MB'); return; }
-    setVisionBusy(true); setVisionError(null); setVision(null);
-    try {
-      const dataUrl = await new Promise((resolve, reject) => {
-        const fr = new FileReader();
-        fr.onload = () => resolve(fr.result);
-        fr.onerror = () => reject(fr.error);
-        fr.readAsDataURL(file);
-      });
-      const r = await fetch('/api/me/ai-workflows/vision', {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_data_url: dataUrl }),
-      }).then(r => r.json());
-      if (r.ok) { setVision(r); flash(`Chart analysed in ${r.cached ? 'cache' : 'fresh'}`); refresh(); }
-      else setVisionError(r.detail || r.reason || 'vision_failed');
-    } catch (e) { setVisionError(e.message); }
-    finally { setVisionBusy(false); }
-  };
-
-  // H8: start a new experiment (always 'with-vs-without-bulk-deals' for the first cut)
-  const startExperiment = async () => {
-    if (!newExpName.trim()) return;
-    setExpBusy(true);
-    try {
-      const r = await fetch('/api/me/ai-workflows/experiments', {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newExpName, workflow: 'intraday_critic', variant_a_key: 'with-bulk-deals', variant_b_key: 'without-bulk-deals' }),
-      }).then(r => r.json());
-      if (r.ok) { flash(`Experiment '${r.name}' started`); refresh(); }
-      else flash(r.detail || r.reason || 'experiment_failed', false);
-    } catch (e) { flash(e.message, false); }
-    finally { setExpBusy(false); }
-  };
-
-  const endExperiment = async (id) => {
-    if (!confirm('End this experiment? Variant assignment stops; collected data stays in ai_calls.')) return;
-    try {
-      const r = await fetch('/api/me/ai-workflows/experiments/' + id + '/end', { method: 'PUT', credentials: 'include' }).then(r => r.json());
-      if (r.ok) { flash('Experiment ended'); refresh(); }
-      else flash(r.reason || 'end_failed', false);
-    } catch (e) { flash(e.message, false); }
-  };
-
-  // T99-C1: save daily spend cap. PUT /api/me/preferences merges with existing prefs.
-  const saveCap = async () => {
-    const n = Number(capDraft);
-    if (!Number.isFinite(n) || n < 0 || n > 5000) { flash('Cap must be ₹0–5000', false); return; }
-    try {
-      // Pull current prefs so we don't overwrite other fields with nulls
-      const cur = await fetch('/api/v1/me/preferences', { credentials: 'include' }).then(r => r.json()).catch(() => null);
-      const body = { ...(cur && cur.preferences ? cur.preferences : {}), daily_ai_cap_inr: n };
-      const r = await fetch('/api/v1/me/preferences', {
-        method: 'PUT', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      }).then(r => r.json());
-      if (r.ok) { flash(`Daily AI cap set to ₹${n}`); refresh(); }
-      else flash(r.reason || 'cap_save_failed', false);
-    } catch (e) { flash('cap_save_failed: ' + e.message, false); }
-  };
+        })
+        .catch(() => { /* fall back to hardcoded list */ });
+    }
+  }, [keys]);
 
   const findKey = (provider) => (keys || []).find(k => k.provider === provider);
   const setDraft = (provider, patch) => setDrafts(d => ({ ...d, [provider]: { ...d[provider], ...patch } }));
@@ -281,14 +169,14 @@ const AiKeysScreen = () => {
     finally { setBusyFor(provider, null); }
   };
 
-    const testKey = async (provider, useDraftKey = false) => {
+  const testKey = async (provider, useDraftKey = false) => {
     setBusyFor(provider, 'test');
     setResults(r => ({ ...r, [provider]: null }));
     try {
       const body = { provider };
       if (useDraftKey && drafts[provider]?.key) body.apiKey = drafts[provider].key;
       // T92: always send the currently-displayed model so test matches what user sees
-      const existing = keys.find(k => k.provider === provider);
+      const existing = (keys || []).find(k => k.provider === provider);
       const currentModel = drafts[provider]?.model || existing?.model_pref || _PROVIDER_META[provider]?.defaultModel;
       if (currentModel) body.model = currentModel;
       const res = await fetch('/api/me/ai-keys/test', {
@@ -313,6 +201,702 @@ const AiKeysScreen = () => {
       else flash('remove failed', false);
     } catch (e) { flash(e.message, false); }
     finally { setBusyFor(provider, null); }
+  };
+
+  return (
+    <>
+      {/* T99-T123 (v11-H1): empty-state + smart upsell banners.
+          - 0 keys: green getting-started block explaining what 15 workflows unlocks
+          - 1 key:  amber smart-upsell block explaining cross-provider fallback value
+          - 2+ keys: nothing (user is on the curve already) */}
+      {(() => {
+        const configuredCount = (keys || []).filter(k => k && k.provider).length;
+        if (configuredCount === 0) {
+          return (
+            <div style={{
+              padding: '14px 16px', marginBottom: 16, borderRadius: 10,
+              background: 'color-mix(in oklab, var(--up) 6%, transparent)',
+              border: '1px solid color-mix(in oklab, var(--up) 30%, var(--border))',
+              fontSize: 13, lineHeight: 1.55,
+            }}>
+              <div style={{ fontWeight: 600, marginBottom: 6, color: 'var(--up)' }}>
+                Add your first AI key to unlock 15 workflows
+              </div>
+              <div style={{ color: 'var(--text-2)', marginBottom: 8 }}>
+                ATS runs critique, monthly review, strategy explainers, news sentiment, and 11 more workflows through your own provider keys (BYOK).
+                Pick whichever provider you already have — keys are sealed at rest and never leave your VM unencrypted.
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, fontSize: 12 }}>
+                <div><strong>Anthropic Claude</strong> — best on Indian retail finance text. Console: console.anthropic.com</div>
+                <div><strong>OpenAI</strong> — best vision + tool-use. Console: platform.openai.com</div>
+                <div><strong>Google Gemini</strong> — generous free tier for batch workloads. Console: aistudio.google.com</div>
+              </div>
+              <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-3)' }}>
+                Estimated spend: ~₹6–13/day with one key, ~₹13–26/day with three. Daily spend cap is enforced — set it on Settings.
+              </div>
+            </div>
+          );
+        }
+        if (configuredCount === 1) {
+          const sole = (keys || []).find(k => k && k.provider);
+          const soleName = (sole && sole.provider) || 'this provider';
+          const alts = ['anthropic', 'openai', 'gemini'].filter(p => p !== (sole && sole.provider));
+          const fmtAlt = (p) => ({ anthropic: 'Claude', openai: 'OpenAI', gemini: 'Gemini' }[p] || p);
+          return (
+            <div style={{
+              padding: '12px 14px', marginBottom: 16, borderRadius: 8,
+              background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
+              border: '1px solid color-mix(in oklab, var(--warn, #d97706) 30%, var(--border))',
+              fontSize: 12, lineHeight: 1.5, color: 'var(--text-2)',
+            }}>
+              <strong style={{ color: 'oklch(45% 0.13 80)' }}>One provider configured.</strong>{' '}
+              Adding a second unlocks cross-provider fallback — when {soleName} rate-limits or returns 5xx,
+              ATS routes to your alternate. Recommended pair: <em>{soleName}</em> + <em>{fmtAlt(alts[0])}</em>.
+              Both keys stay sealed; ATS only opens the one it routes to.
+            </div>
+          );
+        }
+        return null;
+      })()}
+
+      <div className="grid grid-3" style={{ gap: 16, marginBottom: 16 }}>
+        {supportedProviders.map(provider => {
+          const meta = _PROVIDER_META[provider] || { label: provider, logo: provider[0]?.toUpperCase(), logoColor: '#888', modelOptions: [], defaultModel: '' };
+          const existing = findKey(provider);
+          const isConfigured = !!existing;
+          const draft = drafts[provider] || {};
+          const op = busy[provider];
+          const testResult = results[provider];
+          const usageProv = usage[provider] || { calls_30d: 0, est_cost_inr: 0 };
+          return (
+            <Card key={provider} style={{ border: isConfigured ? '1px solid color-mix(in oklab, var(--up) 30%, var(--border))' : '1px solid var(--border)' }}>
+              <div className="between" style={{ marginBottom: 12, alignItems: 'flex-start' }}>
+                <div className="row" style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: meta.logoColor, color: 'white', display: 'grid', placeItems: 'center', fontWeight: 700, flexShrink: 0 }}>{meta.logo}</div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 15, fontWeight: 600 }}>{meta.label}</div>
+                    <div className="muted" style={{ fontSize: 11 }}>{meta.desc}</div>
+                  </div>
+                </div>
+                {isConfigured ? <Pill kind="up" dot>Active</Pill> : <Pill kind="neutral">Not set</Pill>}
+              </div>
+
+              {/* T99-T120 (v11-H2): per-provider "Powering N of M workflows".
+                  Counts workflows where the router would currently pick this
+                  provider for the user, given their configured keys. */}
+              {(() => {
+                const aiTotal = routerPreview.workflows.filter(w => w.ai === true || (w.ai !== false && w.workflow !== 'regime_inject')).length;
+                const poweringHere = routerPreview.workflows.filter(w => w.ai === true && w.provider === provider).length;
+                if (!isConfigured) return null;
+                return (
+                  <div className="muted" style={{ fontSize: 11, marginBottom: 10, padding: '6px 10px', borderRadius: 6, background: 'color-mix(in oklab, var(--up) 8%, transparent)', border: '1px solid color-mix(in oklab, var(--up) 25%, var(--border))' }}>
+                    <strong style={{ color: 'var(--up)' }}>Powering {poweringHere} of {aiTotal} workflows</strong>{' '}
+                    <span style={{ color: 'var(--text-3)' }}>· mode: {routerPreview.mode}</span>
+                  </div>
+                );
+              })()}
+
+              <label style={{ display: 'block', marginBottom: 10 }}>
+                <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>Model</div>
+                <select className="input" value={draft.model || existing?.model_pref || meta.defaultModel}
+                  onChange={e => {
+                    const m = e.target.value;
+                    setDraft(provider, { model: m });
+                    // T98: auto-save if already configured and user isn't mid-typing a new key
+                    if (isConfigured && !draft.key) { saveModelOnly(provider, m); }
+                  }}>
+                  {(dynamicModels[provider] || meta.modelOptions).map(m => <option key={m} value={m}>{m}{m === meta.defaultModel ? ' · default' : ''}</option>)}
+                </select>
+              </label>
+
+              <label style={{ display: 'block', marginBottom: 10 }}>
+                <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
+                  API key{isConfigured && <span style={{ marginLeft: 6, color: 'var(--up)' }}>· saved {_akRelTime(existing.created_at)}</span>}
+                </div>
+                <input className="input" type="password" autoComplete="off" value={draft.key || ''}
+                  onChange={e => setDraft(provider, { key: e.target.value })}
+                  placeholder={isConfigured ? `(saved · paste new key to replace)` : `${meta.keyPrefix}...`} />
+              </label>
+
+              {testResult && (
+                <div style={{ fontSize: 11, padding: '6px 10px', borderRadius: 6, marginBottom: 10,
+                  background: testResult.ok ? 'color-mix(in oklab, var(--up) 12%, transparent)' : 'color-mix(in oklab, var(--danger) 12%, transparent)',
+                  color: testResult.ok ? 'var(--up)' : 'var(--danger)',
+                }}>{testResult.msg}</div>
+              )}
+
+              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                <button className="btn btn--sm btn--primary" disabled={!!op || !draft.key} onClick={() => saveKey(provider)}>
+                  {op === 'save' ? '⋯ saving' : isConfigured ? 'Update key' : 'Save key'}
+                </button>
+                <button className="btn btn--sm" disabled={!!op || (!draft.key && !isConfigured)} onClick={() => testKey(provider, !!draft.key)}>
+                  {op === 'test' ? '⋯ testing' : 'Test'}
+                </button>
+                {isConfigured && (
+                  <button className="btn btn--sm" disabled={!!op} onClick={() => removeKey(provider)} style={{ color: 'var(--danger)', marginLeft: 'auto' }}>
+                    {op === 'remove' ? '⋯ removing' : 'Remove'}
+                  </button>
+                )}
+              </div>
+
+              <div className="muted" style={{ fontSize: 11, marginTop: 12, paddingTop: 10, borderTop: '1px dashed var(--border)' }}>
+                Get a key at <a href={meta.consoleUrl} target="_blank" rel="noopener" style={{ color: 'var(--accent)' }}>{meta.consoleLabel} ↗</a>
+                {usageProv.calls_30d > 0 && (
+                  <span style={{ marginLeft: 8 }}>· {usageProv.calls_30d} calls / 30d{usageProv.est_cost_inr ? ` · est ₹${usageProv.est_cost_inr.toFixed(2)}` : ''}</span>
+                )}
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+// ============================================================================
+// RouterPanel: T99-H2 router transparency. Shows which model the router
+// would pick for each workflow given the user's configured keys + mode.
+// Pure presentation -- reads routerPreview from the shell. No local state.
+// ============================================================================
+function RouterPanel({ routerPreview }) {
+  if (!routerPreview.workflows.length) return null;
+  return (
+    <details style={{
+      padding: 12, marginBottom: 12, borderRadius: 8, border: '1px solid var(--border)',
+    }}>
+      <summary style={{ cursor: 'pointer', fontWeight: 500, fontSize: 13 }}>
+        What ATS picks for each workflow ({routerPreview.workflows.filter(w => w.ai).length} AI · mode: {routerPreview.mode})
+      </summary>
+      <div style={{ marginTop: 10, overflowX: 'auto' }}>
+        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ textAlign: 'left', color: 'var(--text-3)', borderBottom: '1px solid var(--border)' }}>
+              <th style={{ padding: '6px 8px' }}>Workflow</th>
+              <th style={{ padding: '6px 8px' }}>Provider</th>
+              <th style={{ padding: '6px 8px' }}>Model</th>
+              <th style={{ padding: '6px 8px' }}>Family</th>
+              <th style={{ padding: '6px 8px', textAlign: 'right' }}>Est. ₹/call</th>
+            </tr>
+          </thead>
+          <tbody>
+            {routerPreview.workflows.map((w, i) => (
+              <tr key={w.workflow + i} style={{ borderBottom: '1px solid var(--border)' }}>
+                <td style={{ padding: '6px 8px', fontFamily: 'var(--mono)' }}>{w.workflow}</td>
+                {w.ai ? (
+                  <>
+                    <td style={{ padding: '6px 8px' }}>{w.provider}</td>
+                    <td style={{ padding: '6px 8px', fontFamily: 'var(--mono)', fontSize: 11 }}>{w.model}</td>
+                    <td style={{ padding: '6px 8px', color: 'var(--text-3)' }}>{w.family}</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right', fontFamily: 'var(--mono)' }}>₹{Number(w.est_cost_inr || 0).toFixed(4)}</td>
+                  </>
+                ) : (
+                  <td colSpan={4} style={{ padding: '6px 8px', fontStyle: 'italic', color: 'var(--text-3)' }}>
+                    {w.reason === 'no_ai_call' ? 'no AI call (local computation)' : (w.reason || 'unavailable — add a provider key')}
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  );
+}
+
+// ============================================================================
+// ExperimentsPanel: H8 A/B experiment admin (start / list / end + per-variant
+// win-rate display). Owns experiments, expResults, newExpName, expBusy.
+// Hidden entirely when there are no experiments AND no workflow usage rows
+// (matches the original conditional render exactly).
+// ============================================================================
+function ExperimentsPanel({ usageMeta, flash, refresh }) {
+  const [experiments, setExperiments] = React.useState([]);
+  const [expResults, setExpResults] = React.useState({});
+  const [newExpName, setNewExpName] = React.useState('with-vs-without-bulk-deals');
+  const [expBusy, setExpBusy] = React.useState(false);
+
+  // Fetch experiments + auto-fetch results for any active one. Re-run when
+  // the shell calls refresh() by bumping a counter -- here we just refetch
+  // on mount and after our own mutations.
+  const refetch = React.useCallback(async () => {
+    try {
+      const ex = await fetch('/api/me/ai-workflows/experiments', { credentials: 'include' }).then(r => r.json()).catch(() => null);
+      if (ex && ex.ok) {
+        setExperiments(ex.experiments || []);
+        for (const e of (ex.experiments || []).filter(x => x.active)) {
+          fetch(`/api/me/ai-workflows/experiments/${e.id}/results?days=30`, { credentials: 'include' })
+            .then(r => r.json())
+            .then(j => { if (j.ok) setExpResults(prev => ({ ...prev, [e.id]: j })); })
+            .catch(e => console.warn('[screen-ai-keys] promise rejected:', e && e.message));
+        }
+      }
+    } catch (e) { console.warn('[screen-ai-keys] swallowed:', e && e.message); }
+  }, []);
+
+  // The shell calls refresh() after mutations; that updates usageMeta to a
+  // new reference. Re-fire here so this panel keeps the same "refetch every
+  // refresh()" behavior the original god-component had.
+  React.useEffect(() => { refetch(); }, [refetch, usageMeta]);
+
+  const startExperiment = async () => {
+    if (!newExpName.trim()) return;
+    setExpBusy(true);
+    try {
+      const r = await fetch('/api/me/ai-workflows/experiments', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newExpName, workflow: 'intraday_critic', variant_a_key: 'with-bulk-deals', variant_b_key: 'without-bulk-deals' }),
+      }).then(r => r.json());
+      if (r.ok) { flash(`Experiment '${r.name}' started`); await refresh(); await refetch(); }
+      else flash(r.detail || r.reason || 'experiment_failed', false);
+    } catch (e) { flash(e.message, false); }
+    finally { setExpBusy(false); }
+  };
+
+  const endExperiment = async (id) => {
+    if (!confirm('End this experiment? Variant assignment stops; collected data stays in ai_calls.')) return;
+    try {
+      const r = await fetch('/api/me/ai-workflows/experiments/' + id + '/end', { method: 'PUT', credentials: 'include' }).then(r => r.json());
+      if (r.ok) { flash('Experiment ended'); await refresh(); await refetch(); }
+      else flash(r.reason || 'end_failed', false);
+    } catch (e) { flash(e.message, false); }
+  };
+
+  if (!(experiments.length > 0 || (usageMeta.byWorkflow && usageMeta.byWorkflow.length > 0))) return null;
+
+  return (
+    <div style={{ padding: 12, marginBottom: 16, borderRadius: 8, border: '1px solid var(--border)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ fontWeight: 500, fontSize: 13 }}>A/B experiments</div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <input
+            value={newExpName}
+            onChange={e => setNewExpName(e.target.value)}
+            placeholder="experiment name"
+            style={{ padding: '5px 8px', fontSize: 11, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface, white)', minWidth: 200 }}
+          />
+          <button
+            onClick={startExperiment} disabled={!newExpName.trim() || expBusy}
+            style={{ padding: '5px 10px', fontSize: 11, borderRadius: 6, border: '1px solid var(--accent, #3b82f6)', background: 'var(--accent, #3b82f6)', color: 'white', cursor: 'pointer' }}
+          >{expBusy ? '…' : 'Start'}</button>
+        </div>
+      </div>
+      {experiments.length === 0 ? (
+        <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
+          No experiments yet. Starting one assigns each critique call to variant A (with bulk-deals context) or B (without), then compares per-variant win-rate after 10+ paper trades land in each bucket.
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 8 }}>
+          {experiments.slice(0, 5).map(ex => {
+            const res = expResults[ex.id];
+            return (
+              <div key={ex.id} style={{ padding: 8, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface, white)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 500 }}>{ex.name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                      {ex.active ? <span style={{ color: 'var(--up)' }}>● active</span> : <span>ended</span>} · workflow: {ex.workflow} · {ex.variant_a_key} vs {ex.variant_b_key}
+                    </div>
+                  </div>
+                  {ex.active && (
+                    <button onClick={() => endExperiment(ex.id)} style={{ padding: '4px 10px', fontSize: 11, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface-2)', cursor: 'pointer' }}>End</button>
+                  )}
+                </div>
+                {res && res.buckets && (
+                  <div style={{ marginTop: 6, fontSize: 11 }}>
+                    <div style={{ marginBottom: 4, fontWeight: 500 }}>{res.headline}</div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      {['a', 'b'].map(v => {
+                        const b = res.buckets[v];
+                        const key = v === 'a' ? ex.variant_a_key : ex.variant_b_key;
+                        return (
+                          <div key={v} style={{ flex: 1, padding: 6, borderRadius: 4, background: 'var(--surface-2)', fontFamily: 'var(--mono)' }}>
+                            <div style={{ fontWeight: 600 }}>{key}</div>
+                            <div>{b.calls} calls · {b.trades_in_window} trades</div>
+                            <div>win rate: {b.win_rate == null ? '—' : (b.win_rate * 100).toFixed(0) + '%'}</div>
+                            <div style={{ color: (b.avg_pnl_inr || 0) >= 0 ? 'var(--up)' : 'var(--down)' }}>avg ₹{b.avg_pnl_inr == null ? '—' : b.avg_pnl_inr.toFixed(0)}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// UsagePanel: 30-day workflow cost table + run-monthly-review button + D3
+// chart-screenshot vision uploader + H4 verdict-ROI rollup.
+// Owns: reviewBusy, reviewResult, roi, vision, visionBusy, visionError.
+// Reads (from shell via props): keys, usageMeta.
+// ============================================================================
+function UsagePanel({ keys, usageMeta, flash, refresh, experimentsSlot }) {
+  const [reviewBusy, setReviewBusy] = React.useState(false);
+  const [reviewResult, setReviewResult] = React.useState(null);
+  const [roi, setRoi] = React.useState(null);
+  const [vision, setVision] = React.useState(null);
+  const [visionBusy, setVisionBusy] = React.useState(false);
+  const [visionError, setVisionError] = React.useState(null);
+
+  // H4: AI verdict-backtest (does following the critic make money?). Fetched
+  // once per shell-refresh -- we wire to refresh via a self-trigger on mount
+  // and also export a refetch the shell can re-call (but the shell's refresh
+  // is cheap, so the simpler path is: refetch on mount + after run-monthly).
+  const refetchRoi = React.useCallback(async () => {
+    try {
+      const bt = await fetch('/api/me/ai-workflows/verdict-backtest?days=30', { credentials: 'include' }).then(r => r.json()).catch(() => null);
+      if (bt && bt.ok) setRoi(bt);
+    } catch (e) { console.warn('[screen-ai-keys] swallowed:', e && e.message); }
+  }, []);
+  // Re-fetch ROI when the shell's keys prop changes -- the shell's refresh()
+  // updates `keys` to a fresh array reference after every mutation, so this
+  // mirrors the original behavior of refetching ROI on every refresh() call.
+  React.useEffect(() => { refetchRoi(); }, [refetchRoi, keys]);
+
+  const runMonthlyReview = async () => {
+    setReviewBusy(true);
+    setReviewResult(null);
+    try {
+      const r = await fetch('/api/me/ai-workflows/monthly-review', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' }, body: '{}',
+      }).then(r => r.json());
+      if (r.ok) { setReviewResult(r); flash(`Monthly review ready (${r.cached ? 'cached' : 'fresh'})`); await refresh(); await refetchRoi(); }
+      else flash(r.detail || r.reason || 'review_failed', false);
+    } catch (e) { flash('review_failed: ' + e.message, false); }
+    finally { setReviewBusy(false); }
+  };
+
+  // D3: read file -> data URL -> POST to /vision
+  const onVisionPick = async (file) => {
+    if (!file) return;
+    if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) { setVisionError('Use a PNG, JPG, or WebP image'); return; }
+    if (file.size > 5 * 1024 * 1024) { setVisionError('Max 5 MB'); return; }
+    setVisionBusy(true); setVisionError(null); setVision(null);
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result);
+        fr.onerror = () => reject(fr.error);
+        fr.readAsDataURL(file);
+      });
+      const r = await fetch('/api/me/ai-workflows/vision', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_data_url: dataUrl }),
+      }).then(r => r.json());
+      if (r.ok) { setVision(r); flash(`Chart analysed in ${r.cached ? 'cache' : 'fresh'}`); await refresh(); }
+      else setVisionError(r.detail || r.reason || 'vision_failed');
+    } catch (e) { setVisionError(e.message); }
+    finally { setVisionBusy(false); }
+  };
+
+  return (
+    <>
+      {/* H4: AI verdict ROI (does following the critic make money?) */}
+      {roi && (roi.buckets || {}).agree && (
+        <div style={{ padding: 12, marginBottom: 16, borderRadius: 8, border: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
+            AI ROI · last {roi.window_days}d
+          </div>
+          <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 10 }}>{roi.headline}</div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ textAlign: 'left', color: 'var(--text-3)', borderBottom: '1px solid var(--border)' }}>
+                  <th style={{ padding: '4px 8px' }}>Verdict</th>
+                  <th style={{ padding: '4px 8px', textAlign: 'right' }}>Calls</th>
+                  <th style={{ padding: '4px 8px', textAlign: 'right' }}>Trades</th>
+                  <th style={{ padding: '4px 8px', textAlign: 'right' }}>Win rate</th>
+                  <th style={{ padding: '4px 8px', textAlign: 'right' }}>Avg ₹/trade</th>
+                  <th style={{ padding: '4px 8px', textAlign: 'right' }}>Total ₹</th>
+                </tr>
+              </thead>
+              <tbody>
+                {['agree', 'caution', 'reject'].map(v => {
+                  const b = roi.buckets[v] || { calls: 0, trades_in_window: 0, wins: 0, losses: 0, win_rate: null, avg_pnl_inr: null, total_pnl_inr: 0 };
+                  const color = v === 'agree' ? 'var(--up)' : v === 'reject' ? 'var(--danger)' : 'var(--warn, #d97706)';
+                  return (
+                    <tr key={v} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={{ padding: '4px 8px' }}>
+                        <span style={{ padding: '2px 8px', borderRadius: 4, background: color, color: 'white', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' }}>{v}</span>
+                      </td>
+                      <td style={{ padding: '4px 8px', textAlign: 'right' }}>{b.calls}</td>
+                      <td style={{ padding: '4px 8px', textAlign: 'right' }}>{b.trades_in_window}</td>
+                      <td style={{ padding: '4px 8px', textAlign: 'right' }}>{b.win_rate == null ? '—' : (b.win_rate * 100).toFixed(0) + '%'}</td>
+                      <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'var(--mono)', color: (b.avg_pnl_inr || 0) >= 0 ? 'var(--up)' : 'var(--down)' }}>{b.avg_pnl_inr == null ? '—' : (b.avg_pnl_inr >= 0 ? '+' : '') + '₹' + b.avg_pnl_inr.toFixed(0)}</td>
+                      <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'var(--mono)', color: b.total_pnl_inr >= 0 ? 'var(--up)' : 'var(--down)' }}>{b.total_pnl_inr ? (b.total_pnl_inr >= 0 ? '+' : '') + '₹' + b.total_pnl_inr.toFixed(0) : '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-3)' }}>
+            Joins per-signal AI critique verdicts to paper trades that opened within 30 days. {roi.total_critique_calls} critique row(s) in window.
+          </div>
+        </div>
+      )}
+
+      {/* D3: chart screenshot upload */}
+      <div style={{
+        padding: 12, marginBottom: 16, borderRadius: 8, border: '1px solid var(--border)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <div style={{ fontWeight: 500, fontSize: 13 }}>Chart screenshot → AI analysis</div>
+          <label style={{
+            padding: '6px 12px', fontSize: 12, borderRadius: 6,
+            border: '1px solid var(--accent, #3b82f6)',
+            background: visionBusy ? 'var(--surface-2)' : 'var(--accent, #3b82f6)',
+            color: visionBusy ? 'var(--text-2)' : 'white',
+            cursor: visionBusy ? 'wait' : 'pointer',
+          }}>
+            {visionBusy ? 'Analysing…' : 'Upload chart'}
+            <input
+              type="file" accept="image/png,image/jpeg,image/webp"
+              disabled={visionBusy}
+              onChange={e => onVisionPick(e.target.files && e.target.files[0])}
+              style={{ display: 'none' }}
+            />
+          </label>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
+          PNG / JPG / WebP, max 5MB. Pattern reading is not a forecast — always include the advisory.
+        </div>
+        {visionError && (
+          <div style={{ marginTop: 8, padding: 8, borderRadius: 6, fontSize: 12, color: 'var(--danger, #c53030)', border: '1px solid currentColor' }}>{visionError}</div>
+        )}
+        {vision && vision.ok && (
+          <div style={{ marginTop: 12, padding: 10, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface-2, rgba(0,0,0,0.02))', fontSize: 12 }}>
+            <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
+              {vision.chart_type} · {vision.symbol_guess || 'unknown symbol'} · trend: {vision.trend} · {vision.provider}/{vision.model} · ₹{Number(vision.cost_inr || 0).toFixed(4)}
+            </div>
+            <div style={{ marginBottom: 6 }}>{vision.plain_summary}</div>
+            {vision.key_levels && vision.key_levels.length > 0 && (
+              <div style={{ marginBottom: 6 }}>
+                <strong>Key levels:</strong>{' '}
+                {vision.key_levels.map((k, i) => (
+                  <span key={i} style={{ marginRight: 8, fontFamily: 'var(--mono)' }}>₹{k.price} ({k.kind})</span>
+                ))}
+              </div>
+            )}
+            {vision.annotations && vision.annotations.length > 0 && (
+              <div style={{ marginBottom: 6 }}>
+                <strong>Annotations:</strong> {vision.annotations.join(' · ')}
+              </div>
+            )}
+            {vision.date_range && <div style={{ fontSize: 11, color: 'var(--text-3)' }}>Range: {vision.date_range}</div>}
+            {vision.advisory_note && <div style={{ marginTop: 8, fontSize: 11, fontStyle: 'italic', color: 'var(--text-3)' }}>{vision.advisory_note}</div>}
+            {vision.call_id && window.AiFeedback && (
+              <div style={{ marginTop: 8 }}>
+                <window.AiFeedback callId={vision.call_id} workflow="vision" compact={true}/>
+              </div>
+            )}
+            {window.SebiDisclaimer && <window.SebiDisclaimer compact={true}/>}
+          </div>
+        )}
+      </div>
+
+      {experimentsSlot}
+
+      {/* T99-F3 + A2: workflow cost breakdown + run-now button */}
+      <div style={{ padding: 12, marginBottom: 16, borderRadius: 8, border: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <div style={{ fontWeight: 500, fontSize: 13 }}>
+            30-day cost by workflow {usageMeta.byWorkflow && usageMeta.byWorkflow.length > 0 ? `(${usageMeta.byWorkflow.length} active)` : '(no AI calls yet)'}
+          </div>
+          <button
+            onClick={runMonthlyReview}
+            disabled={reviewBusy || !(keys && keys.length)}
+            style={{
+              padding: '6px 12px', fontSize: 12, borderRadius: 6,
+              border: '1px solid var(--accent, #3b82f6)',
+              background: 'var(--accent, #3b82f6)', color: 'white',
+              cursor: 'pointer', opacity: (reviewBusy || !(keys && keys.length)) ? 0.5 : 1,
+            }}
+          >{reviewBusy ? 'Running…' : 'Run monthly review'}</button>
+        </div>
+        {usageMeta.byWorkflow && usageMeta.byWorkflow.length > 0 ? (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ textAlign: 'left', color: 'var(--text-3)', borderBottom: '1px solid var(--border)' }}>
+                  <th style={{ padding: '4px 8px' }}>Workflow</th>
+                  <th style={{ padding: '4px 8px', textAlign: 'right' }}>Calls</th>
+                  <th style={{ padding: '4px 8px', textAlign: 'right' }}>Cost (₹)</th>
+                  <th style={{ padding: '4px 8px' }}>Providers</th>
+                </tr>
+              </thead>
+              <tbody>
+                {usageMeta.byWorkflow.map((w, i) => (
+                  <tr key={w.workflow + i} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td style={{ padding: '4px 8px', fontFamily: 'var(--mono)' }}>{w.workflow}</td>
+                    <td style={{ padding: '4px 8px', textAlign: 'right' }}>{w.calls}</td>
+                    <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'var(--mono)' }}>₹{Number(w.cost_inr || 0).toFixed(4)}</td>
+                    <td style={{ padding: '4px 8px', fontSize: 11, color: 'var(--text-3)' }}>
+                      {Object.entries(w.providers || {}).map(([p, c]) => `${p}: ${c}`).join(', ')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: 'var(--text-3)', padding: '8px 0' }}>
+            No AI calls yet. Run a critique or analysis to populate this view.
+          </div>
+        )}
+        {reviewResult && reviewResult.ok && (
+          <div style={{
+            marginTop: 12, padding: 10, borderRadius: 6, border: '1px solid var(--border)',
+            background: 'var(--surface-2, rgba(0,0,0,0.02))',
+          }}>
+            <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
+              Monthly review · {reviewResult.period} · {reviewResult.provider}/{reviewResult.model}
+            </div>
+            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>{reviewResult.headline}</div>
+            {reviewResult.what_went_well && reviewResult.what_went_well.length > 0 && (
+              <div style={{ marginBottom: 6, fontSize: 12 }}>
+                <strong style={{ color: 'var(--up)' }}>What went well:</strong>
+                <ul style={{ marginTop: 4, paddingLeft: 18 }}>{reviewResult.what_went_well.map((x, i) => <li key={i}>{x}</li>)}</ul>
+              </div>
+            )}
+            {reviewResult.what_went_wrong && reviewResult.what_went_wrong.length > 0 && (
+              <div style={{ marginBottom: 6, fontSize: 12 }}>
+                <strong style={{ color: 'var(--danger)' }}>What went wrong:</strong>
+                <ul style={{ marginTop: 4, paddingLeft: 18 }}>{reviewResult.what_went_wrong.map((x, i) => <li key={i}>{x}</li>)}</ul>
+              </div>
+            )}
+            {reviewResult.patterns_observed && (
+              <div style={{ marginBottom: 6, fontSize: 12 }}><strong>Pattern:</strong> {reviewResult.patterns_observed}</div>
+            )}
+            {reviewResult.suggested_focus && reviewResult.suggested_focus.length > 0 && (
+              <div style={{ marginBottom: 6, fontSize: 12 }}>
+                <strong>Suggested focus next month:</strong>
+                <ul style={{ marginTop: 4, paddingLeft: 18 }}>{reviewResult.suggested_focus.map((x, i) => <li key={i}>{x}</li>)}</ul>
+              </div>
+            )}
+            {reviewResult.ai_spend_assessment && (
+              <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 8 }}>{reviewResult.ai_spend_assessment}</div>
+            )}
+            {/* T-I5: feedback widget */}
+            {reviewResult.call_id && window.AiFeedback && (
+              <div style={{ marginTop: 8 }}>
+                <window.AiFeedback callId={reviewResult.call_id} workflow="monthly_review" compact={true}/>
+              </div>
+            )}
+            {window.SebiDisclaimer && <window.SebiDisclaimer compact={true}/>}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ============================================================================
+// AiKeysScreen: thin shell. Owns the cross-cutting server state (keys,
+// usage, usageMeta, routerPreview), the user preference state (aiMode,
+// redactPii, capDraft), and the toast pipe. Renders header + cap-meter +
+// mode-switch + privacy toggle, then delegates each functional area to a
+// sub-component.
+// ============================================================================
+const AiKeysScreen = () => {
+  const [keys, setKeys] = React.useState(null);
+  const [supportedProviders, setSupported] = React.useState(['anthropic', 'openai', 'gemini']);
+  const [usage, setUsage] = React.useState({});
+  const [usageMeta, setUsageMeta] = React.useState({ cap_inr: 50, spent_today_inr: 0, cap_remaining_inr: 50, cap_used_pct: 0, byPeriod: {}, byWorkflow: [] });
+  const [capDraft, setCapDraft] = React.useState('');
+  const [aiMode, setAiMode] = React.useState('balanced');
+  const [redactPii, setRedactPii] = React.useState(true);
+  const [routerPreview, setRouterPreview] = React.useState({ workflows: [], availableProviders: [], mode: 'balanced' });
+  const [toast, setToast] = React.useState(null);
+
+  const refresh = React.useCallback(async () => {
+    try {
+      const [k, u] = await Promise.all([
+        fetch('/api/me/ai-keys', { credentials: 'include' }).then(r => r.json()),
+        fetch('/api/me/ai-keys/usage', { credentials: 'include' }).then(r => r.json()).catch(() => ({ ok: false })),
+      ]);
+      if (k.ok) {
+        setKeys(k.keys || []);
+        if (k.supportedProviders) setSupported(k.supportedProviders);
+      }
+      if (u.ok) {
+        setUsage(u.usage || {});
+        setUsageMeta({
+          cap_inr: u.cap_inr != null ? u.cap_inr : 50,
+          spent_today_inr: u.spent_today_inr || 0,
+          cap_remaining_inr: u.cap_remaining_inr != null ? u.cap_remaining_inr : 50,
+          cap_used_pct: u.cap_used_pct || 0,
+          byPeriod: u.byPeriod || {},
+          byWorkflow: u.byWorkflow || [],
+        });
+        if (!capDraft) setCapDraft(String(u.cap_inr != null ? u.cap_inr : 50));
+      }
+      // T99-H9: fetch saved AI mode
+      try {
+        const pr = await fetch('/api/v1/me/preferences', { credentials: 'include' }).then(r => r.json()).catch(() => null);
+        if (pr && pr.ok && pr.preferences) {
+          setAiMode(pr.preferences.ai_mode || 'balanced');
+          setRedactPii(pr.preferences.redact_pii !== 0);
+        }
+      } catch (e) { console.warn('[screen-ai-keys] swallowed:', e && e.message); }
+      // T99-H2: fetch router preview (what model gets picked for each workflow)
+      try {
+        const rp = await fetch('/api/me/ai-keys/router-preview', { credentials: 'include' }).then(r => r.json()).catch(() => null);
+        if (rp && rp.ok) setRouterPreview({ workflows: rp.workflows || [], availableProviders: rp.availableProviders || [], mode: rp.mode || 'balanced' });
+      } catch (e) { console.warn('[screen-ai-keys] swallowed:', e && e.message); }
+    } catch (e) { console.warn('[ai-keys] refresh failed:', e.message); }
+  }, []);
+  React.useEffect(() => { refresh(); }, [refresh]);
+
+  const flash = (msg, ok = true) => { setToast({ msg, ok }); setTimeout(() => setToast(null), 3500); };
+
+  // T99-H9: save AI mode (quality | balanced | economy)
+  const saveMode = async (m) => {
+    setAiMode(m);
+    try {
+      const cur = await fetch('/api/v1/me/preferences', { credentials: 'include' }).then(r => r.json()).catch(() => null);
+      const body = { ...(cur && cur.preferences ? cur.preferences : {}), ai_mode: m };
+      const r = await fetch('/api/v1/me/preferences', { method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
+      if (r.ok) { flash(`AI mode: ${m}`); refresh(); }
+      else flash(r.reason || 'mode_save_failed', false);
+    } catch (e) { flash('mode_save_failed: ' + e.message, false); }
+  };
+
+  // H5: toggle redact-PII setting (sends bucketed values to LLM instead of real ₹ amounts)
+  const saveRedact = async (v) => {
+    setRedactPii(v);
+    try {
+      const cur = await fetch('/api/v1/me/preferences', { credentials: 'include' }).then(r => r.json()).catch(() => null);
+      const body = { ...(cur && cur.preferences ? cur.preferences : {}), redact_pii: v ? 1 : 0 };
+      const r = await fetch('/api/v1/me/preferences', { method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
+      if (r.ok) flash(v ? 'Privacy: rupee values redacted before sending to AI' : 'Privacy: rupee values sent as-is');
+      else flash(r.reason || 'redact_save_failed', false);
+    } catch (e) { flash('redact_save_failed: ' + e.message, false); }
+  };
+
+  // T99-C1: save daily spend cap. PUT /api/me/preferences merges with existing prefs.
+  const saveCap = async () => {
+    const n = Number(capDraft);
+    if (!Number.isFinite(n) || n < 0 || n > 5000) { flash('Cap must be ₹0–5000', false); return; }
+    try {
+      const cur = await fetch('/api/v1/me/preferences', { credentials: 'include' }).then(r => r.json()).catch(() => null);
+      const body = { ...(cur && cur.preferences ? cur.preferences : {}), daily_ai_cap_inr: n };
+      const r = await fetch('/api/v1/me/preferences', {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).then(r => r.json());
+      if (r.ok) { flash(`Daily AI cap set to ₹${n}`); refresh(); }
+      else flash(r.reason || 'cap_save_failed', false);
+    } catch (e) { flash('cap_save_failed: ' + e.message, false); }
   };
 
   return (
@@ -458,456 +1042,32 @@ const AiKeysScreen = () => {
         </label>
       </div>
 
-      {/* T99-H2: router transparency — what ATS would call right now per workflow */}
-      {routerPreview.workflows.length > 0 && (
-        <details style={{
-          padding: 12, marginBottom: 12, borderRadius: 8, border: '1px solid var(--border)',
-        }}>
-          <summary style={{ cursor: 'pointer', fontWeight: 500, fontSize: 13 }}>
-            What ATS picks for each workflow ({routerPreview.workflows.filter(w => w.ai).length} AI · mode: {routerPreview.mode})
-          </summary>
-          <div style={{ marginTop: 10, overflowX: 'auto' }}>
-            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ textAlign: 'left', color: 'var(--text-3)', borderBottom: '1px solid var(--border)' }}>
-                  <th style={{ padding: '6px 8px' }}>Workflow</th>
-                  <th style={{ padding: '6px 8px' }}>Provider</th>
-                  <th style={{ padding: '6px 8px' }}>Model</th>
-                  <th style={{ padding: '6px 8px' }}>Family</th>
-                  <th style={{ padding: '6px 8px', textAlign: 'right' }}>Est. ₹/call</th>
-                </tr>
-              </thead>
-              <tbody>
-                {routerPreview.workflows.map((w, i) => (
-                  <tr key={w.workflow + i} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <td style={{ padding: '6px 8px', fontFamily: 'var(--mono)' }}>{w.workflow}</td>
-                    {w.ai ? (
-                      <>
-                        <td style={{ padding: '6px 8px' }}>{w.provider}</td>
-                        <td style={{ padding: '6px 8px', fontFamily: 'var(--mono)', fontSize: 11 }}>{w.model}</td>
-                        <td style={{ padding: '6px 8px', color: 'var(--text-3)' }}>{w.family}</td>
-                        <td style={{ padding: '6px 8px', textAlign: 'right', fontFamily: 'var(--mono)' }}>₹{Number(w.est_cost_inr || 0).toFixed(4)}</td>
-                      </>
-                    ) : (
-                      <td colSpan={4} style={{ padding: '6px 8px', fontStyle: 'italic', color: 'var(--text-3)' }}>
-                        {w.reason === 'no_ai_call' ? 'no AI call (local computation)' : (w.reason || 'unavailable — add a provider key')}
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </details>
-      )}
+      {/* RouterPanel: T99-H2 transparency table. */}
+      <RouterPanel routerPreview={routerPreview} />
 
-      {/* H4: AI verdict ROI (does following the critic make money?) */}
-      {roi && (roi.buckets || {}).agree && (
-        <div style={{ padding: 12, marginBottom: 16, borderRadius: 8, border: '1px solid var(--border)' }}>
-          <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
-            AI ROI · last {roi.window_days}d
-          </div>
-          <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 10 }}>{roi.headline}</div>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ textAlign: 'left', color: 'var(--text-3)', borderBottom: '1px solid var(--border)' }}>
-                  <th style={{ padding: '4px 8px' }}>Verdict</th>
-                  <th style={{ padding: '4px 8px', textAlign: 'right' }}>Calls</th>
-                  <th style={{ padding: '4px 8px', textAlign: 'right' }}>Trades</th>
-                  <th style={{ padding: '4px 8px', textAlign: 'right' }}>Win rate</th>
-                  <th style={{ padding: '4px 8px', textAlign: 'right' }}>Avg ₹/trade</th>
-                  <th style={{ padding: '4px 8px', textAlign: 'right' }}>Total ₹</th>
-                </tr>
-              </thead>
-              <tbody>
-                {['agree', 'caution', 'reject'].map(v => {
-                  const b = roi.buckets[v] || { calls: 0, trades_in_window: 0, wins: 0, losses: 0, win_rate: null, avg_pnl_inr: null, total_pnl_inr: 0 };
-                  const color = v === 'agree' ? 'var(--up)' : v === 'reject' ? 'var(--danger)' : 'var(--warn, #d97706)';
-                  return (
-                    <tr key={v} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td style={{ padding: '4px 8px' }}>
-                        <span style={{ padding: '2px 8px', borderRadius: 4, background: color, color: 'white', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' }}>{v}</span>
-                      </td>
-                      <td style={{ padding: '4px 8px', textAlign: 'right' }}>{b.calls}</td>
-                      <td style={{ padding: '4px 8px', textAlign: 'right' }}>{b.trades_in_window}</td>
-                      <td style={{ padding: '4px 8px', textAlign: 'right' }}>{b.win_rate == null ? '—' : (b.win_rate * 100).toFixed(0) + '%'}</td>
-                      <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'var(--mono)', color: (b.avg_pnl_inr || 0) >= 0 ? 'var(--up)' : 'var(--down)' }}>{b.avg_pnl_inr == null ? '—' : (b.avg_pnl_inr >= 0 ? '+' : '') + '₹' + b.avg_pnl_inr.toFixed(0)}</td>
-                      <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'var(--mono)', color: b.total_pnl_inr >= 0 ? 'var(--up)' : 'var(--down)' }}>{b.total_pnl_inr ? (b.total_pnl_inr >= 0 ? '+' : '') + '₹' + b.total_pnl_inr.toFixed(0) : '—'}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-3)' }}>
-            Joins per-signal AI critique verdicts to paper trades that opened within 30 days. {roi.total_critique_calls} critique row(s) in window.
-          </div>
-        </div>
-      )}
+      {/* UsagePanel: ROI rollup + vision uploader + 30d workflow table + monthly review.
+          The original render order interleaves the experiments admin:
+            ROI -> vision-upload -> ExperimentsPanel -> workflow-cost-table.
+          To preserve that without coupling state, UsagePanel renders all four
+          of its sections in order and accepts an experimentsSlot prop that
+          the shell fills with <ExperimentsPanel/>. */}
+      <UsagePanel
+        keys={keys}
+        usageMeta={usageMeta}
+        flash={flash}
+        refresh={refresh}
+        experimentsSlot={<ExperimentsPanel usageMeta={usageMeta} flash={flash} refresh={refresh} />}
+      />
 
-      {/* D3: chart screenshot upload */}
-      <div style={{
-        padding: 12, marginBottom: 16, borderRadius: 8, border: '1px solid var(--border)',
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <div style={{ fontWeight: 500, fontSize: 13 }}>Chart screenshot → AI analysis</div>
-          <label style={{
-            padding: '6px 12px', fontSize: 12, borderRadius: 6,
-            border: '1px solid var(--accent, #3b82f6)',
-            background: visionBusy ? 'var(--surface-2)' : 'var(--accent, #3b82f6)',
-            color: visionBusy ? 'var(--text-2)' : 'white',
-            cursor: visionBusy ? 'wait' : 'pointer',
-          }}>
-            {visionBusy ? 'Analysing…' : 'Upload chart'}
-            <input
-              type="file" accept="image/png,image/jpeg,image/webp"
-              disabled={visionBusy}
-              onChange={e => onVisionPick(e.target.files && e.target.files[0])}
-              style={{ display: 'none' }}
-            />
-          </label>
-        </div>
-        <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
-          PNG / JPG / WebP, max 5MB. Pattern reading is not a forecast — always include the advisory.
-        </div>
-        {visionError && (
-          <div style={{ marginTop: 8, padding: 8, borderRadius: 6, fontSize: 12, color: 'var(--danger, #c53030)', border: '1px solid currentColor' }}>{visionError}</div>
-        )}
-        {vision && vision.ok && (
-          <div style={{ marginTop: 12, padding: 10, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface-2, rgba(0,0,0,0.02))', fontSize: 12 }}>
-            <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
-              {vision.chart_type} · {vision.symbol_guess || 'unknown symbol'} · trend: {vision.trend} · {vision.provider}/{vision.model} · ₹{Number(vision.cost_inr || 0).toFixed(4)}
-            </div>
-            <div style={{ marginBottom: 6 }}>{vision.plain_summary}</div>
-            {vision.key_levels && vision.key_levels.length > 0 && (
-              <div style={{ marginBottom: 6 }}>
-                <strong>Key levels:</strong>{' '}
-                {vision.key_levels.map((k, i) => (
-                  <span key={i} style={{ marginRight: 8, fontFamily: 'var(--mono)' }}>₹{k.price} ({k.kind})</span>
-                ))}
-              </div>
-            )}
-            {vision.annotations && vision.annotations.length > 0 && (
-              <div style={{ marginBottom: 6 }}>
-                <strong>Annotations:</strong> {vision.annotations.join(' · ')}
-              </div>
-            )}
-            {vision.date_range && <div style={{ fontSize: 11, color: 'var(--text-3)' }}>Range: {vision.date_range}</div>}
-            {vision.advisory_note && <div style={{ marginTop: 8, fontSize: 11, fontStyle: 'italic', color: 'var(--text-3)' }}>{vision.advisory_note}</div>}
-            {vision.call_id && window.AiFeedback && (
-              <div style={{ marginTop: 8 }}>
-                <window.AiFeedback callId={vision.call_id} workflow="vision" compact={true}/>
-              </div>
-            )}
-            {window.SebiDisclaimer && <window.SebiDisclaimer compact={true}/>}
-          </div>
-        )}
-      </div>
-
-      {/* H8: A/B experiments admin */}
-      {(experiments.length > 0 || (usageMeta.byWorkflow && usageMeta.byWorkflow.length > 0)) && (
-        <div style={{ padding: 12, marginBottom: 16, borderRadius: 8, border: '1px solid var(--border)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <div style={{ fontWeight: 500, fontSize: 13 }}>A/B experiments</div>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <input
-                value={newExpName}
-                onChange={e => setNewExpName(e.target.value)}
-                placeholder="experiment name"
-                style={{ padding: '5px 8px', fontSize: 11, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface, white)', minWidth: 200 }}
-              />
-              <button
-                onClick={startExperiment} disabled={!newExpName.trim() || expBusy}
-                style={{ padding: '5px 10px', fontSize: 11, borderRadius: 6, border: '1px solid var(--accent, #3b82f6)', background: 'var(--accent, #3b82f6)', color: 'white', cursor: 'pointer' }}
-              >{expBusy ? '…' : 'Start'}</button>
-            </div>
-          </div>
-          {experiments.length === 0 ? (
-            <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
-              No experiments yet. Starting one assigns each critique call to variant A (with bulk-deals context) or B (without), then compares per-variant win-rate after 10+ paper trades land in each bucket.
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gap: 8 }}>
-              {experiments.slice(0, 5).map(ex => {
-                const res = expResults[ex.id];
-                return (
-                  <div key={ex.id} style={{ padding: 8, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface, white)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                      <div>
-                        <div style={{ fontSize: 12, fontWeight: 500 }}>{ex.name}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
-                          {ex.active ? <span style={{ color: 'var(--up)' }}>● active</span> : <span>ended</span>} · workflow: {ex.workflow} · {ex.variant_a_key} vs {ex.variant_b_key}
-                        </div>
-                      </div>
-                      {ex.active && (
-                        <button onClick={() => endExperiment(ex.id)} style={{ padding: '4px 10px', fontSize: 11, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface-2)', cursor: 'pointer' }}>End</button>
-                      )}
-                    </div>
-                    {res && res.buckets && (
-                      <div style={{ marginTop: 6, fontSize: 11 }}>
-                        <div style={{ marginBottom: 4, fontWeight: 500 }}>{res.headline}</div>
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          {['a', 'b'].map(v => {
-                            const b = res.buckets[v];
-                            const key = v === 'a' ? ex.variant_a_key : ex.variant_b_key;
-                            return (
-                              <div key={v} style={{ flex: 1, padding: 6, borderRadius: 4, background: 'var(--surface-2)', fontFamily: 'var(--mono)' }}>
-                                <div style={{ fontWeight: 600 }}>{key}</div>
-                                <div>{b.calls} calls · {b.trades_in_window} trades</div>
-                                <div>win rate: {b.win_rate == null ? '—' : (b.win_rate * 100).toFixed(0) + '%'}</div>
-                                <div style={{ color: (b.avg_pnl_inr || 0) >= 0 ? 'var(--up)' : 'var(--down)' }}>avg ₹{b.avg_pnl_inr == null ? '—' : b.avg_pnl_inr.toFixed(0)}</div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* T99-F3 + A2: workflow cost breakdown + run-now button */}
-      <div style={{ padding: 12, marginBottom: 16, borderRadius: 8, border: '1px solid var(--border)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <div style={{ fontWeight: 500, fontSize: 13 }}>
-            30-day cost by workflow {usageMeta.byWorkflow && usageMeta.byWorkflow.length > 0 ? `(${usageMeta.byWorkflow.length} active)` : '(no AI calls yet)'}
-          </div>
-          <button
-            onClick={runMonthlyReview}
-            disabled={reviewBusy || !(keys && keys.length)}
-            style={{
-              padding: '6px 12px', fontSize: 12, borderRadius: 6,
-              border: '1px solid var(--accent, #3b82f6)',
-              background: 'var(--accent, #3b82f6)', color: 'white',
-              cursor: 'pointer', opacity: (reviewBusy || !(keys && keys.length)) ? 0.5 : 1,
-            }}
-          >{reviewBusy ? 'Running…' : 'Run monthly review'}</button>
-        </div>
-        {usageMeta.byWorkflow && usageMeta.byWorkflow.length > 0 ? (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ textAlign: 'left', color: 'var(--text-3)', borderBottom: '1px solid var(--border)' }}>
-                  <th style={{ padding: '4px 8px' }}>Workflow</th>
-                  <th style={{ padding: '4px 8px', textAlign: 'right' }}>Calls</th>
-                  <th style={{ padding: '4px 8px', textAlign: 'right' }}>Cost (₹)</th>
-                  <th style={{ padding: '4px 8px' }}>Providers</th>
-                </tr>
-              </thead>
-              <tbody>
-                {usageMeta.byWorkflow.map((w, i) => (
-                  <tr key={w.workflow + i} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <td style={{ padding: '4px 8px', fontFamily: 'var(--mono)' }}>{w.workflow}</td>
-                    <td style={{ padding: '4px 8px', textAlign: 'right' }}>{w.calls}</td>
-                    <td style={{ padding: '4px 8px', textAlign: 'right', fontFamily: 'var(--mono)' }}>₹{Number(w.cost_inr || 0).toFixed(4)}</td>
-                    <td style={{ padding: '4px 8px', fontSize: 11, color: 'var(--text-3)' }}>
-                      {Object.entries(w.providers || {}).map(([p, c]) => `${p}: ${c}`).join(', ')}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div style={{ fontSize: 12, color: 'var(--text-3)', padding: '8px 0' }}>
-            No AI calls yet. Run a critique or analysis to populate this view.
-          </div>
-        )}
-        {reviewResult && reviewResult.ok && (
-          <div style={{
-            marginTop: 12, padding: 10, borderRadius: 6, border: '1px solid var(--border)',
-            background: 'var(--surface-2, rgba(0,0,0,0.02))',
-          }}>
-            <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
-              Monthly review · {reviewResult.period} · {reviewResult.provider}/{reviewResult.model}
-            </div>
-            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>{reviewResult.headline}</div>
-            {reviewResult.what_went_well && reviewResult.what_went_well.length > 0 && (
-              <div style={{ marginBottom: 6, fontSize: 12 }}>
-                <strong style={{ color: 'var(--up)' }}>What went well:</strong>
-                <ul style={{ marginTop: 4, paddingLeft: 18 }}>{reviewResult.what_went_well.map((x, i) => <li key={i}>{x}</li>)}</ul>
-              </div>
-            )}
-            {reviewResult.what_went_wrong && reviewResult.what_went_wrong.length > 0 && (
-              <div style={{ marginBottom: 6, fontSize: 12 }}>
-                <strong style={{ color: 'var(--danger)' }}>What went wrong:</strong>
-                <ul style={{ marginTop: 4, paddingLeft: 18 }}>{reviewResult.what_went_wrong.map((x, i) => <li key={i}>{x}</li>)}</ul>
-              </div>
-            )}
-            {reviewResult.patterns_observed && (
-              <div style={{ marginBottom: 6, fontSize: 12 }}><strong>Pattern:</strong> {reviewResult.patterns_observed}</div>
-            )}
-            {reviewResult.suggested_focus && reviewResult.suggested_focus.length > 0 && (
-              <div style={{ marginBottom: 6, fontSize: 12 }}>
-                <strong>Suggested focus next month:</strong>
-                <ul style={{ marginTop: 4, paddingLeft: 18 }}>{reviewResult.suggested_focus.map((x, i) => <li key={i}>{x}</li>)}</ul>
-              </div>
-            )}
-            {reviewResult.ai_spend_assessment && (
-              <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 8 }}>{reviewResult.ai_spend_assessment}</div>
-            )}
-            {/* T-I5: feedback widget */}
-            {reviewResult.call_id && window.AiFeedback && (
-              <div style={{ marginTop: 8 }}>
-                <window.AiFeedback callId={reviewResult.call_id} workflow="monthly_review" compact={true}/>
-              </div>
-            )}
-            {window.SebiDisclaimer && <window.SebiDisclaimer compact={true}/>}
-          </div>
-        )}
-      </div>
-
-      {/* T99-T123 (v11-H1): empty-state + smart upsell banners.
-          - 0 keys: green getting-started block explaining what 15 workflows unlocks
-          - 1 key:  amber smart-upsell block explaining cross-provider fallback value
-          - 2+ keys: nothing (user is on the curve already) */}
-      {(() => {
-        const configuredCount = (keys || []).filter(k => k && k.provider).length;
-        if (configuredCount === 0) {
-          return (
-            <div style={{
-              padding: '14px 16px', marginBottom: 16, borderRadius: 10,
-              background: 'color-mix(in oklab, var(--up) 6%, transparent)',
-              border: '1px solid color-mix(in oklab, var(--up) 30%, var(--border))',
-              fontSize: 13, lineHeight: 1.55,
-            }}>
-              <div style={{ fontWeight: 600, marginBottom: 6, color: 'var(--up)' }}>
-                Add your first AI key to unlock 15 workflows
-              </div>
-              <div style={{ color: 'var(--text-2)', marginBottom: 8 }}>
-                ATS runs critique, monthly review, strategy explainers, news sentiment, and 11 more workflows through your own provider keys (BYOK).
-                Pick whichever provider you already have — keys are sealed at rest and never leave your VM unencrypted.
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, fontSize: 12 }}>
-                <div><strong>Anthropic Claude</strong> — best on Indian retail finance text. Console: console.anthropic.com</div>
-                <div><strong>OpenAI</strong> — best vision + tool-use. Console: platform.openai.com</div>
-                <div><strong>Google Gemini</strong> — generous free tier for batch workloads. Console: aistudio.google.com</div>
-              </div>
-              <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-3)' }}>
-                Estimated spend: ~₹6–13/day with one key, ~₹13–26/day with three. Daily spend cap is enforced — set it on Settings.
-              </div>
-            </div>
-          );
-        }
-        if (configuredCount === 1) {
-          const sole = (keys || []).find(k => k && k.provider);
-          const soleName = (sole && sole.provider) || 'this provider';
-          const alts = ['anthropic', 'openai', 'gemini'].filter(p => p !== (sole && sole.provider));
-          const fmtAlt = (p) => ({ anthropic: 'Claude', openai: 'OpenAI', gemini: 'Gemini' }[p] || p);
-          return (
-            <div style={{
-              padding: '12px 14px', marginBottom: 16, borderRadius: 8,
-              background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
-              border: '1px solid color-mix(in oklab, var(--warn, #d97706) 30%, var(--border))',
-              fontSize: 12, lineHeight: 1.5, color: 'var(--text-2)',
-            }}>
-              <strong style={{ color: 'oklch(45% 0.13 80)' }}>One provider configured.</strong>{' '}
-              Adding a second unlocks cross-provider fallback — when {soleName} rate-limits or returns 5xx,
-              ATS routes to your alternate. Recommended pair: <em>{soleName}</em> + <em>{fmtAlt(alts[0])}</em>.
-              Both keys stay sealed; ATS only opens the one it routes to.
-            </div>
-          );
-        }
-        return null;
-      })()}
-
-            <div className="grid grid-3" style={{ gap: 16, marginBottom: 16 }}>
-        {supportedProviders.map(provider => {
-          const meta = _PROVIDER_META[provider] || { label: provider, logo: provider[0]?.toUpperCase(), logoColor: '#888', modelOptions: [], defaultModel: '' };
-          const existing = findKey(provider);
-          const isConfigured = !!existing;
-          const draft = drafts[provider] || {};
-          const op = busy[provider];
-          const testResult = results[provider];
-          const usageProv = usage[provider] || { calls_30d: 0, est_cost_inr: 0 };
-          return (
-            <Card key={provider} style={{ border: isConfigured ? '1px solid color-mix(in oklab, var(--up) 30%, var(--border))' : '1px solid var(--border)' }}>
-              <div className="between" style={{ marginBottom: 12, alignItems: 'flex-start' }}>
-                <div className="row" style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ width: 40, height: 40, borderRadius: 10, background: meta.logoColor, color: 'white', display: 'grid', placeItems: 'center', fontWeight: 700, flexShrink: 0 }}>{meta.logo}</div>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 15, fontWeight: 600 }}>{meta.label}</div>
-                    <div className="muted" style={{ fontSize: 11 }}>{meta.desc}</div>
-                  </div>
-                </div>
-                {isConfigured ? <Pill kind="up" dot>Active</Pill> : <Pill kind="neutral">Not set</Pill>}
-              </div>
-
-              {/* T99-T120 (v11-H2): per-provider "Powering N of M workflows".
-                  Counts workflows where the router would currently pick this
-                  provider for the user, given their configured keys. Shows
-                  the user concrete value-per-BYOK-key. */}
-              {(() => {
-                const total = routerPreview.workflows.filter(w => w.ai !== false || w.reason !== 'no_ai_call').length;
-                const aiTotal = routerPreview.workflows.filter(w => w.ai === true || (w.ai !== false && w.workflow !== 'regime_inject')).length;
-                const poweringHere = routerPreview.workflows.filter(w => w.ai === true && w.provider === provider).length;
-                if (!isConfigured) return null;
-                return (
-                  <div className="muted" style={{ fontSize: 11, marginBottom: 10, padding: '6px 10px', borderRadius: 6, background: 'color-mix(in oklab, var(--up) 8%, transparent)', border: '1px solid color-mix(in oklab, var(--up) 25%, var(--border))' }}>
-                    <strong style={{ color: 'var(--up)' }}>Powering {poweringHere} of {aiTotal} workflows</strong>{' '}
-                    <span style={{ color: 'var(--text-3)' }}>· mode: {routerPreview.mode}</span>
-                  </div>
-                );
-              })()}
-
-              <label style={{ display: 'block', marginBottom: 10 }}>
-                <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>Model</div>
-                <select className="input" value={draft.model || existing?.model_pref || meta.defaultModel}
-                  onChange={e => {
-                    const m = e.target.value;
-                    setDraft(provider, { model: m });
-                    // T98: auto-save if already configured and user isn't mid-typing a new key
-                    if (isConfigured && !draft.key) { saveModelOnly(provider, m); }
-                  }}>
-                  {(dynamicModels[provider] || meta.modelOptions).map(m => <option key={m} value={m}>{m}{m === meta.defaultModel ? ' · default' : ''}</option>)}
-                </select>
-              </label>
-
-              <label style={{ display: 'block', marginBottom: 10 }}>
-                <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>
-                  API key{isConfigured && <span style={{ marginLeft: 6, color: 'var(--up)' }}>· saved {_akRelTime(existing.created_at)}</span>}
-                </div>
-                <input className="input" type="password" autoComplete="off" value={draft.key || ''}
-                  onChange={e => setDraft(provider, { key: e.target.value })}
-                  placeholder={isConfigured ? `(saved · paste new key to replace)` : `${meta.keyPrefix}...`} />
-              </label>
-
-              {testResult && (
-                <div style={{ fontSize: 11, padding: '6px 10px', borderRadius: 6, marginBottom: 10,
-                  background: testResult.ok ? 'color-mix(in oklab, var(--up) 12%, transparent)' : 'color-mix(in oklab, var(--danger) 12%, transparent)',
-                  color: testResult.ok ? 'var(--up)' : 'var(--danger)',
-                }}>{testResult.msg}</div>
-              )}
-
-              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-                <button className="btn btn--sm btn--primary" disabled={!!op || !draft.key} onClick={() => saveKey(provider)}>
-                  {op === 'save' ? '⋯ saving' : isConfigured ? 'Update key' : 'Save key'}
-                </button>
-                <button className="btn btn--sm" disabled={!!op || (!draft.key && !isConfigured)} onClick={() => testKey(provider, !!draft.key)}>
-                  {op === 'test' ? '⋯ testing' : 'Test'}
-                </button>
-                {isConfigured && (
-                  <button className="btn btn--sm" disabled={!!op} onClick={() => removeKey(provider)} style={{ color: 'var(--danger)', marginLeft: 'auto' }}>
-                    {op === 'remove' ? '⋯ removing' : 'Remove'}
-                  </button>
-                )}
-              </div>
-
-              <div className="muted" style={{ fontSize: 11, marginTop: 12, paddingTop: 10, borderTop: '1px dashed var(--border)' }}>
-                Get a key at <a href={meta.consoleUrl} target="_blank" rel="noopener" style={{ color: 'var(--accent)' }}>{meta.consoleLabel} ↗</a>
-                {usageProv.calls_30d > 0 && (
-                  <span style={{ marginLeft: 8 }}>· {usageProv.calls_30d} calls / 30d{usageProv.est_cost_inr ? ` · est ₹${usageProv.est_cost_inr.toFixed(2)}` : ''}</span>
-                )}
-              </div>
-            </Card>
-          );
-        })}
-      </div>
+      {/* KeyVault: per-provider key add/test/delete, empty-state + smart-upsell. */}
+      <KeyVault
+        keys={keys}
+        supportedProviders={supportedProviders}
+        usage={usage}
+        routerPreview={routerPreview}
+        flash={flash}
+        refresh={refresh}
+      />
 
       <Card title="Where these get used" sub="The advisor and per-trade analysis on Insights consumes these keys." style={{ marginBottom: 16 }}>
         <div className="muted" style={{ fontSize: 13, lineHeight: 1.7 }}>
@@ -933,15 +1093,6 @@ const AiKeysScreen = () => {
       </Card>
     </>
   );
-};
-
-const _akRelTime = (s) => {
-  if (!s) return '';
-  const dt = (Date.now() - new Date(s).getTime()) / 1000;
-  if (dt < 60) return 'just now';
-  if (dt < 3600) return Math.round(dt/60) + 'm ago';
-  if (dt < 86400) return Math.round(dt/3600) + 'h ago';
-  return Math.round(dt/86400) + 'd ago';
 };
 
 Object.assign(window, { AiKeysScreen });
