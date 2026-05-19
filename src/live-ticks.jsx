@@ -193,8 +193,14 @@
         return;
       }
       if (msg.type === "subscribed") {
-        // backend ack — log so it's visible in DevTools
-        try { console.log("[live-ticks] subscribed:", msg); } catch (e) { console.warn('[live-ticks] swallowed:', e && e.message); }
+        // T-184 (F-12): backend ack — only log when ats_debug=1 in localStorage.
+        // Reduces dev-tools noise for normal users while keeping the signal
+        // available for operators investigating tick issues.
+        try {
+          if (window.localStorage && localStorage.getItem('ats_debug') === '1') {
+            console.log("[live-ticks] subscribed:", msg);
+          }
+        } catch (e) { console.warn('[live-ticks] swallowed:', e && e.message); }
         return;
       }
       if (msg.type === "tick" && typeof msg.symbol === "string" && typeof msg.ltp === "number") {

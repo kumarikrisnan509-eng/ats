@@ -722,22 +722,42 @@ const PaperScreen = () => {
             labels={[window.daysAgo(55), window.daysAgo(40), window.daysAgo(24), window.daysAgo(9), window.TODAY_SHORT]}/>
         </Card>
         <Card title="Fill quality" sub="Paper fills are calibrated to live">
-          <div className="col" style={{ gap: 14 }}>
-            {paperVsLive.map((r,i) => (
-              <div key={i}>
-                <div className="between" style={{ marginBottom: 2 }}>
-                  <div style={{ fontSize: 12, fontWeight: 500 }}>{r.k}</div>
-                  <span className="mono" style={{ fontSize: 11, color: "var(--text-3)" }}>{r.delta}</span>
+          {/* T-184 (F-3): gate the 4-row paperVsLive hardcoded table behind
+              isDemoOn(). Live mode shows an empty state until /api/paper/
+              fill-quality is implemented. Previously this misled users into
+              reading the demo slippage / fill-time / rejection-rate numbers
+              as their OWN paper-fill metrics. */}
+          {(() => {
+            const _isDemoFQ = !!(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
+            if (!_isDemoFQ) {
+              return (
+                <div className="muted" style={{ padding: 12, fontSize: 12, lineHeight: 1.5 }}>
+                  Fill-quality metrics are not yet wired.<br/>
+                  Pending a <code>/api/paper/fill-quality</code> endpoint that returns
+                  per-strategy slippage, fill time, rejection rate, and partial fills
+                  computed from this user's paper order log.
                 </div>
-                <div className="row" style={{ gap: 10 }}>
-                  <span className="mono" style={{ fontSize: 11 }}><span style={{ color: "var(--text-3)" }}>paper </span>{r.paper}</span>
-                  <span style={{ color: "var(--border-strong)" }}>·</span>
-                  <span className="mono" style={{ fontSize: 11 }}><span style={{ color: "var(--text-3)" }}>live </span>{r.live}</span>
-                </div>
-                <div className="muted" style={{ fontSize: 10, marginTop: 2 }}>{r.note}</div>
+              );
+            }
+            return (
+              <div className="col" style={{ gap: 14 }}>
+                {paperVsLive.map((r,i) => (
+                  <div key={i}>
+                    <div className="between" style={{ marginBottom: 2 }}>
+                      <div style={{ fontSize: 12, fontWeight: 500 }}>{r.k}</div>
+                      <span className="mono" style={{ fontSize: 11, color: "var(--text-3)" }}>{r.delta}</span>
+                    </div>
+                    <div className="row" style={{ gap: 10 }}>
+                      <span className="mono" style={{ fontSize: 11 }}><span style={{ color: "var(--text-3)" }}>paper </span>{r.paper}</span>
+                      <span style={{ color: "var(--border-strong)" }}>·</span>
+                      <span className="mono" style={{ fontSize: 11 }}><span style={{ color: "var(--text-3)" }}>live </span>{r.live}</span>
+                    </div>
+                    <div className="muted" style={{ fontSize: 10, marginTop: 2 }}>{r.note}</div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            );
+          })()}
         </Card>
       </div>
 
