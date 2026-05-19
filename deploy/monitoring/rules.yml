@@ -52,3 +52,57 @@ groups:
         labels: { severity: critical }
         annotations:
           summary: "Paper-vs-broker cash drift exceeds INR 1L for 5 min"
+
+  # T-204 (CODE-AUDIT E.11 #2): host + container + alert-pipeline health.
+  # These rules require node_exporter (job_name: node) and cadvisor
+  # (job_name: cadvisor) to be scraped -- see deploy/monitoring/node-exporter.compose.yml.
+  - name: ats.infra
+    interval: 60s
+    rules:
+      - alert: DiskAlmostFull
+        expr: (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) * 100 < 15
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "Disk < 15% free on {{ $labels.mountpoint }} ({{ $labels.instance }})"
+          description: "audit.log + sealed tokens live on the VM disk. A full disk halts the audit append, which on T-110 process.exit(1)s the backend. Free space immediately."
+
+      - alert: HostHighMemory
+        expr: (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 < 15
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Host available memory < 15% for 5 min"
+          description: "OCI Ampere A1 has limited RAM. Likely the playwright-driven auto-login daemon or a leaky Chromium. Check `docker stats` and consider restarting the daemon."
+
+      - alert: ContainerRestartLooping
+        expr: rate(container_start_time_seconds[15m]) > 0.0011
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Container {{ $labels.name }} has restarted > 1x in 15 min"
+          description: "Threshold 0.0011/s = ~1 restart per 15 min. If ats-backend is the offender, /api/health is the next thing to check. T-201 health-monitor workflow will also page on this."
+
+      - alert: AlertmanagerDown
+        expr: absent(up{job="alertmanager"}) or up{job="alertmanager"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Alertmanager itself is down — alerts are not being delivered"
+          description: "Without Alertmanager, every other alert in this file is silenced. Restart it from /opt/monitoring."
+
+      - alert: TelegramBridgeDown
+        expr: absent(up{job="telegram-bridge"}) or up{job="telegram-bridge"} == 0
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "Telegram bridge unreachable — Alertmanager has no way to page"
+          description: "The bridge translates Alertmanager webhooks into Telegram messages. T-204 wrapped it in systemd; check `systemctl status ats-telegram-bridge`."
+
+      - alert: CertExpiringSoon
+        expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < 14
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "TLS certificate expires in < 14 days"
+          description: "Let's Encrypt autorenew should run via certbot. If this fires, check `systemctl list-timers | grep certbot` and the renewal log."

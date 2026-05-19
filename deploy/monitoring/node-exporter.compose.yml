@@ -1,0 +1,73 @@
+# T-204 (CODE-AUDIT E.11 #2): host + container metrics for the existing
+# Prometheus + Alertmanager stack.
+#
+# Today the only scrape target is ATS itself, which exposes application-level
+# gauges (broker, alerts, scanner). That leaves the operator blind to:
+#   - disk-full / inode exhaustion
+#   - host OOM, swap, load average
+#   - the ats-backend container restart-looping
+#   - cert expiry approaching
+#   - node_exporter or cadvisor themselves dying
+#
+# This compose adds two scrape targets that close those gaps:
+#   - node_exporter  (host-level: disk, mem, cpu, fs, net, time, textfile)
+#   - cadvisor       (per-container: CPU, mem, restart count, throttling)
+#
+# Both run with --network host so Prometheus can scrape them via localhost.
+# Both pin a versioned image tag for predictable upgrades. Both have minimal
+# privileges except cadvisor which legitimately needs read access to
+# /sys/fs/cgroup, /var/run, /var/lib/docker, and /var/run/docker.sock to
+# enumerate containers.
+#
+# Install (on the VM, run alongside the existing prom/alertmanager compose):
+#   cd /opt/monitoring
+#   docker compose -f node-exporter.compose.yml up -d
+#   curl -sS http://127.0.0.1:9100/metrics | head -5   # node_exporter sanity
+#   curl -sS http://127.0.0.1:8079/healthz             # cadvisor sanity
+#   docker compose -f docker-compose.yml restart prom  # reload scrape config
+
+services:
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: ats-node-exporter
+    network_mode: host
+    restart: unless-stopped
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro,rslave
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|rootfs/var/lib/docker)($$|/)'
+      - '--web.listen-address=127.0.0.1:9100'
+    # Bind explicitly to loopback so the metrics aren't exposed publicly.
+    # Prometheus scrapes via 127.0.0.1:9100 from the same host.
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: ats-cadvisor
+    network_mode: host
+    restart: unless-stopped
+    privileged: false
+    # cadvisor needs CAP_SYS_PTRACE + CAP_DAC_READ_SEARCH to read cgroups
+    # of unprivileged containers without going fully privileged.
+    cap_add:
+      - SYS_PTRACE
+      - DAC_READ_SEARCH
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command:
+      - '-port=8079'
+      - '-listen_ip=127.0.0.1'
+      - '-storage_duration=2m'
+      # Don't collect every metric -- we only need restart/cpu/mem.
+      - '-docker_only=true'
+      - '-housekeeping_interval=15s'

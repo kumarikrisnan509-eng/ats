@@ -1,0 +1,61 @@
+[Unit]
+Description=ATS — Alertmanager → Telegram webhook bridge
+Documentation=https://github.com/kumarikrisnan509-eng/ats/blob/main/deploy/docs/INCIDENT-RUNBOOK.md
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# T-204 (CODE-AUDIT E.11 #2): bridge ran via `nohup node` with no systemd
+# unit, so it died on reboot and there was no watchdog. Wrap as a managed
+# service so the operator's alert pipeline survives a VM restart.
+#
+# The bridge listens on 127.0.0.1:8888 and translates Alertmanager webhook
+# POSTs into Telegram messages via the operator's bot. Auth (bot token +
+# chat id) lives in /etc/ats/telegram-bridge.env (0640 root:ats).
+
+User=ats
+Group=ats
+WorkingDirectory=/opt/ats-telegram-bridge
+
+# Bot token + chat ID come from a 0640 root:ats file. Operator seeds via
+# the install script; don't commit this file's contents.
+EnvironmentFile=/etc/ats/telegram-bridge.env
+
+# Bridge is small (<50 lines of Node, single HTTPS POST per alert).
+# Cap conservatively so an upstream Alertmanager bug can't OOM the host.
+MemoryMax=128M
+CPUQuota=20%
+TasksMax=64
+
+ExecStart=/usr/bin/env node /opt/ats-telegram-bridge/bridge.js
+
+StandardOutput=append:/var/log/ats/telegram-bridge.log
+StandardError=append:/var/log/ats/telegram-bridge.log
+
+# Restart on crash with a back-off. Alertmanager retries delivery, so a
+# brief outage doesn't lose alerts but burning CPU on a tight restart
+# loop would. Five restarts per minute is the cap.
+Restart=on-failure
+RestartSec=5s
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+
+# Hardening: minimal kernel surface. The bridge only does outbound HTTPS
+# to api.telegram.org, so we can be aggressive about lockdown.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/ats
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

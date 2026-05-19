@@ -24,6 +24,23 @@ scrape_configs:
     # Alternative: use the header approach
     # external_labels: are added to ALL series for routing.
 
+  # T-204 (CODE-AUDIT E.11 #2): host-level metrics (disk, mem, cpu, fs, net).
+  # Closes the audit gap "no disk-full / OOM / runaway-CPU alert today".
+  # See deploy/monitoring/node-exporter.compose.yml.
+  - job_name: node
+    metrics_path: /metrics
+    scheme: http
+    static_configs:
+      - targets: ['127.0.0.1:9100']
+
+  # T-204: per-container metrics (restart count, mem, cpu throttling).
+  # Catches the "ats-backend is restart-looping" failure mode.
+  - job_name: cadvisor
+    metrics_path: /metrics
+    scheme: http
+    static_configs:
+      - targets: ['127.0.0.1:8079']
+
 alerting:
   alertmanagers:
     - static_configs:
