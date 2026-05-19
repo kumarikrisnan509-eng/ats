@@ -2,9 +2,36 @@
 /* Broker reconciliation — daily match between our books vs broker contract notes.
    Critical for tax filing and catching any order/fill/fee discrepancy. */
 
+
+// T-208 (CODE-AUDIT F.5 M2.4): visible "data unavailable" pill. Renders
+// only when the primary data fetch fails. Conservative inline component
+// so this commit doesn't touch shared primitives; the pattern can be
+// hoisted later if it spreads to more screens.
+const _LoadErrPill = ({ err, onRetry }) => {
+  if (!err) return null;
+  return (
+    <div style={{
+      padding: '10px 14px', marginBottom: 12, borderRadius: 6, fontSize: 12,
+      background: 'color-mix(in oklab, var(--danger) 12%, transparent)',
+      color: 'var(--danger)', border: '1px solid currentColor',
+      display: 'flex', alignItems: 'center', gap: 12,
+    }}>
+      <span>⚠ Could not load live data: {err}</span>
+      {onRetry && (
+        <button onClick={onRetry} className="btn btn--xs"
+          style={{ marginLeft: 'auto', borderColor: 'currentColor', color: 'currentColor' }}>
+          Retry
+        </button>
+      )}
+    </div>
+  );
+};
+
 const ReconScreen = () => {
   // ---- live /api/reconcile ----
   const [liveRecon, setLiveRecon] = React.useState(null);
+  // T-208 (CODE-AUDIT F.5 M2.4): surface load failures to the user.
+  const [loadErr, setLoadErr] = React.useState(null);
   React.useEffect(() => {
     if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
     let cancelled = false;
@@ -12,7 +39,11 @@ const ReconScreen = () => {
       try {
         const d = await window.fetchApi('/api/reconcile');
         if (!cancelled && d && d.ok) setLiveRecon(d);
-      } catch (e) { console.warn('[screen-recon] error:', e && e.message); }
+      } catch (e) {
+        // T-208: log AND surface to user via inline pill below header.
+        console.warn('[screen-recon] error:', e && e.message);
+        if (!cancelled) setLoadErr(e && e.message ? e.message : 'fetch failed');
+      }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -50,6 +81,7 @@ const ReconScreen = () => {
 
   return (
     <>
+      <_LoadErrPill err={loadErr} />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
         <div>
           <div style={{ fontSize: 12, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>

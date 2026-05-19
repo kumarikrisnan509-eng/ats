@@ -2,9 +2,36 @@
 /* Order Audit Trail — every order's full lifecycle: signal → decision → submit → fills → settlement.
    Filterable, exportable, immutable. Required for SEBI compliance + post-mortem. */
 
+
+// T-208 (CODE-AUDIT F.5 M2.4): visible "data unavailable" pill. Renders
+// only when the primary data fetch fails. Conservative inline component
+// so this commit doesn't touch shared primitives; the pattern can be
+// hoisted later if it spreads to more screens.
+const _LoadErrPill = ({ err, onRetry }) => {
+  if (!err) return null;
+  return (
+    <div style={{
+      padding: '10px 14px', marginBottom: 12, borderRadius: 6, fontSize: 12,
+      background: 'color-mix(in oklab, var(--danger) 12%, transparent)',
+      color: 'var(--danger)', border: '1px solid currentColor',
+      display: 'flex', alignItems: 'center', gap: 12,
+    }}>
+      <span>⚠ Could not load live data: {err}</span>
+      {onRetry && (
+        <button onClick={onRetry} className="btn btn--xs"
+          style={{ marginLeft: 'auto', borderColor: 'currentColor', color: 'currentColor' }}>
+          Retry
+        </button>
+      )}
+    </div>
+  );
+};
+
 const AuditScreen = () => {
   // ---- live /api/audit ----
   const [liveAudit, setLiveAudit] = React.useState(null);
+  // T-208 (CODE-AUDIT F.5 M2.4): surface load failures to the user.
+  const [loadErr, setLoadErr] = React.useState(null);
   React.useEffect(() => {
     if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
     let cancelled = false;
@@ -12,7 +39,11 @@ const AuditScreen = () => {
       try {
         const d = await window.fetchApi('/api/audit?limit=50');
         if (!cancelled && d && d.ok) setLiveAudit(d);
-      } catch (e) { console.warn('[screen-audit] error:', e && e.message); }
+      } catch (e) {
+        // T-208: log AND surface to user via inline pill below header.
+        console.warn('[screen-audit] error:', e && e.message);
+        if (!cancelled) setLoadErr(e && e.message ? e.message : 'fetch failed');
+      }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -129,6 +160,7 @@ const AuditScreen = () => {
 
   return (
     <>
+      <_LoadErrPill err={loadErr} />
       <div className="page-header">
         <div>
           <h1 className="page-header__title">Order audit trail</h1>
