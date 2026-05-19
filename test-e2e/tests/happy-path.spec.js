@@ -147,11 +147,18 @@ test.describe('Auth gate enforced on per-user endpoints', () => {
     });
   }
 
-  test('POST /api/me/paper/order without session returns 401', async ({ request }) => {
+  test('POST /api/me/paper/order without session returns 401 or 403 (CSRF block)', async ({ request }) => {
+    // T-181: CSRF middleware blocks state-changing POSTs without a valid Origin
+    // header. Playwright's APIRequestContext doesn't send Origin by default, so
+    // the request can be rejected at CSRF (403 cross_origin_rejected) BEFORE
+    // reaching the auth gate. Both responses satisfy the security invariant:
+    // anonymous external clients cannot place paper orders.
     const r = await request.post('/api/me/paper/order', {
       data: { symbol: 'RELIANCE', side: 'BUY', qty: 1, type: 'MARKET' },
     });
-    expect(r.status()).toBe(401);
+    expect([401, 403]).toContain(r.status());
+    const j = await r.json().catch(() => ({}));
+    expect(j.ok).toBe(false);
   });
 
   test('POST /api/orders/place without session is rejected (401 or 400)', async ({ request }) => {
