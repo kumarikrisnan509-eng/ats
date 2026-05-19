@@ -124,6 +124,19 @@ jobs:
             echo "no test script defined -- skipping"
           fi
 
+      - name: Frontend unit tests (Vitest -- non-blocking initially per T-211)
+        working-directory: test-frontend
+        # T-211 (CODE-AUDIT D.9 #2): scaffold + 5 tests. Wired as
+        # continue-on-error: true initially while we verify it runs reliably
+        # in CI. Flip to blocking after a week of clean runs, same pattern
+        # T-199 used for npm audit pre-blocking.
+        continue-on-error: true
+        run: |
+          if [ -f package.json ]; then
+            npm install --silent --no-audit --no-fund
+            npm test
+          fi
+
       - name: Playwright smoke tests (blocking, against live URL)
         # T-199 (CODE-AUDIT D.9 #5): used to skip on PRs to keep CI fast, which
         # meant E2E regressions only surfaced AFTER merge to main. Now runs on
