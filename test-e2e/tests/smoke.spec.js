@@ -6,11 +6,27 @@
 
 const { test, expect } = require('@playwright/test');
 
+// T-179 (SCREENS-AUDIT followup): updated to match the live app.jsx TITLES map.
+//   Removed: #regime, #benchmark, #news -- deleted from the app in T100/v9
+//            reduction; the previous spec was silently iterating dead routes.
+//   Added:   #modes, #harvest, #money, #compliance, #ai-keys, #goals, #stpswp,
+//            #mf, #smallcase, #fixed, #options, #margin, #lab, #review,
+//            #insights, #profile -- HIGH/MEDIUM risk screens that had no
+//            Playwright assertions per SCREENS-AUDIT.md §6.
 const ROUTES = [
-  '#dashboard', '#paper', '#trading', '#backtest', '#audit',
-  '#portfolio', '#regime', '#recon', '#attribution', '#benchmark',
-  '#tuner', '#strategies', '#signals', '#news', '#alerts',
-  '#circuits', '#brokers', '#settings', '#risk', '#tax',
+  // System / shell
+  '#dashboard', '#settings', '#risk', '#compliance', '#profile', '#apidocs',
+  // Automate
+  '#modes', '#strategies', '#signals', '#tuner', '#alerts', '#options', '#compare',
+  // Execute
+  '#trading', '#audit', '#margin',
+  // Validate
+  '#paper', '#backtest', '#circuits', '#lab',
+  // Wealth / long-term
+  '#portfolio', '#goals', '#stpswp', '#smallcase', '#fixed', '#harvest', '#tax',
+  '#brokers', '#money', '#mf', '#insights',
+  // Operations / AI
+  '#recon', '#attribution', '#review', '#ai-keys',
 ];
 
 for (const route of ROUTES) {
