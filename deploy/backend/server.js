@@ -2861,6 +2861,96 @@ app.get('/api/me/identity', (req, res) => {
   });
 });
 
+// T-185 (SCREENS-AUDIT F-7): per-mode runtime aggregates for the Trading Modes
+// screen. The screen previously rendered a hardcoded RUNTIME object with zeros
+// for every mode and a banner that admitted as much. This endpoint aggregates
+// the user's paper_positions + paper_closed_trades into the same shape so the
+// screen can display real (or partial) numbers when the user has activity.
+//
+// Mode classification is symbol-based because paper_positions has no product
+// column. Heuristics match src/trading-modes.jsx inferModeFromSymbol():
+//   options : symbol matches /\bCE\b|\bPE\b|CALL|PUT/
+//   futures : symbol matches /\bFUT\b|FUTURES/
+//   intraday: everything else (default). Swing is not separable from intraday
+//             without per-order product info, so swing returns zeros for now.
+//             Better honest zeros than fake numbers.
+//
+// strategiesRunning is derived from distinct strategy_tag values across
+// recent (last 7d) paper_orders, classified the same way. Zero when the user
+// has no orders in window.
+//
+// Shape matches the hardcoded RUNTIME in screen-modes.jsx exactly:
+//   { intraday: { openPositions, utilized, todayPnl, strategiesRunning },
+//     swing:    { ... }, options: { ... }, futures: { ... } }
+app.get('/api/me/modes/runtime', withAuth(async (req, res) => {
+  const uid = req.user.id;
+  const empty = () => ({ openPositions: 0, utilized: 0, todayPnl: 0, strategiesRunning: 0 });
+  const out = { intraday: empty(), swing: empty(), options: empty(), futures: empty() };
+
+  // Classify by symbol the same way the frontend does.
+  const classify = (sym) => {
+    const s = String(sym || '').toUpperCase();
+    if (/\bCE\b|\bPE\b|CALL|PUT/.test(s)) return 'options';
+    if (/\bFUT\b|FUTURES/.test(s))           return 'futures';
+    return 'intraday';
+  };
+
+  try {
+    // Open positions + utilized capital, from paper_positions.
+    const positions = (db && db.paper && typeof db.paper.listPositions === 'function')
+      ? (db.paper.listPositions(uid) || []) : [];
+    for (const p of positions) {
+      const mode = classify(p.symbol);
+      const qty  = Number(p.qty || 0);
+      const avg  = Number(p.avg_price || 0);
+      if (!qty) continue;
+      out[mode].openPositions += 1;
+      out[mode].utilized      += Math.abs(qty) * avg;
+    }
+  } catch (e) { console.warn('[modes-runtime] positions:', e && e.message); }
+
+  try {
+    // Today's PnL, from paper_closed_trades exited today (server local date).
+    if (db && db._conn) {
+      const rows = db._conn.prepare(
+        "SELECT symbol, pnl FROM paper_closed_trades " +
+        "WHERE user_id = ? AND date(exited_at) = date('now')"
+      ).all(uid) || [];
+      for (const r of rows) {
+        const mode = classify(r.symbol);
+        out[mode].todayPnl += Number(r.pnl || 0);
+      }
+    }
+  } catch (e) { console.warn('[modes-runtime] todayPnl:', e && e.message); }
+
+  try {
+    // Strategies running per mode: distinct strategy_tag across paper_orders
+    // in the last 7 days, classified by symbol of the order.
+    if (db && db._conn) {
+      const rows = db._conn.prepare(
+        "SELECT DISTINCT strategy_tag, symbol FROM paper_orders " +
+        "WHERE user_id = ? AND strategy_tag IS NOT NULL AND strategy_tag != '' " +
+        "  AND created_at >= datetime('now','-7 days')"
+      ).all(uid) || [];
+      const perMode = { intraday: new Set(), swing: new Set(), options: new Set(), futures: new Set() };
+      for (const r of rows) {
+        perMode[classify(r.symbol)].add(r.strategy_tag);
+      }
+      for (const k of Object.keys(perMode)) {
+        out[k].strategiesRunning = perMode[k].size;
+      }
+    }
+  } catch (e) { console.warn('[modes-runtime] strategies:', e && e.message); }
+
+  // Round utilized + todayPnl to whole rupees -- frontend treats them as INR.
+  for (const k of Object.keys(out)) {
+    out[k].utilized = Math.round(out[k].utilized);
+    out[k].todayPnl = Math.round(out[k].todayPnl);
+  }
+
+  res.json({ ok: true, runtime: out, asOf: new Date().toISOString() });
+}));
+
 app.get('/api/margins', async (req, res) => {
   try {
     const p = await pickBroker(req);

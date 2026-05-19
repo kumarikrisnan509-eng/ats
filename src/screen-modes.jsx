@@ -43,18 +43,48 @@ const ModesScreen = () => {
   const CASH_BUFFER_PCT = Math.max(0, 100 - totalCapitalPct);
   const capitalFor = (id) => HAS_LIVE_CAPITAL ? (TOTAL_CAPITAL * state[id].capitalPct) / 100 : 0;
 
-  // Simulated per-mode runtime state (would come from backend)
-  // T99-T111: zeroed out per-mode RUNTIME demo numbers. T-82 banner already
-  // discloses these are demo. Per-mode aggregation backend not wired —
-  // showing zeros instead of fake non-zero values aligns the data with the
-  // banner's disclosure. When the per-mode endpoint ships, switch this back
-  // to a fetched object.
-  const RUNTIME = {
+  // T-185 (SCREENS-AUDIT F-7): per-mode runtime now reads from
+  // /api/me/modes/runtime when the user is authenticated. Falls back to
+  // zeros if the API errors / 401s / 503s -- the existing banner still
+  // discloses any zero values as "not yet aggregated."
+  //
+  // Demo mode is respected: window.MockData.isDemoOn() short-circuits the
+  // fetch and keeps the (also-zeroed) constants below, so demo viewers
+  // don't unexpectedly see a real user's positions if they share a session.
+  const ZERO_RUNTIME = {
     intraday: { openPositions: 0, utilized: 0, todayPnl: 0, strategiesRunning: 0 },
     swing:    { openPositions: 0, utilized: 0, todayPnl: 0, strategiesRunning: 0 },
     options:  { openPositions: 0, utilized: 0, todayPnl: 0, strategiesRunning: 0 },
     futures:  { openPositions: 0, utilized: 0, todayPnl: 0, strategiesRunning: 0 },
   };
+  const [RUNTIME, setRuntime] = React.useState(ZERO_RUNTIME);
+  React.useEffect(() => {
+    const isDemo = (typeof window !== 'undefined' && window.MockData && typeof window.MockData.isDemoOn === 'function' && window.MockData.isDemoOn());
+    if (isDemo) return; // keep zeros in demo mode
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch('/api/me/modes/runtime', { credentials: 'include' });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (cancelled || !j || !j.ok || !j.runtime) return;
+        // Overlay the response onto ZERO_RUNTIME so missing modes still render zeros.
+        const merged = { ...ZERO_RUNTIME };
+        for (const k of Object.keys(ZERO_RUNTIME)) {
+          if (j.runtime[k] && typeof j.runtime[k] === 'object') {
+            merged[k] = {
+              openPositions:     Number(j.runtime[k].openPositions     || 0),
+              utilized:          Number(j.runtime[k].utilized          || 0),
+              todayPnl:          Number(j.runtime[k].todayPnl          || 0),
+              strategiesRunning: Number(j.runtime[k].strategiesRunning || 0),
+            };
+          }
+        }
+        setRuntime(merged);
+      } catch (e) { /* leave zeros on error -- the banner already discloses */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const [detailMode, setDetailMode] = useState("intraday");
 
