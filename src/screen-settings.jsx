@@ -104,6 +104,9 @@ const SettingsScreen = () => {
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [activeSection, setActiveSection] = React.useState('account');
   const [testingChannel, setTestingChannel] = React.useState(null);
+  // T-189: per-section save in-flight flag (so inline Save buttons can show "⋯ saving"
+  // and prevent double-submit). Distinct from `testingChannel`, which gates Send test only.
+  const [savingNotif, setSavingNotif] = React.useState(false);
 
   // refs for scrollspy
   const refs = {
@@ -217,24 +220,34 @@ const SettingsScreen = () => {
   };
 
   const saveNotif = async () => {
-    const payload = { ...notifForm };
-    if (payload.telegram_bot_token === '(unchanged)') delete payload.telegram_bot_token;
-    if (payload.webhook_secret === '(unchanged)') delete payload.webhook_secret;
-    const res = await fetch('/api/v1/me/notifications', { method: 'PUT', credentials: 'include',
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    const j = await res.json();
-    if (res.ok && j.ok) {
-      flash('Notifications saved');
-      const refreshed = await fetch('/api/v1/me/notifications', { credentials: 'include' }).then(r => r.json());
-      if (refreshed.ok) {
-        setNotif(refreshed.notifications);
-        setNotifForm(f => ({ ...f,
-          telegram_bot_token: refreshed.notifications.telegram_bot_token_set ? '(unchanged)' : '',
-          webhook_secret:     refreshed.notifications.webhook_secret_set ? '(unchanged)' : '',
-        }));
-      }
-      setSavedAt(s => ({ ...s, notifications: new Date() }));
-    } else flash(j.detail || 'save failed', false);
+    // T-189: guard re-entry while a save is in flight (per-section Save buttons
+    // can fire while the global sticky bar is also visible).
+    if (savingNotif) return;
+    setSavingNotif(true);
+    try {
+      const payload = { ...notifForm };
+      if (payload.telegram_bot_token === '(unchanged)') delete payload.telegram_bot_token;
+      if (payload.webhook_secret === '(unchanged)') delete payload.webhook_secret;
+      const res = await fetch('/api/v1/me/notifications', { method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const j = await res.json();
+      if (res.ok && j.ok) {
+        flash('Notifications saved');
+        const refreshed = await fetch('/api/v1/me/notifications', { credentials: 'include' }).then(r => r.json());
+        if (refreshed.ok) {
+          setNotif(refreshed.notifications);
+          setNotifForm(f => ({ ...f,
+            telegram_bot_token: refreshed.notifications.telegram_bot_token_set ? '(unchanged)' : '',
+            webhook_secret:     refreshed.notifications.webhook_secret_set ? '(unchanged)' : '',
+          }));
+        }
+        setSavedAt(s => ({ ...s, notifications: new Date() }));
+      } else flash(j.detail || 'save failed', false);
+    } catch (e) {
+      flash('Save failed: ' + (e && e.message ? e.message : 'network error'), false);
+    } finally {
+      setSavingNotif(false);
+    }
   };
 
   const testChannel = async (channel) => {
@@ -387,13 +400,20 @@ const SettingsScreen = () => {
                     <Toggle on={notifForm.email_enabled} onClick={() => setNotifForm(f => ({ ...f, email_enabled: !f.email_enabled }))} />
                   </div>
                   {notifForm.email_enabled && (
-                    <div className="row" style={{ gap: 12, marginTop: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                    <div className="row" style={{ gap: 8, marginTop: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
                       <label>
                         <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>Send time</div>
                         <TimePicker value={notifForm.email_digest_time} onChange={v => setNotifForm(f => ({ ...f, email_digest_time: v }))} />
                       </label>
-                      <button className="btn btn--sm" disabled={!!testingChannel} onClick={() => testChannel('email')}
-                        style={{ marginLeft: 'auto' }}>{testingChannel === 'email' ? '⋯ sending' : 'Send test email'}</button>
+                      <div style={{ flex: 1 }} />
+                      {/* T-189: inline Save button so users don't have to scroll to the bottom sticky bar */}
+                      <button className="btn btn--sm btn--primary" data-testid="notif-save-email"
+                        disabled={!notifDirty || savingNotif} onClick={saveNotif}>
+                        {savingNotif ? '⋯ saving' : 'Save'}
+                      </button>
+                      <button className="btn btn--sm" disabled={!!testingChannel} onClick={() => testChannel('email')}>
+                        {testingChannel === 'email' ? '⋯ sending' : 'Send test email'}
+                      </button>
                     </div>
                   )}
                 </div>
@@ -420,11 +440,27 @@ const SettingsScreen = () => {
                           onChange={e => setNotifForm(f => ({ ...f, telegram_chat_id: e.target.value }))}
                           placeholder="e.g. 140299" />
                       </label>
-                      <div className="row" style={{ justifyContent: 'flex-end' }}>
+                      <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+                        {/* T-189: inline Save — primary action, disabled until something changed.
+                            Test message stays disabled until a token is on file (saved). */}
+                        <button className="btn btn--sm btn--primary" data-testid="notif-save-telegram"
+                          disabled={!notifDirty || savingNotif} onClick={saveNotif}>
+                          {savingNotif ? '⋯ saving' : 'Save'}
+                        </button>
                         <button className="btn btn--sm" disabled={!!testingChannel || !notif.telegram_bot_token_set} onClick={() => testChannel('telegram')}>
                           {testingChannel === 'telegram' ? '⋯ sending' : 'Send test message'}
                         </button>
                       </div>
+                      {!notif.telegram_bot_token_set && !notifDirty && (
+                        <div className="muted" style={{ fontSize: 11, fontStyle: 'italic', marginTop: 4 }}>
+                          ⓘ No token saved yet. Paste your bot token and chat ID, then click Save.
+                        </div>
+                      )}
+                      {notif.telegram_bot_token_set && notifDirty && (
+                        <div className="muted" style={{ fontSize: 11, color: 'var(--warn, #d97706)', marginTop: 4 }}>
+                          ⚠ Unsaved changes — click Save to persist.
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -451,7 +487,12 @@ const SettingsScreen = () => {
                           onChange={e => setNotifForm(f => ({ ...f, webhook_secret: e.target.value }))}
                           placeholder={notif.webhook_secret_set ? '(unchanged)' : 'Signs the body with HMAC-SHA256 in X-ATS-Signature'} />
                       </label>
-                      <div className="row" style={{ justifyContent: 'flex-end' }}>
+                      <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+                        {/* T-189: inline Save mirrors the Telegram card pattern. */}
+                        <button className="btn btn--sm btn--primary" data-testid="notif-save-webhook"
+                          disabled={!notifDirty || savingNotif} onClick={saveNotif}>
+                          {savingNotif ? '⋯ saving' : 'Save'}
+                        </button>
                         <button className="btn btn--sm" disabled={!!testingChannel || !notifForm.webhook_url} onClick={() => testChannel('webhook')}>
                           {testingChannel === 'webhook' ? '⋯ POSTing' : 'Send test POST'}
                         </button>
