@@ -11,6 +11,13 @@
 //     writes to the audit log. Wire real orders in a separate, deliberate change.
 
 const express = require('express');
+// T-220: rate-limit helpers moved to services/order-rate-limit.js.
+// Names preserved (underscore prefix) so existing route handler call sites
+// + the order-guards.test.js source-grep assertion continue to work.
+const _orderRateLimit = require('./services/order-rate-limit');
+const _orderTimes = _orderRateLimit._orderTimes;
+const _orderRateOk = _orderRateLimit.orderRateOk;
+const _orderRateRecord = _orderRateLimit.orderRateRecord;
 // T-219 (CODE-AUDIT F.5 M1.4 piece 5a): order-payload validation constants extracted.
 const { VALID_SIDES, VALID_PRODUCTS, VALID_ORDER_TYPES, VALID_VARIETIES, VALID_VALIDITY } = require('./services/order-validation');
 // T-218 (CODE-AUDIT F.5 M1.4 piece 4): /api/portfolio + /api/me/portfolio routes extracted.
@@ -108,16 +115,7 @@ const DEFAULT_SYMBOLS = (process.env.DEFAULT_SYMBOLS || 'NIFTY 50,BANKNIFTY,RELI
 let auditSeq = 0;
 // Tier 15: rolling-window order rate counter (in-memory, per-process).
 // On restart this resets, which is fine -- the cap is per-minute, not per-day.
-const _orderTimes = [];
-function _orderRateOk() {
-  const now = Date.now();
-  const cutoff = now - 60 * 1000;
-  while (_orderTimes.length && _orderTimes[0] < cutoff) _orderTimes.shift();
-  return _orderTimes.length < MAX_ORDERS_PER_MIN;
-}
-function _orderRateRecord() {
-  _orderTimes.push(Date.now());
-}
+
 
 function audit(event, data) {
   auditSeq += 1;
