@@ -93,6 +93,23 @@ for i in $(seq 1 30); do
     if curl -sf "${HEALTH_URL}" >/dev/null; then ok=1; break; fi
     echo "    ...attempt ${i}, not ready yet"
 done
+
+# T-201 (CODE-AUDIT E.11 #5): on success, append the new tag to .last-good-tags
+# so deploy/scripts/rollback-on-vm.sh has more than 1 historical option.
+# Dedupe + cap at 5 most-recent entries. This runs BEFORE the rollback branch
+# so a failed deploy does NOT pollute the history.
+if [[ "${ok}" -eq 1 ]]; then
+    HISTORY_FILE="${COMPOSE_DIR}/.last-good-tags"
+    touch "${HISTORY_FILE}"
+    # Prepend NEW_TAG, dedupe, keep top 5.
+    {
+        echo "${NEW_TAG}"
+        grep -v "^${NEW_TAG}$" "${HISTORY_FILE}" || true
+    } | head -n 5 > "${HISTORY_FILE}.tmp"
+    mv "${HISTORY_FILE}.tmp" "${HISTORY_FILE}"
+    echo "==> recorded ${NEW_TAG} in .last-good-tags (top 5)"
+fi
+
 if [[ ${ok} -ne 1 ]]; then
     echo "==> Container logs (last 50 lines) for diagnosis:"
     docker logs --tail 50 ats-backend 2>&1 || true

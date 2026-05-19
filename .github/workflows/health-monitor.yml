@@ -1,0 +1,113 @@
+# T-201 (CODE-AUDIT F.5 M2.5): scheduled live health monitor.
+#
+# Hits /api/health and /api/health-deep against production every 15 minutes
+# during market hours (Mon-Fri, 09:00-15:30 IST = 03:30-10:00 UTC). Any non-2xx
+# response, or a deep-health field signalling stalled broker or expired DR
+# backup, fails the workflow. GitHub Actions emails the repo owner on failed
+# workflow runs, so the operator gets paged.
+#
+# Why not Prometheus/Alertmanager? The existing monitoring stack scrapes
+# /metrics every 30s but currently has NO alert rule that emails or pages the
+# operator on /api/health-deep field anomalies (brokerWsStalled, drStale, etc.).
+# Wiring that into Alertmanager is in the audit backlog (E.11 #2). This
+# GitHub-side monitor is the cheap defense-in-depth in the meantime.
+
+name: health-monitor
+
+on:
+  schedule:
+    # Every 15 min, 03:00 to 10:59 UTC (covers 08:30-16:30 IST, a 30-min buffer
+    # either side of NSE 09:00-15:30 trading hours), Monday through Friday.
+    - cron: '*/15 3-10 * * 1-5'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: probe production
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: GET /api/health (must return ok:true)
+        run: |
+          set -e
+          BASE="${ATS_BASE_URL:-https://ats.rajasekarselvam.com}"
+          RESP=$(curl -sS -m 10 -w "\nHTTP_STATUS=%{http_code}" "${BASE}/api/health")
+          STATUS=$(echo "$RESP" | grep -oP 'HTTP_STATUS=\K\d+')
+          BODY=$(echo "$RESP" | sed '/^HTTP_STATUS=/d')
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::health endpoint returned HTTP ${STATUS}"
+            echo "$BODY"
+            exit 1
+          fi
+          if ! echo "$BODY" | grep -q '"ok":true'; then
+            echo "::error::health endpoint returned ok:false"
+            echo "$BODY"
+            exit 1
+          fi
+          echo "::notice::/api/health ok"
+
+      - name: GET /api/health-deep (broker + DR + market signals)
+        run: |
+          set -e
+          BASE="${ATS_BASE_URL:-https://ats.rajasekarselvam.com}"
+          RESP=$(curl -sS -m 10 "${BASE}/api/health-deep")
+          # Parse with python because jq isn't guaranteed on ubuntu-latest
+          # (it is, but this is more portable + lets us emit GH-style annotations).
+          echo "$RESP" | python3 - <<'PY'
+          import sys, json
+          body = sys.stdin.read()
+          try:
+              d = json.loads(body)
+          except Exception as e:
+              print(f'::error::health-deep returned non-JSON: {body[:300]}')
+              sys.exit(1)
+
+          # Top-level ok flag.
+          if not d.get('ok'):
+              print(f'::error::health-deep ok:false  body={body[:500]}')
+              sys.exit(1)
+
+          # Surface stalled-broker / DR-stale signals as failures so the workflow
+          # fails and GitHub emails the operator.
+          checks = d.get('checks', {}) or {}
+          fails = []
+
+          br = checks.get('broker', {}) or {}
+          if br.get('stalledOnToken'):
+              fails.append(f'broker.stalledOnToken=true (token age {br.get("accessTokenAgeMin")} min)')
+          if br.get('tickStale'):
+              fails.append(f'broker.tickStale=true (last tick {br.get("lastTickAgoSec")}s ago)')
+          if br.get('reconnectAttempts', 0) >= 5:
+              fails.append(f'broker.reconnectAttempts={br.get("reconnectAttempts")} (>=5)')
+
+          dr = checks.get('dr', {}) or {}
+          if dr.get('drStale'):
+              fails.append(f'dr.drStale=true (last successful archive {dr.get("lastArchiveAgeHours")}h ago)')
+
+          # During market hours we ALSO require a recent tick. The cron only fires
+          # during the trading window per the schedule, so we don't gate on time.
+          mk = checks.get('market', {}) or {}
+          if mk.get('isOpen') and not br.get('connected'):
+              fails.append('market.isOpen=true but broker.connected=false')
+
+          if fails:
+              for f in fails:
+                  print(f'::error::{f}')
+              sys.exit(1)
+          print('::notice::/api/health-deep all checks green')
+          PY
+
+      - name: GET /api/status (preflight)
+        run: |
+          set -e
+          BASE="${ATS_BASE_URL:-https://ats.rajasekarselvam.com}"
+          STATUS=$(curl -sS -o /dev/null -w "%{http_code}" -m 10 "${BASE}/api/status")
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::/api/status returned HTTP ${STATUS}"
+            exit 1
+          fi
+          echo "::notice::/api/status ok"
