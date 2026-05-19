@@ -11,6 +11,8 @@
 //     writes to the audit log. Wire real orders in a separate, deliberate change.
 
 const express = require('express');
+// T-218 (CODE-AUDIT F.5 M1.4 piece 4): /api/portfolio + /api/me/portfolio routes extracted.
+const { mountPortfolioRoutes } = require('./routes/portfolio');
 // T-217 (CODE-AUDIT F.5 M1.4 piece 3 + A.2 fix): OAuth state-signer.
 const _oauthState = require('./services/oauth-state');
 const _pendingNonces = _oauthState._pendingNonces;
@@ -2614,48 +2616,7 @@ app.get('/api/quotes', async (req, res) => {
 // ---------- Portfolio / orders REST (read-only, per-user) ----------
 // Tier 58: route through user's own broker. If not connected, return empty + flag.
 
-app.get('/api/portfolio/holdings', async (req, res) => {
-  try {
-    const r = await resolveUserBroker(req);
-    if (!r.broker) return res.json({ ok: true, brokerConnected: false, reason: r.reason, rows: [] });
-    const rows = await r.broker.getHoldings();
-    res.json({ ok: true, brokerConnected: true, rows });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: e.message });
-  }
-});
-
-// T99-T66: per-user mutual-fund holdings. Kite has no MF API; data comes
-// from the user uploading their CAS (Consolidated Account Statement) PDF
-// via /api/cas/parse + future UI. Until that pipeline persists results
-// to a per-user table, this endpoint returns an empty list so the frontend
-// can render a clean 'no MF data yet, upload your CAS' empty state instead
-// of showing hardcoded sample data.
-app.get('/api/me/portfolio/mf', (req, res) => {
-  if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
-  // TODO: when CAS-upload persistence lands, query a per-user mf_holdings table here.
-  res.json({ ok: true, holdings: [], source: 'awaiting_cas_upload' });
-});
-
-// T99-T66: per-user ETF holdings. ETFs trade on NSE/BSE so they DO show up
-// in Kite's getHoldings() — they're listed alongside equity holdings (just
-// with instrument_type=ETF). Until the frontend filters them out cleanly,
-// return empty list with a hint pointing to the equity holdings endpoint.
-app.get('/api/me/portfolio/etf', (req, res) => {
-  if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
-  res.json({ ok: true, holdings: [], source: 'see_equity_holdings', note: 'ETFs are returned by /api/portfolio/holdings; filter by instrument_type=ETF client-side' });
-});
-
-app.get('/api/portfolio/positions', async (req, res) => {
-  try {
-    const r = await resolveUserBroker(req);
-    if (!r.broker) return res.json({ ok: true, brokerConnected: false, reason: r.reason, day: [], net: [] });
-    const data = await r.broker.getPositions();
-    res.json({ ok: true, brokerConnected: true, ...data });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: e.message });
-  }
-});
+mountPortfolioRoutes(app, { resolveUserBroker }); // T-218: was 4 inline /api/portfolio + /api/me/portfolio routes; see routes/portfolio.js
 
 app.get('/api/orders', async (req, res) => {
   try {
