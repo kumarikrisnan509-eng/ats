@@ -152,7 +152,12 @@ function App() {
   }, []);
   const handleAction = (actId) => {
     if (actId === "act:kill")    window.dispatchEvent(new CustomEvent("kill-switch"));
-    if (actId === "act:pause")   alert("Paused all modes — placeholder");
+    if (actId === "act:pause") {
+      // T-178 (F-6 fix): removed placeholder alert(). Real bulk-pause needs a
+      // POST /api/risk/pause-all endpoint that isn't yet implemented. Route
+      // the user to the Modes screen where they can toggle modes individually.
+      window.location.hash = "#modes";
+    }
     if (actId === "act:theme")   setTheme(t => t === "dark" ? "light" : "dark");
     if (actId === "act:logout")  window.dispatchEvent(new CustomEvent("logout"));
   };

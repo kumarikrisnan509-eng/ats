@@ -16,9 +16,14 @@ const HarvestScreen = () => {
     })();
     return () => { cancelled = true; };
   }, []);
-  const [selected, setSelected] = React.useState(new Set([1, 2, 4]));
+  const [selected, setSelected] = React.useState(new Set());
 
-  const lots = [
+  // T-178 (F-2 fix): gate the hardcoded harvest universe behind demo mode.
+  // Previously this 7-row hardcoded array rendered as real user opportunities
+  // regardless of demo state -- users could read VEDL/PAYTM/etc. as their
+  // own tax-loss candidates. Now we only show them in demo mode; live mode
+  // takes lots from /api/tax/harvest (liveHarvest.lots) or empty state.
+  const __demoLots = [
     { id: 1, sym: "VEDL",       qty: 100, avg: 412,  ltp: 368,  loss: -4400,  type: "STCL", age: "4 mo",  ok: true,  replacement: "HINDALCO (metals sector proxy)" },
     { id: 2, sym: "IDEA",       qty: 500, avg: 14.2, ltp: 10.8, loss: -1700,  type: "STCL", age: "8 mo",  ok: true,  replacement: "BHARTIARTL (telecom proxy)" },
     { id: 3, sym: "YESBANK",    qty: 300, avg: 22,   ltp: 18.5, loss: -1050,  type: "STCL", age: "6 mo",  ok: true,  replacement: "FEDERALBNK (mid-bank proxy)" },
@@ -27,6 +32,10 @@ const HarvestScreen = () => {
     { id: 6, sym: "INDIGO",     qty: 30,  avg: 4280, ltp: 3920, loss: -10800, type: "STCL", age: "3 mo",  ok: false, blockReason: "Wash sale risk: bought 50 shares 12 days ago" },
     { id: 7, sym: "ADANIPORTS", qty: 50,  avg: 1280, ltp: 1198, loss: -4100,  type: "STCL", age: "2 mo",  ok: true,  replacement: "JSWINFRA (port/infra proxy)" },
   ];
+  const _isDemo = !!(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
+  const lots = _isDemo
+    ? __demoLots
+    : (liveHarvest && Array.isArray(liveHarvest.lots) ? liveHarvest.lots : []);
 
   const eligible = lots.filter(l => l.ok);
   const selectedLots = lots.filter(l => selected.has(l.id) && l.ok);

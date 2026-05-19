@@ -66,6 +66,11 @@ const TradingScreen = () => {
   }, []);
 
   const candles = useMemo(() => {
+    // T-178 (F-4 fix): only generate synthetic candles in demo mode. Live mode
+    // shows an empty array until a real /api/candles or instrument-history
+    // endpoint is wired. ChartCard's <Candles> handles empty array gracefully.
+    const _isDemoCandles = !!(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
+    if (!_isDemoCandles) return [];
     const arr = []; let v = 2920;
     for (let i = 0; i < 40; i++) {
       const o = v;

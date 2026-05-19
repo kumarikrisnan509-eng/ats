@@ -38,7 +38,13 @@ const __factorTiltPresets = {
 };
 
 const FactorTiltPanel = () => {
-  const [universeText, setUniverseText] = React.useState(JSON.stringify(__factorTiltDemoUniverse, null, 2));
+  // T-178 (F-5 fix): only pre-fill the universe textarea with the 10-name
+  // hardcoded demo universe in demo mode. Live mode starts empty so users
+  // can't accidentally POST factor-tilt against a fake universe.
+  const _isDemoFT = !!(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
+  const [universeText, setUniverseText] = React.useState(
+    _isDemoFT ? JSON.stringify(__factorTiltDemoUniverse, null, 2) : ''
+  );
   const [weights, setWeights] = React.useState(__factorTiltPresets['Momentum tilted']);
   const [mode, setMode]       = React.useState('long-only');
   const [topPct, setTopPct]   = React.useState(0.3);
