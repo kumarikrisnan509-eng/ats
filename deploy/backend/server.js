@@ -1975,44 +1975,44 @@ app.get('/api/paper', (_req, res) => {
   if (!paper) return res.status(503).json({ ok:false, reason:'paper_not_initialized' });
   res.json({ ok:true, stats: paper.stats() });
 });
-app.get('/api/paper/orders', (_req, res) => {
+app.get('/api/paper/orders', withDeprecation('/api/me/paper', (_req, res) => {
   if (!paper) return res.status(503).json({ ok:false, reason:'paper_not_initialized' });
   res.json({ ok:true, orders: paper.list() });
-});
-app.get('/api/paper/positions', (_req, res) => {
+}));
+app.get('/api/paper/positions', withDeprecation('/api/me/paper', (_req, res) => {
   if (!paper) return res.status(503).json({ ok:false, reason:'paper_not_initialized' });
   res.json({ ok:true, positions: paper.positions() });
-});
-app.get('/api/paper/trades', (req, res) => {
+}));
+app.get('/api/paper/trades', withDeprecation('/api/me/paper', (req, res) => {
   if (!paper) return res.status(503).json({ ok:false, reason:'paper_not_initialized' });
   const lim = parseInt(req.query.limit || '50', 10) || 50;
   res.json({ ok:true, trades: paper.trades(lim) });
-});
-app.post('/api/paper/order', (req, res) => {
+}));
+app.post('/api/paper/order', withDeprecation('/api/me/paper', (req, res) => {
   if (!paper) return res.status(503).json({ ok:false, reason:'paper_not_initialized' });
   try {
     const o = paper.placeOrder(req.body || {});
     res.status(201).json({ ok:true, order:o });
   } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
-});
-app.delete('/api/paper/order/:id', (req, res) => {
+}));
+app.delete('/api/paper/order/:id', withDeprecation('/api/me/paper', (req, res) => {
   if (!paper) return res.status(503).json({ ok:false, reason:'paper_not_initialized' });
   res.json({ ok:true, ...paper.cancelOrder(req.params.id) });
-});
-app.post('/api/paper/reset', (req, res) => {
+}));
+app.post('/api/paper/reset', withDeprecation('/api/me/paper', (req, res) => {
   if (!paper) return res.status(503).json({ ok:false, reason:'paper_not_initialized' });
   // Tier 28: optional { tier: '10L' | '25L' | '50L' } or { startingCash: <int> }.
   try {
     const r = paper.reset(req.body || {});
     res.json({ ok:true, ...r, stats: paper.stats() });
   } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
-});
+}));
 
 // Tier 28: expose available paper tiers.
-app.get('/api/paper/tiers', (_req, res) => {
+app.get('/api/paper/tiers', withDeprecation('/api/me/paper', (_req, res) => {
   if (!paper) return res.status(503).json({ ok:false, reason:'paper_not_initialized' });
   res.json({ ok:true, tiers: paper.availableTiers(), current: paper.stats().cash + paper.stats().totalEquity ? paper.stats() : null });
-});
+}));
 
 // ============ E5: paper-to-live promotion gates (require auth) ============
 // Decides whether a {strategy, symbol} pair has earned the right to fire on the
@@ -2633,12 +2633,12 @@ app.post('/api/scanner/run', async (req, res) => {
 });
 
 // ---------- Watchlist ----------
-app.get('/api/watchlist', (_req, res) => {
+app.get('/api/watchlist', withDeprecation('/api/me/watchlist', (_req, res) => {
   if (!watchlist) return res.status(503).json({ ok: false, reason: 'watchlist_not_initialized' });
   res.json({ ok: true, symbols: watchlist.list() });
-});
+}));
 
-app.put('/api/watchlist', (req, res) => {
+app.put('/api/watchlist', withDeprecation('/api/me/watchlist', (req, res) => {
   if (!watchlist) return res.status(503).json({ ok: false, reason: 'watchlist_not_initialized' });
   try {
     const symbols = watchlist.set(req.body && req.body.symbols);
@@ -2650,9 +2650,9 @@ app.put('/api/watchlist', (req, res) => {
   } catch (e) {
     res.status(400).json({ ok: false, reason: e.message });
   }
-});
+}));
 
-app.post('/api/watchlist/add', (req, res) => {
+app.post('/api/watchlist/add', withDeprecation('/api/me/watchlist', (req, res) => {
   if (!watchlist) return res.status(503).json({ ok: false, reason: 'watchlist_not_initialized' });
   try {
     const sym = req.body && req.body.symbol;
@@ -2664,9 +2664,9 @@ app.post('/api/watchlist/add', (req, res) => {
   } catch (e) {
     res.status(400).json({ ok: false, reason: e.message });
   }
-});
+}));
 
-app.post('/api/watchlist/remove', (req, res) => {
+app.post('/api/watchlist/remove', withDeprecation('/api/me/watchlist', (req, res) => {
   if (!watchlist) return res.status(503).json({ ok: false, reason: 'watchlist_not_initialized' });
   try {
     const out = watchlist.remove(req.body && req.body.symbol);
@@ -2674,15 +2674,15 @@ app.post('/api/watchlist/remove', (req, res) => {
   } catch (e) {
     res.status(400).json({ ok: false, reason: e.message });
   }
-});
+}));
 
 // ---------- Alerts ----------
-app.get('/api/alerts', (_req, res) => {
+app.get('/api/alerts', withDeprecation('/api/me/alerts', (_req, res) => {
   if (!alerts) return res.status(503).json({ ok: false, reason: 'alerts_not_initialized' });
   res.json({ ok: true, alerts: alerts.list() });
-});
+}));
 
-app.post('/api/alerts', (req, res) => {
+app.post('/api/alerts', withDeprecation('/api/me/alerts', (req, res) => {
   if (!alerts) return res.status(503).json({ ok: false, reason: 'alerts_not_initialized' });
   try {
     const a = alerts.add(req.body || {});
@@ -2690,24 +2690,24 @@ app.post('/api/alerts', (req, res) => {
   } catch (e) {
     res.status(400).json({ ok: false, reason: e.message });
   }
-});
+}));
 
-app.delete('/api/alerts/:id', (req, res) => {
+app.delete('/api/alerts/:id', withDeprecation('/api/me/alerts', (req, res) => {
   if (!alerts) return res.status(503).json({ ok: false, reason: 'alerts_not_initialized' });
   const ok = alerts.remove(req.params.id);
   res.status(ok ? 200 : 404).json({ ok });
-});
+}));
 
-app.post('/api/alerts/:id/reset', (req, res) => {
+app.post('/api/alerts/:id/reset', withDeprecation('/api/me/alerts', (req, res) => {
   if (!alerts) return res.status(503).json({ ok: false, reason: 'alerts_not_initialized' });
   const ok = alerts.reset(req.params.id);
   res.status(ok ? 200 : 404).json({ ok });
-});
+}));
 
-app.get('/api/alerts/stats', (_req, res) => {
+app.get('/api/alerts/stats', withDeprecation('/api/me/alerts', (_req, res) => {
   if (!alerts) return res.status(503).json({ ok: false, reason: 'alerts_not_initialized' });
   res.json({ ok: true, ...alerts.stats() });
-});
+}));
 
 // Config exposed to the front-end
 app.get('/api/config', (_req, res) => {
@@ -3369,6 +3369,26 @@ function withAuth(handler) {
     try { await handler(req, res); }
     catch (e) { res.status(400).json({ ok:false, reason: e.message }); }
   };
+}
+
+// T-202 (CODE-AUDIT C.10 #3): wrap legacy unscoped routes with auth + a
+// Deprecation header. The pre-Tier 75 routes (/api/watchlist, /api/alerts,
+// /api/paper/*) read/write module-level singletons with no req.user.id
+// filter. In single-tenant prod this works because there's only one user
+// (the operator); but the audit flagged them as a multi-tenant data-leak
+// class. This wrapper:
+//   (1) Forces auth (anon callers get 401 via withAuth).
+//   (2) Adds `Deprecation: true` and `Link: </api/me/...>; rel="successor-version"`
+//       so the frontend (or any future client) can detect deprecated calls.
+//   (3) Audits each hit as `legacy.route.hit` so we can see when the last
+//       caller clears and the route is safe to delete.
+function withDeprecation(successorPath, handler) {
+  return withAuth(async (req, res) => {
+    res.setHeader('Deprecation', 'true');
+    res.setHeader('Link', '<' + successorPath + '>; rel="successor-version"');
+    audit('legacy.route.hit', { path: req.path, method: req.method, userId: req.user && req.user.id, successor: successorPath });
+    return handler(req, res);
+  });
 }
 
 // Watchlist
