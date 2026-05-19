@@ -12,7 +12,7 @@ param(
     [string]$Owner   = "kumarikrisnan509-eng",
     [string]$Repo    = "ats",
     [string]$Branch  = "main",
-    [string]$Pat     = "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"
+    [string]$Pat     = $env:GH_PAT
 )
 
 $ErrorActionPreference = "Stop"

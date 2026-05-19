@@ -144,11 +144,17 @@ jobs:
         run: |
           set -e
           # Hard fail if anything that looks like a secret is committed.
+          # T-190: added ghp_/github_pat_ patterns after SECRETS-AUDIT P0 #1 found
+          # 31 files with hardcoded PATs. The PAT chars after the prefix are 36 for
+          # classic tokens and 82 for fine-grained `github_pat_*`. Regexes use {30,}
+          # to stay tolerant to future format changes while still catching real leaks.
           ! grep -RIn --exclude-dir=node_modules --exclude-dir=.git \
               -e 'ZERODHA_API_SECRET=[A-Za-z0-9]\+' \
               -e 'BEGIN RSA PRIVATE KEY' \
               -e 'BEGIN OPENSSH PRIVATE KEY' \
               -e 'GHCR_TOKEN=ghp_' \
+              -e 'ghp_[A-Za-z0-9]\{30,\}' \
+              -e 'github_pat_[A-Za-z0-9_]\{80,\}' \
               .
           # Master key, audit log, sealed tokens must never be committed.
           for path in deploy/backend/master.key deploy/backend/audit.log deploy/backend/tokens; do

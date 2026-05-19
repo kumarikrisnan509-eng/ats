@@ -4,7 +4,13 @@
 set -uo pipefail
 OWNER="${OWNER:-kumarikrisnan509-eng}"
 REPO="${REPO:-ats}"
-PAT="${PAT:-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}"
+# T-190 redaction (P0 #1 from SECRETS-AUDIT.md): rotated; literal removed.
+# Set GH_PAT env var before running: export GH_PAT=ghp_yournewpat
+PAT="${PAT:-${GH_PAT}}"
+if [ -z "$PAT" ]; then
+    echo "ERROR: GH_PAT env var not set. Run: export GH_PAT=ghp_yournewpat" >&2
+    exit 1
+fi
 SHA="${1:?provide commit sha prefix}"
 
 API="https://api.github.com/repos/${OWNER}/${REPO}"

@@ -50,7 +50,7 @@ sudo timeout 8 docker run --rm --name ats-test2-${RANDOM} \
 '@
 
 # Substitute the PAT
-$bashScript = $bashScript.Replace('$GH_PAT', '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')
+$bashScript = $bashScript.Replace('$GH_PAT', $env:GH_PAT)
 
 $ScriptDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path

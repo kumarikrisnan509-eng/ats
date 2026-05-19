@@ -8,7 +8,13 @@ REM   4. Push using PAT
 cd /d "%~dp0"
 set REPO_OWNER=kumarikrisnan509-eng
 set REPO_NAME=ats
-set PAT=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
+REM T-190 redaction (P0 #1 from SECRETS-AUDIT.md): rotated; literal removed.
+REM Set GH_PAT env var before running: set GH_PAT=ghp_yournewpat
+if "%GH_PAT%"=="" (
+    echo ERROR: GH_PAT env var not set. Run: set GH_PAT=ghp_yournewpat then re-run this script.
+    exit /b 1
+)
+set PAT=%GH_PAT%
 
 echo ============================================================
 echo  ATS - Fix git state and push tiers 57+58
