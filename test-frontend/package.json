@@ -1,0 +1,17 @@
+{
+  "name": "ats-test-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "T-209 (CODE-AUDIT D.9 #2): Vitest scaffold for frontend unit tests. Loads .jsx files via a custom transform that mirrors the script-tag-loading model used in app.html (each file ends with Object.assign(window, {...}); the loader evals and reads exports from window). This avoids editing production source to add ES module exports.",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.4",
+    "jsdom": "^25.0.1",
+    "esbuild": "^0.24.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}
