@@ -165,16 +165,25 @@ const SettingsScreen = () => {
   // dirty trackers — compare form vs server snapshot
   const accountDirty = account && (accountForm.name !== (account.name || '') || accountForm.email !== (account.email || ''));
   const prefsDirty = prefs && prefsForm && JSON.stringify(prefs) !== JSON.stringify(prefsForm);
-  const notifDirty = notif && (
+  // T-192: split notifDirty into per-channel flags so each inline Save button
+  // can show/hide based on its OWN section's state, not the whole notifications
+  // blob. emailDirty/telegramDirty/webhookDirty are evaluated against the
+  // server-side snapshot (`notif`) the same way the old combined flag was.
+  const emailDirty = notif && (
     notifForm.email_enabled !== !!notif.email_enabled ||
-    notifForm.email_digest_time !== (notif.email_digest_time || '16:00') ||
+    notifForm.email_digest_time !== (notif.email_digest_time || '16:00')
+  );
+  const telegramDirty = notif && (
     notifForm.telegram_enabled !== !!notif.telegram_enabled ||
     notifForm.telegram_chat_id !== (notif.telegram_chat_id || '') ||
-    (notifForm.telegram_bot_token !== '(unchanged)' && notifForm.telegram_bot_token !== '') ||
+    (notifForm.telegram_bot_token !== '(unchanged)' && notifForm.telegram_bot_token !== '')
+  );
+  const webhookDirty = notif && (
     notifForm.webhook_enabled !== !!notif.webhook_enabled ||
     notifForm.webhook_url !== (notif.webhook_url || '') ||
     (notifForm.webhook_secret !== '(unchanged)' && notifForm.webhook_secret !== '')
   );
+  const notifDirty = emailDirty || telegramDirty || webhookDirty;
   const anyDirty = accountDirty || prefsDirty || notifDirty;
 
   const saveAll = async () => {
@@ -223,27 +232,77 @@ const SettingsScreen = () => {
     // T-189: guard re-entry while a save is in flight (per-section Save buttons
     // can fire while the global sticky bar is also visible).
     if (savingNotif) return;
+
+    // T-192-E: confirm before clobbering an existing sealed credential. The
+    // backend will simply replace the sealed cell -- there's no undo. For
+    // trading-related alerting credentials a single mistyped char can mean
+    // missed signals during market hours, so an explicit confirm is worth the
+    // friction. We only ask when the user is REPLACING a real token, not when
+    // first setting one (notif.*_set is false in that case).
+    const replacingTelegramToken =
+      notif && notif.telegram_bot_token_set &&
+      notifForm.telegram_bot_token !== '(unchanged)' &&
+      notifForm.telegram_bot_token !== '';
+    const replacingWebhookSecret =
+      notif && notif.webhook_secret_set &&
+      notifForm.webhook_secret !== '(unchanged)' &&
+      notifForm.webhook_secret !== '';
+    if (replacingTelegramToken || replacingWebhookSecret) {
+      const what = replacingTelegramToken && replacingWebhookSecret
+        ? 'the Telegram bot token AND webhook signing secret'
+        : replacingTelegramToken ? 'the Telegram bot token' : 'the webhook signing secret';
+      if (!window.confirm(`Replace ${what}? The previous sealed value will be discarded and cannot be recovered.`)) {
+        return;
+      }
+    }
+
     setSavingNotif(true);
+
+    // T-192-D: optimistic update. Mutate the local `notif` snapshot to what we
+    // are about to send so the dirty flags clear and "Saved just now" can show
+    // immediately. If the PUT fails we roll back to `prevNotif`. This removes
+    // the ~200ms re-fetch latency for the common case (save succeeds).
+    const prevNotif = notif;
+    const prevForm = notifForm;
+    const payload = { ...notifForm };
+    if (payload.telegram_bot_token === '(unchanged)') delete payload.telegram_bot_token;
+    if (payload.webhook_secret === '(unchanged)') delete payload.webhook_secret;
+    const optimistic = {
+      ...notif,
+      email_enabled: !!payload.email_enabled,
+      email_digest_time: payload.email_digest_time || '16:00',
+      telegram_enabled: !!payload.telegram_enabled,
+      telegram_chat_id: payload.telegram_chat_id || '',
+      telegram_bot_token_set: payload.telegram_bot_token ? true : !!(notif && notif.telegram_bot_token_set),
+      webhook_enabled: !!payload.webhook_enabled,
+      webhook_url: payload.webhook_url || '',
+      webhook_secret_set: payload.webhook_secret ? true : !!(notif && notif.webhook_secret_set),
+    };
+    setNotif(optimistic);
+    // After optimistic update, mask the input fields the same way the server
+    // masks them on re-read. This is what the old code did via a refetch.
+    setNotifForm(f => ({ ...f,
+      telegram_bot_token: optimistic.telegram_bot_token_set ? '(unchanged)' : '',
+      webhook_secret:     optimistic.webhook_secret_set ? '(unchanged)' : '',
+    }));
+    setSavedAt(s => ({ ...s, notifications: new Date() }));
+
     try {
-      const payload = { ...notifForm };
-      if (payload.telegram_bot_token === '(unchanged)') delete payload.telegram_bot_token;
-      if (payload.webhook_secret === '(unchanged)') delete payload.webhook_secret;
       const res = await fetch('/api/v1/me/notifications', { method: 'PUT', credentials: 'include',
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const j = await res.json();
       if (res.ok && j.ok) {
         flash('Notifications saved');
-        const refreshed = await fetch('/api/v1/me/notifications', { credentials: 'include' }).then(r => r.json());
-        if (refreshed.ok) {
-          setNotif(refreshed.notifications);
-          setNotifForm(f => ({ ...f,
-            telegram_bot_token: refreshed.notifications.telegram_bot_token_set ? '(unchanged)' : '',
-            webhook_secret:     refreshed.notifications.webhook_secret_set ? '(unchanged)' : '',
-          }));
-        }
-        setSavedAt(s => ({ ...s, notifications: new Date() }));
-      } else flash(j.detail || 'save failed', false);
+      } else {
+        // Rollback: server rejected the change.
+        setNotif(prevNotif);
+        setNotifForm(prevForm);
+        flash(j.detail || j.reason || 'save failed', false);
+      }
     } catch (e) {
+      // Rollback: network or transport error.
+      setNotif(prevNotif);
+      setNotifForm(prevForm);
       flash('Save failed: ' + (e && e.message ? e.message : 'network error'), false);
     } finally {
       setSavingNotif(false);
@@ -406,11 +465,14 @@ const SettingsScreen = () => {
                         <TimePicker value={notifForm.email_digest_time} onChange={v => setNotifForm(f => ({ ...f, email_digest_time: v }))} />
                       </label>
                       <div style={{ flex: 1 }} />
-                      {/* T-189: inline Save button so users don't have to scroll to the bottom sticky bar */}
-                      <button className="btn btn--sm btn--primary" data-testid="notif-save-email"
-                        disabled={!notifDirty || savingNotif} onClick={saveNotif}>
-                        {savingNotif ? '⋯ saving' : 'Save'}
-                      </button>
+                      {/* T-189 + T-192-A: inline Save renders ONLY when THIS section is dirty.
+                          Disappears when clean so the user isn't tempted to click a no-op. */}
+                      {emailDirty && (
+                        <button className="btn btn--sm btn--primary" data-testid="notif-save-email"
+                          disabled={savingNotif} onClick={saveNotif}>
+                          {savingNotif ? '⋯ saving' : 'Save'}
+                        </button>
+                      )}
                       <button className="btn btn--sm" disabled={!!testingChannel} onClick={() => testChannel('email')}>
                         {testingChannel === 'email' ? '⋯ sending' : 'Send test email'}
                       </button>
@@ -441,24 +503,22 @@ const SettingsScreen = () => {
                           placeholder="e.g. 140299" />
                       </label>
                       <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
-                        {/* T-189: inline Save — primary action, disabled until something changed.
-                            Test message stays disabled until a token is on file (saved). */}
-                        <button className="btn btn--sm btn--primary" data-testid="notif-save-telegram"
-                          disabled={!notifDirty || savingNotif} onClick={saveNotif}>
-                          {savingNotif ? '⋯ saving' : 'Save'}
-                        </button>
+                        {/* T-189 + T-192-A: Save is conditional on THIS section's own dirty flag.
+                            T-189 hint text dropped -- the appearing/disappearing button now
+                            carries the same signal without adding noise to a clean state. */}
+                        {telegramDirty && (
+                          <button className="btn btn--sm btn--primary" data-testid="notif-save-telegram"
+                            disabled={savingNotif} onClick={saveNotif}>
+                            {savingNotif ? '⋯ saving' : 'Save'}
+                          </button>
+                        )}
                         <button className="btn btn--sm" disabled={!!testingChannel || !notif.telegram_bot_token_set} onClick={() => testChannel('telegram')}>
                           {testingChannel === 'telegram' ? '⋯ sending' : 'Send test message'}
                         </button>
                       </div>
-                      {!notif.telegram_bot_token_set && !notifDirty && (
+                      {!notif.telegram_bot_token_set && !telegramDirty && (
                         <div className="muted" style={{ fontSize: 11, fontStyle: 'italic', marginTop: 4 }}>
-                          ⓘ No token saved yet. Paste your bot token and chat ID, then click Save.
-                        </div>
-                      )}
-                      {notif.telegram_bot_token_set && notifDirty && (
-                        <div className="muted" style={{ fontSize: 11, color: 'var(--warn, #d97706)', marginTop: 4 }}>
-                          ⚠ Unsaved changes — click Save to persist.
+                          ⓘ No token saved yet. Paste your bot token and chat ID -- a Save button will appear.
                         </div>
                       )}
                     </div>
@@ -488,11 +548,13 @@ const SettingsScreen = () => {
                           placeholder={notif.webhook_secret_set ? '(unchanged)' : 'Signs the body with HMAC-SHA256 in X-ATS-Signature'} />
                       </label>
                       <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
-                        {/* T-189: inline Save mirrors the Telegram card pattern. */}
-                        <button className="btn btn--sm btn--primary" data-testid="notif-save-webhook"
-                          disabled={!notifDirty || savingNotif} onClick={saveNotif}>
-                          {savingNotif ? '⋯ saving' : 'Save'}
-                        </button>
+                        {/* T-189 + T-192-A: Save conditional on THIS section's dirty flag. */}
+                        {webhookDirty && (
+                          <button className="btn btn--sm btn--primary" data-testid="notif-save-webhook"
+                            disabled={savingNotif} onClick={saveNotif}>
+                            {savingNotif ? '⋯ saving' : 'Save'}
+                          </button>
+                        )}
                         <button className="btn btn--sm" disabled={!!testingChannel || !notifForm.webhook_url} onClick={() => testChannel('webhook')}>
                           {testingChannel === 'webhook' ? '⋯ POSTing' : 'Send test POST'}
                         </button>
