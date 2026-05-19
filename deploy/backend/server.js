@@ -81,6 +81,13 @@ const BROKER_NAME     = (process.env.BROKER || 'mock').toLowerCase();
 const MASTER_KEY_PATH = process.env.MASTER_KEY_PATH || path.join(__dirname, 'master.key');
 const TOKENS_DIR      = process.env.TOKENS_DIR || path.join(__dirname, 'tokens');
 const SESSION_SECRET  = process.env.SESSION_SECRET || 'dev-only-change-me';
+// T-195 (CODE-AUDIT C.10 #5): refuse to boot in prod with the default secret.
+// In dev/test we tolerate it so contributors can run the suite without env wiring.
+if (SESSION_SECRET === 'dev-only-change-me' && (process.env.ENV_NAME === 'prod' || process.env.NODE_ENV === 'production')) {
+  console.error('FATAL: SESSION_SECRET is still the default value in a prod-flagged environment.');
+  console.error('       Set SESSION_SECRET=<32+ random bytes> in /etc/ats/backend.env and re-deploy.');
+  process.exit(1);
+}
 const DEFAULT_SYMBOLS = (process.env.DEFAULT_SYMBOLS || 'NIFTY 50,BANKNIFTY,RELIANCE,HDFCBANK,TCS,INFY')
     .split(',').map(s => s.trim()).filter(Boolean);
 
@@ -391,7 +398,12 @@ function readSessionCookie(req) {
   if (!c) return null;
   const [sid, mac] = c.split('.');
   if (!sid || !mac) return null;
-  if (sign(sid) !== mac) return null;
+  // T-195 (CODE-AUDIT C.10 #5): constant-time MAC compare avoids the theoretical
+  // timing side-channel in `!==` (low risk over a network but trivial to fix).
+  const a = Buffer.from(sign(sid), 'utf8');
+  const b = Buffer.from(String(mac), 'utf8');
+  if (a.length !== b.length) return null;
+  if (!crypto.timingSafeEqual(a, b)) return null;
   return sid;
 }
 
@@ -4547,7 +4559,7 @@ const VALID_ORDER_TYPES   = new Set(['MARKET', 'LIMIT', 'SL', 'SL-M']);
 const VALID_VARIETIES     = new Set(['regular', 'amo', 'co', 'iceberg', 'auction']);
 const VALID_VALIDITY      = new Set(['DAY', 'IOC', 'TTL']);
 
-app.post('/api/orders/place', async (req, res) => {
+app.post('/api/orders/place', withAuth(async (req, res) => {
   const body = req.body || {};
   // Tier 15: SEBI Algo-ID is now required. Under the 1 Apr 2026 framework every
   // algo-routed order must carry an exchange-issued Algo-ID. We require the caller
@@ -4695,12 +4707,16 @@ app.post('/api/orders/place', async (req, res) => {
     }
   } catch (_e) {}
 
-  if (typeof broker.placeOrder !== 'function') {
-    audit('order.blocked.notImplemented', normalizedPayload);
+  // T-196 (CODE-AUDIT C.10 #1): per-user broker resolution. The legacy module-
+  // level `broker` singleton check would let user A's order succeed because user B
+  // (the operator) has a real broker adapter. Each user must have their own.
+  const _preCheckBroker = await pickBroker(req);
+  if (!_preCheckBroker.broker || typeof _preCheckBroker.broker.placeOrder !== 'function') {
+    audit('order.blocked.notImplemented', { ...normalizedPayload, isUserOwn: _preCheckBroker.isUserOwn });
     return res.status(501).json({
       ok: false,
       reason: 'PLACE_ORDER_NOT_IMPLEMENTED',
-      message: 'Broker adapter has no placeOrder() method. Add it deliberately when wiring live trading.',
+      message: 'No broker adapter for this user, or it lacks placeOrder(). Connect a broker in Settings -> Brokers.',
       clientOrderId,
       validatedPayload: normalizedPayload,
     });
@@ -4710,8 +4726,11 @@ app.post('/api/orders/place', async (req, res) => {
   // day per {userId, strategyTag} pair. If active, the order is held in a
   // 5-minute bucket and the user is asked to confirm via Telegram.
   // The actual broker.placeOrder() call is deferred to /api/orders/confirm-2fa/:token.
+  // T-196 (CODE-AUDIT C.10 #1): the 2FA challenge key is now the per-session
+  // user id (not the process-global broker.userId). Without this, one user's
+  // confirmation would exempt every user from 2FA for the rest of the day.
   try {
-    const userId = (broker && broker.userId) || (broker && broker.name) || 'unknown';
+    const userId = String(req.user.id);
     const sTag   = normalizedPayload.strategyTag || 'unknown';
     if (twoFactor && twoFactor.shouldChallenge({ userId, strategyTag: sTag })) {
       const issued = await twoFactor.issue({
@@ -4731,22 +4750,34 @@ app.post('/api/orders/place', async (req, res) => {
       });
     }
   } catch (e) {
-    // 2FA failure must not block the order path -- fall through to broker.placeOrder.
+    // T-196 (CODE-AUDIT C.10 #1): 2FA error must HARD-FAIL the order. Falling
+    // through to broker.placeOrder() on a 2FA exception defeats the purpose of
+    // the gate. Operator can retry, escalate, or disable 2FA explicitly via
+    // env var if there's a real outage.
     audit('order.2fa.error', { clientOrderId, msg: e.message });
+    return res.status(503).json({ ok: false, reason: '2fa_unavailable', detail: e.message, clientOrderId });
   }
 
   // Reserved for the future. Unreachable today.
+  // T-196 (CODE-AUDIT C.10 #1): route to the AUTHENTICATED user's broker via
+  // pickBroker(req), not the process-global `broker` singleton. Otherwise every
+  // user's "place order" would execute on the operator's connection.
   _orderRateRecord();
-  broker.placeOrder(normalizedPayload)
+  const _p = await pickBroker(req);
+  if (!_p.broker || typeof _p.broker.placeOrder !== 'function') {
+    audit('order.blocked.brokerUnavailable', { clientOrderId, isUserOwn: _p.isUserOwn });
+    return res.status(503).json({ ok: false, reason: 'broker_unavailable', clientOrderId });
+  }
+  _p.broker.placeOrder(normalizedPayload)
     .then((result) => {
-      audit('order.placed', { clientOrderId, result });
-      res.json({ ok: true, clientOrderId, ...result });
+      audit('order.placed', { clientOrderId, result, isUserOwn: _p.isUserOwn });
+      res.json({ ok: true, clientOrderId, isUserOwn: _p.isUserOwn, ...result });
     })
     .catch((err) => {
-      audit('order.placeError', { clientOrderId, msg: err.message });
+      audit('order.placeError', { clientOrderId, msg: err.message, isUserOwn: _p.isUserOwn });
       res.status(502).json({ ok: false, reason: err.message, clientOrderId });
     });
-});
+}));
 
 // Tier 38: confirm a 2FA-pending order. Replays the held payload through
 // the same broker.placeOrder path so all the same audit + risk checks apply.
@@ -4794,7 +4825,7 @@ app.get('/api/security/two-factor', (_req, res) => {
 });
 
 // Tier 11: cancel a working order. Same dual gating as place.
-app.post('/api/orders/cancel', async (req, res) => {
+app.post('/api/orders/cancel', withAuth(async (req, res) => {
   const body = req.body || {};
   const orderId = String(body.orderId || '').trim();
   const variety = String(body.variety || 'regular').toLowerCase();
@@ -4814,7 +4845,7 @@ app.post('/api/orders/cancel', async (req, res) => {
     audit('order.cancelError', { orderId, msg: e.message });
     res.status(502).json({ ok: false, reason: e.message, orderId });
   }
-});
+}));
 
 app.post('/api/orders/dry-run', (req, res) => {
   if (KILL_SWITCH) {

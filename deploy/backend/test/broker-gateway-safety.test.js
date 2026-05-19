@@ -123,6 +123,53 @@ test('Layer 3: server.js has KNOWN_PLACE_ORDER_CALL_SITES live broker.placeOrder
   );
 });
 
+// --- Layer 4 (T-196): /api/orders/place and /api/orders/cancel are auth-gated ---
+//
+// CODE-AUDIT C.10 #1 documented that the place/cancel routes had no requireAuth,
+// used the process-global broker, and keyed 2FA on broker.userId. T-196 fixed all
+// three. This test pins the auth wrapper and the use of pickBroker(req).
+
+test('Layer 4 (T-196): /api/orders/place is wrapped in withAuth', () => {
+  const serverPath = path.join(__dirname, '..', 'server.js');
+  const raw = fs.readFileSync(serverPath, 'utf8');
+  // Expect the literal route definition `withAuth(async (req, res) =>`.
+  const placeAuthed = /app\.post\(\s*['"]\/api\/orders\/place['"]\s*,\s*withAuth\(/m.test(raw);
+  assert.equal(placeAuthed, true,
+    'POST /api/orders/place must be wrapped in withAuth -- live-trading auth gate.');
+});
+
+test('Layer 4 (T-196): /api/orders/cancel is wrapped in withAuth', () => {
+  const serverPath = path.join(__dirname, '..', 'server.js');
+  const raw = fs.readFileSync(serverPath, 'utf8');
+  const cancelAuthed = /app\.post\(\s*['"]\/api\/orders\/cancel['"]\s*,\s*withAuth\(/m.test(raw);
+  assert.equal(cancelAuthed, true,
+    'POST /api/orders/cancel must be wrapped in withAuth -- live-trading auth gate.');
+});
+
+test('Layer 4 (T-196): 2FA key is per-user (req.user.id), not process-global broker.userId', () => {
+  const serverPath = path.join(__dirname, '..', 'server.js');
+  const raw = fs.readFileSync(serverPath, 'utf8');
+  // The legacy form `const userId = (broker && broker.userId) || ...` must be gone
+  // from within the /api/orders/place handler. Search for it; assert absence.
+  const legacyKey = /const userId\s*=\s*\(broker\s*&&\s*broker\.userId\)/m.test(raw);
+  assert.equal(legacyKey, false,
+    'Process-global broker.userId as 2FA key was replaced with req.user.id in T-196.');
+  // And the new form should be present at least once.
+  const newKey = /const userId\s*=\s*String\(req\.user\.id\);/m.test(raw);
+  assert.equal(newKey, true,
+    'Expected `const userId = String(req.user.id);` in the post-T-196 2FA key construction.');
+});
+
+test('Layer 4 (T-196): 2FA error path HARD-FAILS instead of silent fallthrough', () => {
+  const serverPath = path.join(__dirname, '..', 'server.js');
+  const raw = fs.readFileSync(serverPath, 'utf8');
+  // Pin the 503/2fa_unavailable response. If a future refactor reverts to silent
+  // fallthrough, this assertion fails.
+  const hardFail = /reason:\s*['"]2fa_unavailable['"]/m.test(raw);
+  assert.equal(hardFail, true,
+    'On 2FA system error, /api/orders/place must return 503 2fa_unavailable, not fall through to broker.placeOrder.');
+});
+
 // --- Layer 3 supplemental: .env.example must not pre-enable live orders ---
 
 test('Layer 3: .env.example does not pre-enable live orders', () => {
