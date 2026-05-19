@@ -56,24 +56,29 @@ test('POST /api/v1/me/notifications/test requires auth (T-189)', async ({ reques
   expect([401, 403]).toContain(r.status());
 });
 
-// ---- 4. Settings page renders the three inline Save buttons ----
+// ---- 4. Settings source has the three inline Save buttons ----
 //
-// We can't sign in from CI, but the Settings page DOM should still load the
-// SettingsScreen component (which gates rendering on `notif` being non-null).
-// So we just verify the testid selectors exist in the bundled JSX source by
-// fetching the screen-settings.jsx file from the server and grepping it.
+// CI ordering: validate (Playwright) runs BEFORE deploy. Production is still
+// serving the previous bundle when Playwright executes, so fetching screen-
+// settings.jsx from `${BASE_URL}/src/...` would test the OLD code, not the
+// commit-under-test. To make this a real regression guard against the code
+// being shipped, we read from the runner's checked-out source tree directly.
 //
-// This is sufficient to catch regressions where someone removes the inline
-// Save buttons (e.g. during a refactor) without realizing they're the
-// canonical save UX for Telegram.
-test('screen-settings.jsx exposes inline Save buttons for all 3 channels (T-189)', async ({ request }) => {
-  const r = await request.get('/src/screen-settings.jsx');
-  expect(r.status()).toBe(200);
-  const src = await r.text();
+// If someone removes the inline Save buttons in a future refactor, this
+// assertion fails at PR time -- before the bad code ever reaches prod.
+const fs = require('fs');
+const path = require('path');
+
+test('screen-settings.jsx exposes inline Save buttons for all 3 channels (T-189)', () => {
+  // CI runs Playwright from working-directory: test-e2e/, so the source file
+  // is one level up. Locally same path works because dev runs from test-e2e/.
+  const settingsPath = path.resolve(__dirname, '..', '..', 'src', 'screen-settings.jsx');
+  expect(fs.existsSync(settingsPath)).toBe(true);
+  const src = fs.readFileSync(settingsPath, 'utf8');
   expect(src).toContain('data-testid="notif-save-email"');
   expect(src).toContain('data-testid="notif-save-telegram"');
   expect(src).toContain('data-testid="notif-save-webhook"');
   // Also verify the savingNotif loading state is wired (so users see "⋯ saving"
-  // feedback while the PUT is in flight — not just a silent click).
+  // feedback while the PUT is in flight -- not just a silent click).
   expect(src).toContain('savingNotif');
 });
