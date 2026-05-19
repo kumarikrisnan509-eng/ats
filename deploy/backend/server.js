@@ -11,6 +11,8 @@
 //     writes to the audit log. Wire real orders in a separate, deliberate change.
 
 const express = require('express');
+// T-219 (CODE-AUDIT F.5 M1.4 piece 5a): order-payload validation constants extracted.
+const { VALID_SIDES, VALID_PRODUCTS, VALID_ORDER_TYPES, VALID_VARIETIES, VALID_VALIDITY } = require('./services/order-validation');
 // T-218 (CODE-AUDIT F.5 M1.4 piece 4): /api/portfolio + /api/me/portfolio routes extracted.
 const { mountPortfolioRoutes } = require('./routes/portfolio');
 // T-217 (CODE-AUDIT F.5 M1.4 piece 3 + A.2 fix): OAuth state-signer.
@@ -4270,11 +4272,6 @@ app.post('/api/ai/monthly-review', async (req, res) => {
 //     present yet by design — adding it is the deliberate moment you decide to trade live.
 //
 // Until then this endpoint validates + audits + returns 503 with reason:'KILL_SWITCH_ON'.
-const VALID_SIDES         = new Set(['BUY', 'SELL']);
-const VALID_PRODUCTS      = new Set(['CNC', 'NRML', 'MIS', 'BO', 'CO']);
-const VALID_ORDER_TYPES   = new Set(['MARKET', 'LIMIT', 'SL', 'SL-M']);
-const VALID_VARIETIES     = new Set(['regular', 'amo', 'co', 'iceberg', 'auction']);
-const VALID_VALIDITY      = new Set(['DAY', 'IOC', 'TTL']);
 
 app.post('/api/orders/place', withAuth(async (req, res) => {
   const body = req.body || {};
