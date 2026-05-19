@@ -250,3 +250,145 @@ Telegram bot delivers automated alerts to the operator (configured in Settings �
 ## Change log
 
 - 2026-05-18 — initial runbook (T-128, v11-I4). Synthesized from T-106 through T-127 operational learnings.
+
+---
+
+## Master key rotation (T-210)
+
+**Scope:** rotate `/etc/ats/master.key` (the libsodium secretbox master key
+that seals all per-user broker credentials, BYOK AI keys, Telegram bot
+tokens, webhook secrets, and persisted Zerodha login tokens). Run this when:
+- The key file has been read by someone unauthorized (compromise).
+- Quarterly hygiene rotation (recommended).
+- The operator moves the file off the VM filesystem (e.g. to OCI Vault).
+
+**Pre-flight checklist (~10 minutes):**
+
+```bash
+# 1. Confirm you can SSH in as `ats` (or root) and the script is current.
+ssh deployer@141.148.192.4 'ls -la /opt/ats/scripts/rotate-master-key.js'
+
+# 2. Confirm backups are fresh (the DB is part of the daily rclone archive,
+#    but ensure no critical changes are unbackuped right now).
+ssh deployer@141.148.192.4 'ls -lt /var/log/ats/audit.log.*.gz | head -3'
+#    Latest archive should be < 24h old.
+
+# 3. STOP the backend so it doesn't write new cells mid-rotation. Otherwise
+#    cells written between dry-run and commit would use the OLD key but be
+#    expected to decrypt with the NEW key.
+ssh deployer@141.148.192.4 'docker compose -f /opt/ats/compose/docker-compose.yml stop ats-backend'
+
+# 4. Verify no other process is holding the DB open.
+ssh deployer@141.148.192.4 'fuser /var/lib/ats/ats.db || echo "DB free"'
+
+# 5. Run a DRY_RUN to enumerate what will rotate.
+ssh deployer@141.148.192.4 'sudo -u ats node /opt/ats/scripts/rotate-master-key.js'
+#    Expected output: list of (table.column: N rows) + (TOKENS_DIR/*.enc: M files).
+#    Sanity-check the counts match your expectation. broker_accounts should
+#    have ~6×N rows for N user-broker pairs; ai_keys ~1×K for K BYOK providers
+#    in use; user_notifications row for each user with Telegram or webhook
+#    configured; tokens dir 1 per user that has a Tier 75 session.
+```
+
+**Actual rotation:**
+
+```bash
+# 6. Run with --commit and the runbook ack. The script:
+#    - generates a new key in memory,
+#    - unseals every cell with old key, reseals with new key (in memory),
+#    - if ALL succeed, writes the new key file (old backed up with timestamp),
+#    - if ANY cell fails to unseal, aborts WITHOUT touching the key file.
+ssh deployer@141.148.192.4 \
+  'sudo -u ats node /opt/ats/scripts/rotate-master-key.js \
+       --commit --i-have-read-the-runbook'
+
+# Expected output ends with:
+#   ---
+#   ROTATION COMPLETE
+#   Old key backup:  /etc/ats/master.key.<ts>.bak
+#   Total cells:     N
+#   ---
+
+# 7. Restart the backend.
+ssh deployer@141.148.192.4 \
+  'docker compose -f /opt/ats/compose/docker-compose.yml start ats-backend'
+
+# 8. Verify the backend opens the new key correctly (no decrypt errors).
+sleep 10
+ssh deployer@141.148.192.4 'docker logs ats-backend --tail 50 2>&1 | grep -iE "(error|fatal|crypto|vault)" || echo "no crypto errors in last 50 lines"'
+```
+
+**Post-rotation verification (within 5 minutes):**
+
+```bash
+# Health-deep should still be all-green; broker.connected stays true because
+# the access_token has been resealed (not re-issued).
+curl -sS https://ats.rajasekarselvam.com/api/health-deep | jq '.ok, .checks.broker.connected'
+# Expect: true true
+
+# AI providers list should return 200 -- proves ai_keys.sealed_key decrypts.
+# (Run from a tab where you're logged in; check Network → /api/me/ai-keys.)
+
+# Telegram bot test from Settings → Notifications → "Send test message"
+# should succeed -- proves user_notifications.telegram_bot_token decrypts.
+
+# Next bulk-rotate window (~05:45 IST or run on demand) should succeed --
+# proves broker_accounts.api_key + totp_seed decrypt:
+ssh deployer@141.148.192.4 'sudo systemctl start ats-bulk-rotate.service'
+ssh deployer@141.148.192.4 'tail -50 /var/log/ats/bulk-rotate.log'
+```
+
+**Rollback path (within 24 hours):**
+
+If anything is wrong, the backup of the old key is at
+`/etc/ats/master.key.<ts>.bak`. Restore:
+
+```bash
+ssh deployer@141.148.192.4 << 'EOF'
+sudo cp /etc/ats/master.key.<ts>.bak /etc/ats/master.key
+sudo chmod 400 /etc/ats/master.key
+sudo chown root:ats /etc/ats/master.key
+sudo docker compose -f /opt/ats/compose/docker-compose.yml restart ats-backend
+EOF
+```
+
+**However** — rolling back **after** any new sealed cell is written with the
+new key will leave those new cells unrecoverable. The 24-hour rollback
+window assumes the backend has been UP under the new key and writing new
+cells (orders, AI calls, etc.). If you need to roll back, accept that
+those new cells will fail to decrypt and require manual cleanup.
+
+**Cleanup after 24h with no incidents:**
+
+```bash
+ssh deployer@141.148.192.4 'sudo rm /etc/ats/master.key.<ts>.bak'
+```
+
+The rotation event is audit-logged as `crypto.master.rotated` with the
+backup filename. Search `audit.log` for the previous rotation timestamp.
+
+**What this DOES NOT cover:**
+
+- **History on origin/main / GitHub.** Sealed values in commits are
+  untouched. Only the live VM state is rotated. Sealed values in commits
+  were always encrypted-at-rest with the old key, and they remain so —
+  but the old key still exists in the backup file for 24h, so the time
+  window matters. If the compromise involved a Git history leak (sealed
+  cells PLUS the master key file), assume those cells leaked and rotate
+  the underlying credentials (Zerodha API keys, AI BYOK keys, Telegram
+  bot token) on top of rotating the master key.
+- **The libsodium-wrappers library itself.** If the compromise was a
+  malicious package in node_modules, run `npm audit` + dependency pin
+  audit BEFORE rotating.
+- **Future migration to OCI Vault.** The script in-place rotates within
+  the current `/etc/ats/master.key` filesystem model. A separate
+  migration to OCI Vault would replace the file with a Vault key id
+  reference; that's a multi-day project (see CODE-AUDIT §E.4 backlog
+  for "Don't rewrite the in-house libsodium SealedBox vault to use OCI
+  Vault yet" rationale).
+
+**Why this exists:**
+
+CODE-AUDIT §E.4 flagged that before T-210, a key compromise had no
+documented recovery beyond "wipe everything and re-onboard the operator".
+This script + runbook closes that gap.
