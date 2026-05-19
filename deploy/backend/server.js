@@ -5190,15 +5190,27 @@ const wss = new WebSocketServer({
   path: '/ws',
   verifyClient: (info, cb) => {
     const origin = (info.origin || (info.req && info.req.headers && info.req.headers['origin']) || '').toString();
-    // T-198a: allow no-Origin connections (curl, native WS clients, Playwright
-    // test runner, server-to-server monitors). Browsers cannot omit Origin on
-    // WS upgrades, so a missing Origin proves the client is non-browser and
-    // therefore cannot ride a user's cookie in a cross-origin-attack shape.
-    // This mirrors the HTTP CSRF middleware semantics (server.js:1108) which
-    // treats absent Origin+Referer as a non-browser direct caller.
-    if (!origin) return cb(true);
+    // T-198b: allow three benign shapes; reject only the explicit
+    // cross-origin browser attack.
+    //
+    // (1) No Origin header (empty)    -> ALLOW. curl/native WS, server-to-
+    //                                     server monitors. Cannot ride a user's
+    //                                     cookie because they can't acquire one.
+    // (2) Origin: 'null'              -> ALLOW. Standard browser opaque-origin
+    //                                     value (about:blank, sandboxed iframes,
+    //                                     data: URLs, sandboxed Playwright
+    //                                     contexts). SameSite=Lax cookies are
+    //                                     NOT sent on WS upgrades from these
+    //                                     contexts, so even if an attacker
+    //                                     hosted a sandboxed page, the user's
+    //                                     session cookie wouldn't ride the WS
+    //                                     upgrade -> the connection lands
+    //                                     anonymous -> the auth gate at L5117
+    //                                     treats it as a public welcome.
+    // (3) Origin in CSRF_ALLOWED_ORIGINS -> ALLOW. Same-origin browser.
+    // (4) any other explicit Origin    -> REJECT. Browser cross-origin attack.
+    if (!origin || origin === 'null') return cb(true);
     if (CSRF_ALLOWED_ORIGINS.has(origin)) return cb(true);
-    // Browser sent an explicit non-allowlist Origin: this IS the attack shape.
     audit('ws.upgrade.reject', { reason: 'origin_not_allowed', origin, ip: info.req && info.req.socket && info.req.socket.remoteAddress });
     return cb(false, 403, 'cross_origin_rejected');
   },
