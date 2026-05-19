@@ -715,20 +715,8 @@ function createV1BrokersRouter({ db, vault, requireAuth }) {
       if (!row || !row.api_key)
         return res.status(412).json({ ok: false, reason: 'no_credentials', detail: 'Save api_key + api_secret first.' });
       const apiKey = await vault.open(row.api_key);
-      // Reuse the existing _signState from server.js via require trick. If not available, build inline.
-      let signState;
-      try { signState = require('./server.js')._signState; } catch (_) { /* unavailable */ }
-      if (!signState) {
-        // Fallback: inline state generation (HMAC with master key)
-        const crypto = require('crypto');
-        const fs = require('fs');
-        const nonce = crypto.randomBytes(12).toString('hex');
-        const keyBuf = fs.readFileSync(process.env.MASTER_KEY_PATH || '/var/lib/ats/master.key');
-        const sig = crypto.createHmac('sha256', keyBuf).update(`${req.user.id}|${nonce}`).digest('hex');
-        signState = () => `${Buffer.from(String(req.user.id)).toString('base64').replace(/=+$/,'')}.${Buffer.from(nonce).toString('base64').replace(/=+$/,'')}.${sig}`;
-        // NOTE: inline fallback doesn't register the nonce in _pendingNonces — callback will fail.
-        // So we always rely on the server.js _signState being available. Most installs share the module.
-      }
+      // T-217: require the shared oauth-state module (was require('./server.js')._signState).
+      const { signState } = require('./services/oauth-state');
       const state = signState(req.user.id);
       const url = `https://kite.zerodha.com/connect/login?api_key=${encodeURIComponent(apiKey)}&v=3&state=${encodeURIComponent(state)}`;
       res.json({ ok: true, url, expiresInSec: 300 });

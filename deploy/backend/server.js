@@ -11,6 +11,11 @@
 //     writes to the audit log. Wire real orders in a separate, deliberate change.
 
 const express = require('express');
+// T-217 (CODE-AUDIT F.5 M1.4 piece 3 + A.2 fix): OAuth state-signer.
+const _oauthState = require('./services/oauth-state');
+const _pendingNonces = _oauthState._pendingNonces;
+const _signState = _oauthState.signState;
+const _verifyState = _oauthState.verifyState;
 // T-216 (CODE-AUDIT F.5 M1.4 piece 2): /api/auth/* routes extracted.
 const { mountAuthRoutes } = require('./routes/auth');
 // T-214 (CODE-AUDIT F.5 M1.4 piece 1): strategies registry extracted.
@@ -3940,48 +3945,6 @@ app.post('/api/me/broker-test', withAuth(async (req, res) => {
 // ---------- Tier 62: per-user Kite OAuth flow ----------
 // HMAC-signed state token so callback can identify the user without trusting URL query.
 // state = base64url(userId).base64url(nonce).hex(HMAC_SHA256(userId|nonce, masterKey))
-const _pendingNonces = new Map(); // nonce -> { userId, exp }
-
-function _b64u(buf) { return Buffer.from(buf).toString('base64').replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
-function _b64uDecode(s) { s = s.replace(/-/g,'+').replace(/_/g,'/'); while (s.length % 4) s += '='; return Buffer.from(s, 'base64'); }
-
-function _signState(userId) {
-  const nonce = crypto.randomBytes(12).toString('hex');
-  // Master key lives at MASTER_KEY_PATH; use the vault's key as HMAC secret.
-  // We don't expose the key; we just read it once.
-  const keyBuf = require('fs').readFileSync(MASTER_KEY_PATH || '/var/lib/ats/master.key');
-  const payload = `${userId}|${nonce}`;
-  const sig = crypto.createHmac('sha256', keyBuf).update(payload).digest('hex');
-  _pendingNonces.set(nonce, { userId, exp: Date.now() + 5 * 60 * 1000 });
-  // Periodic cleanup
-  if (_pendingNonces.size > 100) {
-    const now = Date.now();
-    for (const [k, v] of _pendingNonces) if (v.exp < now) _pendingNonces.delete(k);
-  }
-  return `${_b64u(String(userId))}.${_b64u(nonce)}.${sig}`;
-}
-
-function _verifyState(state) {
-  if (!state || typeof state !== 'string') return null;
-  const parts = state.split('.');
-  if (parts.length !== 3) return null;
-  try {
-    const userId = parseInt(_b64uDecode(parts[0]).toString('utf8'), 10);
-    const nonce = _b64uDecode(parts[1]).toString('utf8');
-    const sig = parts[2];
-    if (!Number.isFinite(userId)) return null;
-    const keyBuf = require('fs').readFileSync(MASTER_KEY_PATH || '/var/lib/ats/master.key');
-    const expected = crypto.createHmac('sha256', keyBuf).update(`${userId}|${nonce}`).digest('hex');
-    if (!crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(expected, 'hex'))) return null;
-    const rec = _pendingNonces.get(nonce);
-    if (!rec || rec.userId !== userId || rec.exp < Date.now()) return null;
-    _pendingNonces.delete(nonce); // single use
-    return userId;
-  } catch (_) { return null; }
-}
-
-// GET /api/me/broker/oauth-url -> { ok, url }
-// Builds the Kite login URL using the user's own api_key.
 app.get('/api/me/broker-oauth-url', withAuth(async (req, res) => {
   try {
     const row = db.brokers.getByBroker(req.user.id, 'zerodha');
