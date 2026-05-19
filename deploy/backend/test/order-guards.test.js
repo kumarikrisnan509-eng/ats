@@ -29,15 +29,20 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 
-const SERVER_PATH = path.join(__dirname, '..', 'server.js');
+// T-224 (M1.4 piece 6b): the /api/orders/place handler moved from server.js
+// to routes/orders.js. The handler body itself is byte-identical except for
+// `const broker = getBroker()`-style locals at the top. The 8 source-grep
+// assertions still pin the same invariants since they look for audit-event
+// strings + reason codes that exist regardless.
+const HANDLER_PATH = path.join(__dirname, '..', 'routes', 'orders.js');
 
 // Extract the /api/orders/place handler body once for all assertions.
 // Heuristic: from `app.post('/api/orders/place'` line down to the next
 // `app.` (route definition for the NEXT route).
 function getPlaceOrderHandler() {
-  const raw = fs.readFileSync(SERVER_PATH, 'utf8');
+  const raw = fs.readFileSync(HANDLER_PATH, 'utf8');
   const startIdx = raw.indexOf("app.post('/api/orders/place'");
-  if (startIdx === -1) throw new Error('/api/orders/place route not found in server.js');
+  if (startIdx === -1) throw new Error('/api/orders/place route not found in routes/orders.js');
   // Find the next `app.` route definition after this one.
   const afterStart = raw.indexOf('app.', startIdx + 1);
   const endIdx = afterStart === -1 ? raw.length : afterStart;

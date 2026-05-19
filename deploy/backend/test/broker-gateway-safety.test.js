@@ -76,9 +76,14 @@ test('Layer 2: MockBroker placeDryRun returns ok+dry-run shape', async () => {
 
 const KNOWN_PLACE_ORDER_CALL_SITES = 2;
 
-test('Layer 3: server.js has KNOWN_PLACE_ORDER_CALL_SITES live broker.placeOrder calls', () => {
+test('Layer 3: server.js + routes/orders.js have KNOWN_PLACE_ORDER_CALL_SITES live broker.placeOrder calls', () => {
+  // T-224 (M1.4 piece 6b): the place/confirm-2fa handlers moved to routes/orders.js,
+  // so the live broker.placeOrder() call sites are NOW in routes/orders.js. We scan
+  // BOTH files concatenated to keep the invariant pinned. If a future commit moves
+  // them elsewhere again, extend this list.
   const serverPath = path.join(__dirname, '..', 'server.js');
-  const raw = fs.readFileSync(serverPath, 'utf8');
+  const ordersPath = path.join(__dirname, '..', 'routes', 'orders.js');
+  const raw = fs.readFileSync(serverPath, 'utf8') + '\n' + fs.readFileSync(ordersPath, 'utf8');
 
   // Walk line-by-line. For each line, determine whether the position of any
   // `.placeOrder(` token is BEFORE the start of a `//` line-comment on that
@@ -117,7 +122,7 @@ test('Layer 3: server.js has KNOWN_PLACE_ORDER_CALL_SITES live broker.placeOrder
   assert.equal(
     hits.length,
     KNOWN_PLACE_ORDER_CALL_SITES,
-    'server.js has ' + hits.length + ' live broker.placeOrder() call(s); expected ' +
+    'server.js + routes/orders.js have ' + hits.length + ' live broker.placeOrder() call(s); expected ' +
     KNOWN_PLACE_ORDER_CALL_SITES + '.\nCall sites found:\n' + summary +
     '\n\nIf you added/removed a live-order code path, update KNOWN_PLACE_ORDER_CALL_SITES.'
   );
