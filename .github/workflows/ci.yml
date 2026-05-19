@@ -53,6 +53,20 @@ jobs:
           done
           echo "backend JS OK"
 
+      - name: Require-order check (T-215 -- catch TDZ violations pre-deploy)
+        run: |
+          set -e
+          # T-215 (CODE-AUDIT M1.4 followup after T-214 TDZ failure):
+          # JavaScript const is NOT hoisted; a require destructure placed
+          # AFTER its use site causes the container to fail to boot with
+          # "Cannot access X before initialization". The T-214 strategies
+          # extract hit exactly this -- production saved by the auto-rollback
+          # safety net but downtime would have been worse without it.
+          # This check fails the build if any `const { X } = require('./
+          # routes/...')` or `./services/...` line in server.js comes
+          # AFTER a use of X.
+          python3 deploy/scripts/check-require-order.py deploy/backend/server.js
+
       - name: Lint static HTML (basic checks)
         run: |
           set -e
