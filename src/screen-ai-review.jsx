@@ -44,6 +44,14 @@ const AIReviewScreen = () => {
   const [mrBusy, setMrBusy] = React.useState(false);
   const [mrText, setMrText] = React.useState(null);
   const [mrErr, setMrErr] = React.useState(null);
+  // T-186 (SCREENS-AUDIT F-11): canonical AI workflows live under
+  // /api/me/ai-workflows/* (BYOK, per-user, structured). The legacy
+  // /api/ai/monthly-review endpoint this screen still calls is marked
+  // @deprecated in server.js. Migrating here is non-trivial because the
+  // response shape changes ({narrative} -> structured fields) and would
+  // require redesigning the Monthly review card. Kept on the old endpoint
+  // for now; the deprecation comment in server.js is the breadcrumb for
+  // the future refactor.
   const runMonthlyReview = async () => {
     setMrBusy(true); setMrErr(null); setMrText(null);
     try {
@@ -56,6 +64,10 @@ const AIReviewScreen = () => {
     } catch (e) { setMrErr(String(e.message || e)); }
     finally { setMrBusy(false); }
   };
+  // T-186 (SCREENS-AUDIT F-11): see runMonthlyReview above for the
+  // deprecation rationale. /api/ai/strategy-explain is @deprecated;
+  // canonical endpoint is /api/me/ai-workflows/explain (takes strategy_id,
+  // returns structured fields).
   const askLiveAI = async () => {
     setAiBusy(true); setAiError(null);
     try {

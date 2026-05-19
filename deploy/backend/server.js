@@ -2303,6 +2303,18 @@ app.post('/api/ai/position-review', async (_req, res) => {
     res.json({ ok:true, review: out, stats: ai.stats() });
   } catch (e) { res.status(500).json({ ok:false, reason:e.message }); }
 });
+// @deprecated T-186 (SCREENS-AUDIT F-11): use POST /api/me/ai-workflows/explain
+// instead. The new endpoint:
+//   - is auth-required and BYOK (per-user API key via vault), so spend is
+//     attributed and capped per user instead of charged to the single legacy
+//     ANTHROPIC_API_KEY this route reads.
+//   - takes { strategy_id, mode? } (strategy_id must exist in STRATEGIES)
+//     instead of arbitrary { strategy, symbol, params, stats } here.
+//   - returns structured { what_it_does, how_it_decides, when_it_works,
+//     when_it_fails, example } instead of free-form { summary, stats }.
+// This handler stays for backward compatibility with screen-ai-review.jsx and
+// any external clients that still call it. A future commit will migrate the
+// screen and remove this route; do not add new callers.
 app.post('/api/ai/strategy-explain', async (req, res) => {
   if (!ai || !ai.enabled()) return res.status(503).json({ ok:false, reason:'ai_disabled' });
   try {
@@ -4481,6 +4493,19 @@ app.post('/api/whatsapp/send', async (req, res) => {
 });
 
 
+// @deprecated T-186 (SCREENS-AUDIT F-11): use POST /api/me/ai-workflows/monthly-review
+// instead. The new endpoint:
+//   - is auth-required and BYOK (per-user API key via vault) -- works for any
+//     authenticated user, not just the operator who set ANTHROPIC_API_KEY.
+//   - aggregates the CALLER's paper_orders / paper_closed_trades / pnl_daily,
+//     not the global file-backed paper store this route reads from.
+//   - returns structured { headline, what_went_well[], what_went_wrong[],
+//     patterns_observed, suggested_focus[], ai_spend_assessment } instead of
+//     the free-form { narrative } string this route returns.
+//   - respects user redact_pii pref (H5) for rupee values.
+// This handler stays for backward compatibility with screen-ai-review.jsx and
+// any external clients that still call it. A future commit will migrate the
+// screen and remove this route; do not add new callers.
 app.post('/api/ai/monthly-review', async (req, res) => {
   if (!ai || !ai.enabled()) return res.status(503).json({ ok:false, reason:'ai_disabled', detail:'set ANTHROPIC_API_KEY env to enable' });
   try {
