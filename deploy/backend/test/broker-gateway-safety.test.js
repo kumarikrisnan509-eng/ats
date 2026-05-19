@@ -135,8 +135,9 @@ test('Layer 3: server.js + routes/orders.js have KNOWN_PLACE_ORDER_CALL_SITES li
 // three. This test pins the auth wrapper and the use of pickBroker(req).
 
 test('Layer 4 (T-196): /api/orders/place is wrapped in withAuth', () => {
-  const serverPath = path.join(__dirname, '..', 'server.js');
-  const raw = fs.readFileSync(serverPath, 'utf8');
+  // T-224 (M1.4 6b): handler moved from server.js to routes/orders.js
+  const ordersPath = path.join(__dirname, '..', 'routes', 'orders.js');
+  const raw = fs.readFileSync(ordersPath, 'utf8');
   // Expect the literal route definition `withAuth(async (req, res) =>`.
   const placeAuthed = /app\.post\(\s*['"]\/api\/orders\/place['"]\s*,\s*withAuth\(/m.test(raw);
   assert.equal(placeAuthed, true,
@@ -144,16 +145,18 @@ test('Layer 4 (T-196): /api/orders/place is wrapped in withAuth', () => {
 });
 
 test('Layer 4 (T-196): /api/orders/cancel is wrapped in withAuth', () => {
-  const serverPath = path.join(__dirname, '..', 'server.js');
-  const raw = fs.readFileSync(serverPath, 'utf8');
+  // T-224 (M1.4 6b): handler moved from server.js to routes/orders.js
+  const ordersPath = path.join(__dirname, '..', 'routes', 'orders.js');
+  const raw = fs.readFileSync(ordersPath, 'utf8');
   const cancelAuthed = /app\.post\(\s*['"]\/api\/orders\/cancel['"]\s*,\s*withAuth\(/m.test(raw);
   assert.equal(cancelAuthed, true,
     'POST /api/orders/cancel must be wrapped in withAuth -- live-trading auth gate.');
 });
 
 test('Layer 4 (T-196): 2FA key is per-user (req.user.id), not process-global broker.userId', () => {
-  const serverPath = path.join(__dirname, '..', 'server.js');
-  const raw = fs.readFileSync(serverPath, 'utf8');
+  // T-224 (M1.4 6b): handler moved from server.js to routes/orders.js
+  const ordersPath = path.join(__dirname, '..', 'routes', 'orders.js');
+  const raw = fs.readFileSync(ordersPath, 'utf8');
   // The legacy form `const userId = (broker && broker.userId) || ...` must be gone
   // from within the /api/orders/place handler. Search for it; assert absence.
   const legacyKey = /const userId\s*=\s*\(broker\s*&&\s*broker\.userId\)/m.test(raw);
@@ -166,8 +169,9 @@ test('Layer 4 (T-196): 2FA key is per-user (req.user.id), not process-global bro
 });
 
 test('Layer 4 (T-196): 2FA error path HARD-FAILS instead of silent fallthrough', () => {
-  const serverPath = path.join(__dirname, '..', 'server.js');
-  const raw = fs.readFileSync(serverPath, 'utf8');
+  // T-224 (M1.4 6b): handler moved from server.js to routes/orders.js
+  const ordersPath = path.join(__dirname, '..', 'routes', 'orders.js');
+  const raw = fs.readFileSync(ordersPath, 'utf8');
   // Pin the 503/2fa_unavailable response. If a future refactor reverts to silent
   // fallthrough, this assertion fails.
   const hardFail = /reason:\s*['"]2fa_unavailable['"]/m.test(raw);
