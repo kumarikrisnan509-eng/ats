@@ -5180,7 +5180,27 @@ app.use('/api', (_req, res) => res.status(404).json({ ok: false, reason: 'not_fo
 
 // ---------- HTTP + WebSocket server ----------
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
+// T-198 (CODE-AUDIT C.10 #4): reject WebSocket upgrades that don't carry an
+// allowed Origin. Reuses the same CSRF_ALLOWED_ORIGINS Set used by the HTTP
+// CSRF middleware so the two policies stay in lock-step. Without this gate,
+// a page at evil.example.com can open wss://ats.rajasekarselvam.com/ws with
+// the user's cookie and read their watchlist + tick stream.
+const wss = new WebSocketServer({
+  server,
+  path: '/ws',
+  verifyClient: (info, cb) => {
+    const origin = (info.origin || (info.req && info.req.headers && info.req.headers['origin']) || '').toString();
+    // Empty origin = curl/native WS without an Origin header. We reject those
+    // because every legitimate browser caller sets Origin on the upgrade.
+    if (!origin) {
+      audit('ws.upgrade.reject', { reason: 'no_origin', ip: info.req && info.req.socket && info.req.socket.remoteAddress });
+      return cb(false, 403, 'cross_origin_rejected');
+    }
+    if (CSRF_ALLOWED_ORIGINS.has(origin)) return cb(true);
+    audit('ws.upgrade.reject', { reason: 'origin_not_allowed', origin, ip: info.req && info.req.socket && info.req.socket.remoteAddress });
+    return cb(false, 403, 'cross_origin_rejected');
+  },
+});
 
 // Single shared subscription against the broker. Adapter does the heavy lifting.
 const wsClients = new Set(); // Set<WebSocket>
