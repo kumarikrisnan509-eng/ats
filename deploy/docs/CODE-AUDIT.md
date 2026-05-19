@@ -22,6 +22,29 @@ Section C (security review) was unable to find any Origin/CSRF middleware in `de
 
 **Action: confirm the rejection source before trusting the CSRF posture.** Likely a 1-hour investigation — grep more broadly, add an explicit `audit('csrf.reject', ...)` to the middleware if it exists, or fix the audit.
 
+### Postscript — stale-tree correction (T-194a, 2026-05-19)
+
+**Two of the original P0 findings + several roadmap items were FALSE ALARMS** because the audit was generated against a stale local working tree at HEAD `34d63da` (T-175), missing the 18 commits T-176..T-187 that already shipped many fixes. Specifically:
+
+- **§C.2 CSRF middleware ("missing") — RESOLVED.** The Origin/Referer middleware DOES exist in committed code at `server.js:1070-1111` and produces the `403 cross_origin_rejected` response observed in production. It was shipped in T-181 (`3479dc9`), refined in T-181a (`489c366`) for the docker-bridge case, and re-applied in T-181b (`515119a`) after a T-182 merge clobbered it. **No fix needed.**
+- **§F.5 M1.1 sweep 2FA gate — ALREADY DONE.** Shipped in T-180 (`ccbecb0`).
+- **§F.5 M1.2 trading kill-switch button lock — ALREADY DONE.** Shipped in T-180 (`ccbecb0`).
+- **§F.5 M1.3 harvest hardcoded lots demo-gate — ALREADY DONE.** Shipped in T-178 (`a76ef37`).
+- **§E reference to isInternalIp() docker-bridge bug — ALREADY FIXED.** Shipped in T-183 (`9df9172`).
+
+**Findings that survive verification against the current main and remain real:**
+
+- **§C.3 / §C.10 #1 — `/api/orders/place` has no `requireAuth`, uses global broker singleton, 2FA key is process-global** — confirmed against current `server.js:4550/4714/4740`. This is fixed in T-196 in the same session as this postscript.
+- **§C.10 #3 — legacy unscoped routes (`/api/watchlist`, `/api/alerts`, `/api/paper/*`) leak across users** — not yet verified against current main; status unknown.
+- **§C.10 #4 — no Origin check on WS upgrade** — confirmed still present in `server.js:5078-5117`.
+- **§C.10 #5 — SESSION_SECRET default + non-constant-time HMAC compare + WORM Merkle anchor** — fixed in T-195.
+- **§E.4 — master-key rotation has no procedure/script** — still missing.
+- **§E.8 — `ats-auto-login-daemon.service` not in repo** — still missing.
+
+**Reader instruction:** when consuming this audit doc, cross-reference each finding against the current `main` before acting. The findings flagged "RESOLVED" or "ALREADY DONE" above should be considered closed; the surviving findings are the real backlog.
+
+---
+
 ### Three live-money risks (P0 — fix in week 1)
 
 | # | Finding | Source | File:line | Action |
