@@ -5190,13 +5190,15 @@ const wss = new WebSocketServer({
   path: '/ws',
   verifyClient: (info, cb) => {
     const origin = (info.origin || (info.req && info.req.headers && info.req.headers['origin']) || '').toString();
-    // Empty origin = curl/native WS without an Origin header. We reject those
-    // because every legitimate browser caller sets Origin on the upgrade.
-    if (!origin) {
-      audit('ws.upgrade.reject', { reason: 'no_origin', ip: info.req && info.req.socket && info.req.socket.remoteAddress });
-      return cb(false, 403, 'cross_origin_rejected');
-    }
+    // T-198a: allow no-Origin connections (curl, native WS clients, Playwright
+    // test runner, server-to-server monitors). Browsers cannot omit Origin on
+    // WS upgrades, so a missing Origin proves the client is non-browser and
+    // therefore cannot ride a user's cookie in a cross-origin-attack shape.
+    // This mirrors the HTTP CSRF middleware semantics (server.js:1108) which
+    // treats absent Origin+Referer as a non-browser direct caller.
+    if (!origin) return cb(true);
     if (CSRF_ALLOWED_ORIGINS.has(origin)) return cb(true);
+    // Browser sent an explicit non-allowlist Origin: this IS the attack shape.
     audit('ws.upgrade.reject', { reason: 'origin_not_allowed', origin, ip: info.req && info.req.socket && info.req.socket.remoteAddress });
     return cb(false, 403, 'cross_origin_rejected');
   },
