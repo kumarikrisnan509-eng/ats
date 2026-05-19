@@ -54,6 +54,31 @@ if [[ -f "${TAG_FILE}" ]]; then cp "${TAG_FILE}" "${PREV_FILE}"; fi
 echo "${NEW_TAG}" > "${TAG_FILE}"
 
 echo "==> docker compose up -d (tag=${NEW_TAG})"
+
+# T-177: write tag + owner into /opt/ats/compose/.env so docker-compose actually
+# picks them up. Previous behavior relied on `export` but docker-compose's .env
+# file takes precedence over shell env in some setups, which is how the VM ended
+# up frozen on a stale image from the old GHCR namespace for ~6 months.
+ENV_FILE="${COMPOSE_DIR}/.env"
+touch "${ENV_FILE}"
+
+# Surgical rewrite: replace the line if it exists, else append. Preserve every
+# other line (notably ANTHROPIC_API_KEY and any future secrets).
+upsert_env_var() {
+    local key="$1"
+    local value="$2"
+    if grep -qE "^${key}=" "${ENV_FILE}"; then
+        sed -i "s|^${key}=.*|${key}=${value}|" "${ENV_FILE}"
+    else
+        echo "${key}=${value}" >> "${ENV_FILE}"
+    fi
+}
+upsert_env_var ATS_REPO_OWNER "${OWNER}"
+upsert_env_var ATS_IMAGE_TAG  "${NEW_TAG}"
+chmod 640 "${ENV_FILE}"
+
+# Still export for safety so any tool that reads the shell env (vs the .env
+# file) sees the same values.
 export ATS_IMAGE_TAG="${NEW_TAG}"
 export ATS_REPO_OWNER="${OWNER}"
 docker compose up -d --remove-orphans
@@ -80,6 +105,8 @@ if [[ ${ok} -ne 1 ]]; then
     if [[ -f "${PREV_FILE}" ]]; then
         PREV_TAG="$(cat "${PREV_FILE}")"
         echo "==> Rolling back to ${PREV_TAG}"
+        # T-177: rollback also has to update .env, not just shell env.
+        upsert_env_var ATS_IMAGE_TAG "${PREV_TAG}"
         export ATS_IMAGE_TAG="${PREV_TAG}"
         docker compose up -d
         # Static rollback too.
