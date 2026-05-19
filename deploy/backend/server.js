@@ -11,6 +11,8 @@
 //     writes to the audit log. Wire real orders in a separate, deliberate change.
 
 const express = require('express');
+// T-214 (CODE-AUDIT F.5 M1.4 piece 1): strategies registry extracted.
+const { STRATEGIES, mountStrategiesRoutes } = require('./routes/strategies');
 const http    = require('http');
 const fs      = require('fs');
 const path    = require('path');
@@ -2571,8 +2573,6 @@ app.get('/api/symbols', async (_req, res) => {
 // Quotes can stay on the global broker (market data, not user-specific).
 // Holdings/positions/orders MUST route through the requesting user's broker.
 const _brokerResolver = require('./broker-resolver');
-// T-214 (CODE-AUDIT F.5 M1.4 piece 1): strategies registry extracted.
-const { STRATEGIES, mountStrategiesRoutes } = require('./routes/strategies');
 async function resolveUserBroker(req) {
   if (!db || !vault) return { broker: null, isUserOwn: false, reason: 'storage_unavailable' };
   if (!req.user || !req.user.id) return { broker: null, isUserOwn: false, reason: 'auth_required' };
