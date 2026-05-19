@@ -1014,8 +1014,22 @@ function isInternalIp(ra) {
   return /^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)/.test(ra);
 }
 
+// T-183: req.ip reports the immediate hop, which in our deploy topology is
+// the docker bridge gateway (172.18.0.1 / docker0). That matches our RFC1918
+// private-IP regex in isInternalIp(), silently neutering every middleware
+// that did `if (isInternalIp(req.ip)) return next()` -- meaning rate limiting,
+// bearer-token auth (when AUTH_REQUIRED is on), and the /metrics gate were
+// exempting ALL traffic regardless of where it came from. Fix: read the real
+// client IP from nginx's X-Real-IP header (set by both ats.rajasekarselvam.com.conf
+// and rajasekarselvam.com.conf via `proxy_set_header X-Real-IP $remote_addr`).
+function getClientIp(req) {
+  const x = (req.headers && req.headers['x-real-ip']) ? String(req.headers['x-real-ip']).trim() : '';
+  if (x) return x;
+  return req.ip || (req.connection && req.connection.remoteAddress) || (req.socket && req.socket.remoteAddress) || '';
+}
+
 app.use('/api', (req, res, next) => {
-  const ra = (req.ip || req.connection.remoteAddress || '').replace('::ffff:', '');
+  const ra = getClientIp(req).replace('::ffff:', '');
   if (isInternalIp(ra)) return next(); // never throttle internal callers
   const now = Date.now();
   let b = _rateBuckets.get(ra);
@@ -1112,7 +1126,7 @@ const AUTH_REQUIRED = !!ATS_OPS_KEY;
 
 function authMiddleware(req, res, next) {
   if (!AUTH_REQUIRED) return next(); // dev / opt-out mode
-  const ra = (req.ip || req.connection.remoteAddress || '').replace('::ffff:', '');
+  const ra = getClientIp(req).replace('::ffff:', '');
   if (isInternalIp(ra)) return next();  // internal callers always allowed
   const h = req.headers['authorization'] || '';
   if (!h.startsWith('Bearer ')) {
@@ -1259,7 +1273,7 @@ app.get('/api/system/info', (_req, res) => {
 // Plain text exposition format (no client lib). Scrapeable by Prometheus / Datadog / VictoriaMetrics.
 // Loopback or internal IPs only -- public exposure of internal counters is a small info leak.
 app.get('/metrics', (req, res) => {
-  const ra = (req.ip || req.connection.remoteAddress || '').replace('::ffff:', '');
+  const ra = getClientIp(req).replace('::ffff:', '');
   if (!isInternalIp(ra)) {
     // Allow GH Actions + monitoring tools that pass a shared metrics token if configured.
     const tok = process.env.ATS_METRICS_TOKEN || '';
@@ -4801,7 +4815,7 @@ function requireInternal(req, res) {
   // have `proxy_set_header X-ATS-Internal ""`). So even if a public attacker
   // somehow had a private source IP, they'd still fail the header check. The
   // IP check is the primary boundary; the header check is the backstop.
-  const ra = (req.ip || req.connection.remoteAddress || '').replace('::ffff:', '');
+  const ra = getClientIp(req).replace('::ffff:', '');
   const isLoopback = ra === '127.0.0.1' || ra === '::1';
   const isPrivate  = /^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)/.test(ra);
   if (!isLoopback && !isPrivate) {
