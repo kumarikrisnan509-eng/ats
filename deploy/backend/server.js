@@ -1063,25 +1063,37 @@ const CSRF_ALLOWED_ORIGINS = new Set([
 app.use('/api', (req, res, next) => {
   const m = req.method;
   if (m !== 'POST' && m !== 'PUT' && m !== 'PATCH' && m !== 'DELETE') return next();
-  const ra = (req.ip || req.connection.remoteAddress || '').replace('::ffff:', '');
-  if (isInternalIp(ra)) return next();
   // Bearer-token callers are server-to-server, not cookie-auth -> not CSRF-able.
   if ((req.headers['authorization'] || '').startsWith('Bearer ')) return next();
   // Explicit skip for Zerodha OAuth callback (GET-only today, but defensive).
   if (req.path === '/brokers/zerodha/callback') return next();
   if (req.path === '/v1/oauth/zerodha/callback') return next();
+  // Internal callers (auto-login daemon, ops scripts) tag themselves with this
+  // header AND hit 127.0.0.1:8080 directly without going through nginx.
+  if (req.headers['x-ats-internal'] === '1') return next();
+  // NOTE: cannot use isInternalIp(req.ip) here -- the backend container sits
+  // behind nginx + a docker bridge, so EVERY external client appears as an
+  // internal IP from the container's POV. Instead, true server-local callers
+  // (auto-login daemon hitting 127.0.0.1:8080 directly, NOT through nginx)
+  // are identified by the absence of X-Forwarded-For. nginx always sets XFF;
+  // direct loopback callers do not.
+  const xff = req.headers['x-forwarded-for'];
+  if (!xff) return next(); // trusted local caller (no proxy hop)
   const rawOrigin = req.headers['origin'] || '';
   const rawReferer = req.headers['referer'] || '';
-  // Accept missing Origin AND missing Referer (programmatic curl / native clients).
-  // Cookie auth still requires the cookie -- a CSRF attacker from a browser tab
-  // would have at least one of these headers set by the browser itself.
-  if (!rawOrigin && !rawReferer) return next();
+  // Accept missing Origin AND missing Referer ONLY when XFF is also absent
+  // (handled above). If we got here, request came through nginx -> browser-side
+  // caller -> Origin or Referer MUST be present, else reject.
+  if (!rawOrigin && !rawReferer) {
+    audit('api.csrf.reject', { ip: req.ip, path: req.path, method: m, reason: 'no_origin_no_referer' });
+    return res.status(403).json({ ok: false, reason: 'cross_origin_rejected' });
+  }
   let checkOrigin = rawOrigin;
   if (!checkOrigin && rawReferer) {
     try { const u = new URL(rawReferer); checkOrigin = `${u.protocol}//${u.host}`; } catch (_e) { checkOrigin = ''; }
   }
   if (CSRF_ALLOWED_ORIGINS.has(checkOrigin)) return next();
-  audit('api.csrf.reject', { ip: ra, path: req.path, method: m, origin: rawOrigin || null, referer: rawReferer || null });
+  audit('api.csrf.reject', { ip: req.ip, path: req.path, method: m, origin: rawOrigin || null, referer: rawReferer || null });
   return res.status(403).json({ ok: false, reason: 'cross_origin_rejected' });
 });
 
