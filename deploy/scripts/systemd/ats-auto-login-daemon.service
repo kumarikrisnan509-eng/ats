@@ -1,0 +1,66 @@
+[Unit]
+Description=ATS — host-side auto-login daemon (Tier 79 — Playwright Kite login worker)
+Documentation=https://github.com/kumarikrisnan509-eng/ats/blob/main/deploy/AUTO-LOGIN-SETUP.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# T-199 (CODE-AUDIT E.8): unit file was previously missing from the repo — the
+# setup-auto-login-daemon.sh script expected it as a sibling but it had only
+# ever existed as a hand-rolled copy on the VM. This restores it.
+#
+# The daemon listens on a Unix socket (default /var/run/ats/auto-login.sock)
+# that the backend container bind-mounts. POSTs from the container drive a
+# headless Chromium login to kite.zerodha.com and return a request_token.
+# Auth is a shared bearer in env AUTO_LOGIN_TOKEN, sourced from EnvironmentFile.
+
+User=ats
+Group=docker
+WorkingDirectory=/opt/ats-auto-login
+
+# Shared bearer + base URL come from a 0640 root:docker file. Operator seeds
+# it via setup-auto-login-daemon.sh. Don't commit this file's contents.
+EnvironmentFile=/etc/ats/auto-login.env
+
+# Playwright resolves Chromium from the ats user's cache (installed via
+# `npx playwright install chromium` during setup).
+Environment=PLAYWRIGHT_BROWSERS_PATH=/home/ats/.cache/ms-playwright
+
+# Cap blast radius if headless Chromium leaks. Daily reauth completes in
+# ~15-30s typically; 512M is comfortably above measured RSS.
+MemoryMax=512M
+CPUQuota=60%
+TasksMax=200
+
+# Socket directory + log file are pre-created in setup-auto-login-daemon.sh
+# (chowned ats:docker, mode 0775). The daemon binds the socket at startup
+# and writes to /var/log/ats/auto-login-daemon.log.
+ExecStart=/usr/bin/env node /opt/ats-auto-login/auto-login-daemon.js
+
+StandardOutput=append:/var/log/ats/auto-login-daemon.log
+StandardError=append:/var/log/ats/auto-login-daemon.log
+
+# Restart on crash but back off so a misconfigured Chromium binary doesn't
+# burn CPU. Max 5 restarts in 60s.
+Restart=on-failure
+RestartSec=10s
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+
+# Hardening: deny most kernel facilities the daemon doesn't need.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/run/ats /var/log/ats /home/ats/.cache/ms-playwright /tmp
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

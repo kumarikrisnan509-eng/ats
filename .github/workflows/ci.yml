@@ -31,19 +31,19 @@ jobs:
         run: |
           if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
-      - name: Dependency vulnerability scan (npm audit -- non-blocking, T-169 P0 #4)
+      - name: Dependency vulnerability scan (npm audit -- BLOCKING, T-199)
         working-directory: deploy/backend
-        continue-on-error: true
         run: |
-          # Surface high & critical CVEs. Non-blocking for now so we can review
-          # the baseline before flipping to blocking. Once the audit is clean
-          # (or all known advisories are explicitly accepted), remove
-          # `continue-on-error` and bump `--audit-level=critical` if too noisy.
-          echo "=== npm audit (high+) ==="
-          npm audit --audit-level=high || true
-          echo ""
+          # T-199 (CODE-AUDIT D.9 #5): flipped from continue-on-error to blocking.
+          # T-171 cleared all 8 high-severity vulns; this gate keeps them clear.
+          # Audit level "high" matches what T-171 verified clean. If a transitive
+          # bump introduces a new high+critical CVE, this step fails the build
+          # and the operator must either update the dep or document an exception.
           echo "=== npm audit summary (machine-readable) ==="
           npm audit --json | python3 -c "import sys, json; d=json.load(sys.stdin); m=d.get('metadata',{}).get('vulnerabilities',{}); print('counts:', m); total=sum(m.values()); print('::notice::npm audit total vulnerabilities:', total)" || true
+          echo ""
+          echo "=== npm audit (high+, blocking) ==="
+          npm audit --audit-level=high
 
       - name: Syntax-check backend JS
         run: |
@@ -125,8 +125,11 @@ jobs:
           fi
 
       - name: Playwright smoke tests (blocking, against live URL)
-        # Only run on push to main; PRs skip to keep CI fast.
-        if: github.event_name == 'push'
+        # T-199 (CODE-AUDIT D.9 #5): used to skip on PRs to keep CI fast, which
+        # meant E2E regressions only surfaced AFTER merge to main. Now runs on
+        # PRs too. If the suite gets too slow (>10min) consider splitting into
+        # a fast subset for PRs and a full suite on push, but for now keep
+        # parity so PR reviewers see the same gate that blocks deploy.
         working-directory: test-e2e
         # T-175: continue-on-error REMOVED. All 80 specs green as of T-174,
         # so we now block the deploy if any E2E test regresses. If a real
