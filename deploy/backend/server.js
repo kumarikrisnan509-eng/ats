@@ -1038,6 +1038,53 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
+// ---------- T-181 CSRF defense-in-depth (SCREENS-AUDIT F-4) ----------
+// Session cookie is already SameSite=Lax (deploy/backend/users.js _setCookie),
+// which blocks the most common CSRF vector (cross-origin POST from a malicious
+// site cannot ride the cookie). This middleware adds belt-and-suspenders Origin
+// (with Referer fallback) verification on state-changing /api/* requests.
+//
+// Skips:
+//   - Internal IPs (auto-login daemons, internal cron, Docker private nets)
+//   - Bearer-token requests (server-to-server, ops scripts) -- not cookie-auth
+//   - GET/HEAD/OPTIONS (no state change; also covers /api/brokers/zerodha/callback
+//     which is GET-only, but we still keep an explicit path skip below for clarity)
+//   - Requests where Origin matches the production origin, localhost dev, or null
+//     (programmatic curl without Origin -- already filtered by bearer/internal-ip
+//     checks above)
+//
+// Rejected requests return 403 { ok:false, reason:'cross_origin_rejected' } and
+// are audited via the existing audit() helper.
+const CSRF_ALLOWED_ORIGINS = new Set([
+  'https://ats.rajasekarselvam.com',
+  'http://localhost:8080',
+  'http://127.0.0.1:8080',
+]);
+app.use('/api', (req, res, next) => {
+  const m = req.method;
+  if (m !== 'POST' && m !== 'PUT' && m !== 'PATCH' && m !== 'DELETE') return next();
+  const ra = (req.ip || req.connection.remoteAddress || '').replace('::ffff:', '');
+  if (isInternalIp(ra)) return next();
+  // Bearer-token callers are server-to-server, not cookie-auth -> not CSRF-able.
+  if ((req.headers['authorization'] || '').startsWith('Bearer ')) return next();
+  // Explicit skip for Zerodha OAuth callback (GET-only today, but defensive).
+  if (req.path === '/brokers/zerodha/callback') return next();
+  if (req.path === '/v1/oauth/zerodha/callback') return next();
+  const rawOrigin = req.headers['origin'] || '';
+  const rawReferer = req.headers['referer'] || '';
+  // Accept missing Origin AND missing Referer (programmatic curl / native clients).
+  // Cookie auth still requires the cookie -- a CSRF attacker from a browser tab
+  // would have at least one of these headers set by the browser itself.
+  if (!rawOrigin && !rawReferer) return next();
+  let checkOrigin = rawOrigin;
+  if (!checkOrigin && rawReferer) {
+    try { const u = new URL(rawReferer); checkOrigin = `${u.protocol}//${u.host}`; } catch (_e) { checkOrigin = ''; }
+  }
+  if (CSRF_ALLOWED_ORIGINS.has(checkOrigin)) return next();
+  audit('api.csrf.reject', { ip: ra, path: req.path, method: m, origin: rawOrigin || null, referer: rawReferer || null });
+  return res.status(403).json({ ok: false, reason: 'cross_origin_rejected' });
+});
+
 // ---------- Optional bearer-token auth (env-gated) ----------
 // If ATS_OPS_KEY is set in /etc/ats/backend.env, the following routes require
 // Authorization: Bearer <ATS_OPS_KEY>. Internal IPs are exempt (auto-login flows).
