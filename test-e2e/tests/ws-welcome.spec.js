@@ -50,8 +50,7 @@ function openWs(baseURL, page, opts = {}) {
   }), { url: wsURL, timeoutMs: opts.timeoutMs || 5000 });
 }
 
-// T-198c: temporarily fixme. See happy-path.spec.js comment for context.
-test.fixme('anonymous /ws connection — welcome packet has T-130 auth fields', async ({ page, baseURL }) => {
+test('anonymous /ws connection — welcome packet has T-130 auth fields', async ({ page, baseURL }) => {
   const r = await openWs(baseURL, page);
   expect(r.opened, `WS did not open: ${r.error}`).toBe(true);
   expect(r.welcome, 'no welcome packet received').toBeTruthy();
@@ -72,8 +71,7 @@ test.fixme('anonymous /ws connection — welcome packet has T-130 auth fields', 
   expect(r.welcome).toHaveProperty('broker');
 });
 
-// T-198c: temporarily fixme. See happy-path.spec.js comment for context.
-test.fixme('bogus cookie /ws connection — HMAC fails, falls back anonymous', async ({ context, page, baseURL }) => {
+test('bogus cookie /ws connection — HMAC fails, falls back anonymous', async ({ context, page, baseURL }) => {
   // Set a fake ats.sid cookie that won't pass the HMAC check.
   const host = new URL(baseURL).host.split(':')[0];
   await context.addCookies([{

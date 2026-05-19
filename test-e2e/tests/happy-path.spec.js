@@ -237,12 +237,7 @@ test.describe('API 404 contract', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Live ticker WebSocket', () => {
-  // T-198c: temporarily fixme during the T-198/T-198a/T-198b deploy deadlock.
-  // The currently-deployed verifyClient rejects Origin: 'null' (the about:blank
-  // value browsers send when page.evaluate() runs without navigating first).
-  // T-198b accepts 'null'. Once T-198b is deployed and verified live, this
-  // fixme is removed in T-198d.
-  test.fixme('/ws handshake completes within 5s', async ({ page, baseURL }) => {
+  test('/ws handshake completes within 5s', async ({ page, baseURL }) => {
     // Convert https://host -> wss://host/ws
     const wsURL = (baseURL || '').replace(/^http/, 'ws') + '/ws';
 
