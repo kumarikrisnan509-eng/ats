@@ -322,9 +322,21 @@ const StrategiesScreen = () => {
         <div className="page-header__right">
           <button className="btn"><I.code size={14}/> Import Python</button>
           <button className="btn btn--primary" onClick={() => {
+            // T-180 (SCREENS-AUDIT F-15): replace native alert() with the
+            // global toast system (window.toast from r8-primitives.jsx).
+            // Same information, non-blocking, matches the rest of the UI.
             const m = window.getEffectiveDefaultMode ? window.getEffectiveDefaultMode() : "intraday";
-            const meta = window.MODE_META[m];
-            alert(`New strategy will start in ${meta.label} mode (default).\nChange the default in Settings → Profile → Trading preferences.`);
+            const meta = (window.MODE_META && window.MODE_META[m]) || { label: m };
+            if (window.toast) {
+              window.toast({
+                kind: 'info',
+                title: `New strategy will start in ${meta.label} mode (default)`,
+                sub: 'Change the default in Settings → Profile → Trading preferences.',
+              });
+            } else {
+              // Fallback if toast host isn't mounted (e.g. early boot).
+              alert(`New strategy will start in ${meta.label} mode (default).\nChange the default in Settings → Profile → Trading preferences.`);
+            }
           }}><I.plus size={14}/> New strategy</button>
         </div>
       </div>

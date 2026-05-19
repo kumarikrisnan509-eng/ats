@@ -17,6 +17,9 @@ const MoneyScreen = () => {
   const [evalData, setEvalData]   = React.useState(null);
   const [busy, setBusy]           = React.useState(false);
   const [msg, setMsg]             = React.useState("");
+  // T-180 (SCREENS-AUDIT F-16 / item 3): sweep/execute moves money. Gate the
+  // POST through TwoFactorModal (typed-phrase confirm) before firing.
+  const [confirm2FA, setConfirm2FA] = React.useState(null); // {action, detail, onYes}
   // Tier 20: bucket strategy (emergency / short-term / long-term)
   const [buckets, setBuckets]     = React.useState(null);
   const [bucketDraft, setBucketDraft] = React.useState(null);
@@ -188,8 +191,9 @@ const MoneyScreen = () => {
     await saveRules(rules.map(x => x.id === id ? { ...x, enabled: !x.enabled } : x));
   };
 
-  const executeSweep = async () => {
-    if (!confirm(`Log a sweep of ${fmtInr(wouldSweepTotal)} now? (paper-only, no real order placed)`)) return;
+  // T-180 (SCREENS-AUDIT F-16): split the actual POST out so the 2FA modal's
+  // onConfirm can call it after the user types the confirm phrase.
+  const _doSweepPost = async () => {
     setBusy(true); setMsg("");
     try {
       const r = await window.fetchApi('/api/sweep/execute', { method: 'POST' });
@@ -198,9 +202,24 @@ const MoneyScreen = () => {
     } catch (e) { setMsg("Execute failed: " + e.message); }
     finally { setBusy(false); setTimeout(() => setMsg(""), 4000); }
   };
+  const executeSweep = () => {
+    // If TwoFactorModal isn't loaded for some reason, fall back to a native
+    // confirm so we never lose the money-move guard entirely.
+    if (!window.TwoFactorModal) {
+      if (!confirm(`Execute sweep of ${fmtInr(wouldSweepTotal)} now? This will move funds into your long-term plan.`)) return;
+      _doSweepPost();
+      return;
+    }
+    setConfirm2FA({
+      action: 'Confirm sweep execution',
+      detail: `You are about to move ${fmtInr(wouldSweepTotal)} from trading profits into your long-term plan. This is a paper-only log today; once live trading is enabled it will place real orders. Type the confirm phrase below to proceed.`,
+      onYes: _doSweepPost,
+    });
+  };
 
   // -------- UI --------
   return (
+    <>
     <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* heading */}
       <div>
@@ -676,6 +695,16 @@ const MoneyScreen = () => {
         </div>
       )}
     </div>
+    {window.TwoFactorModal && (
+      <window.TwoFactorModal
+        open={!!confirm2FA}
+        onClose={() => setConfirm2FA(null)}
+        action={confirm2FA && confirm2FA.action}
+        detail={confirm2FA && confirm2FA.detail}
+        onConfirm={confirm2FA && confirm2FA.onYes}
+      />
+    )}
+    </>
   );
 };
 

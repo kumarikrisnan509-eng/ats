@@ -27,18 +27,66 @@ const CircuitsScreen = () => {
     { id: "tick-lag",            scope: "Operational", metric: "Tick feed lag p99",          threshold: 200, current: 38, unit: "ms", action: "Pause signal generation until <100ms", armed: true, lastTrig: "Yesterday", level: "warn" },
   ];
 
-  const grouped = circuits.reduce((acc, c) => {
+  // T-180 (SCREENS-AUDIT F-1 / item 2): overlay live metrics from
+  // /api/system/info onto the hardcoded `current` values where we actually
+  // have a live signal. Wires:
+  //   acct-daily-loss     -> -(paper.realizedPnl) when negative
+  //   acct-margin         -> ordersInWindow share (proxy until margin API
+  //                           ships) — left as fallback if no signal
+  //   intraday-loss       -> -(paper.realizedPnl) when negative
+  //   broker-disconnect   -> broker.lagMs / 1000 (seconds since last tick
+  //                           when disconnected, else 0)
+  //   tick-lag            -> broker.lagMs
+  //   circuit-breaker-mkt -> no-op (no live NIFTY % yet)
+  // Demo-mode keeps hardcoded values so the screenshot still looks alive.
+  const [liveMetrics, setLiveMetrics] = React.useState(null);
+  const __isDemoMode = !!(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
+  React.useEffect(() => {
+    if (__isDemoMode) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const [info, paper] = await Promise.all([
+          window.fetchApi('/api/system/info').catch(() => null),
+          window.fetchApi('/api/paper').catch(() => null),
+        ]);
+        if (cancelled) return;
+        const broker = (info && info.broker) || {};
+        const caps   = (info && info.components && info.components.riskCaps) || {};
+        const ps     = (paper && paper.stats) || {};
+        const realized = Number(ps.realizedPnl) || 0;
+        const lossINR  = realized < 0 ? realized : 0; // negative number
+        setLiveMetrics({
+          'acct-daily-loss':   lossINR,
+          'intraday-loss':     lossINR,
+          'broker-disconnect': broker.connected ? 0 : Math.round((broker.lagMs || 0) / 1000),
+          'tick-lag':          broker.lagMs || 0,
+        });
+      } catch (_e) { /* leave fallbacks in place */ }
+    };
+    load();
+    const id = setInterval(load, 15000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [__isDemoMode]);
+
+  // Apply overlay BEFORE downstream calculations so the counters at the top
+  // of the screen reflect live state, not hardcoded numbers.
+  const liveCircuits = liveMetrics
+    ? circuits.map(c => (c.id in liveMetrics) ? { ...c, current: liveMetrics[c.id] } : c)
+    : circuits;
+
+  const grouped = liveCircuits.reduce((acc, c) => {
     (acc[c.scope] = acc[c.scope] || []).push(c);
     return acc;
   }, {});
 
-  const armedCount = circuits.filter(c => c.armed).length;
-  const triggeredCount = circuits.filter(c => {
+  const armedCount = liveCircuits.filter(c => c.armed).length;
+  const triggeredCount = liveCircuits.filter(c => {
     if (c.unit === "%") return c.threshold > 0 ? c.current >= c.threshold : c.current <= c.threshold;
     if (c.unit === "₹") return c.current <= c.threshold;
     return false;
   }).length;
-  const nearTriggered = circuits.filter(c => {
+  const nearTriggered = liveCircuits.filter(c => {
     const ratio = Math.abs(c.current / c.threshold);
     return ratio > 0.8 && ratio < 1;
   }).length;
@@ -120,25 +168,25 @@ const CircuitsScreen = () => {
         </div>
       </div>
 
-      {/* T99-T93: honest banner — each circuit's `current` value (daily loss
-          -₹8,240, vega 1,840, margin 42%, etc.) is hardcoded. They drive
-          the armed/triggered/near-trigger counters above and the progress
-          bars in the cards below. The thresholds COULD be a real user
-          config one day, but the current metric ingestion isn't wired —
-          there's no per-user circuit state or live metric stream behind
-          this screen. Same disclosure pattern as T-91 (Risk). */}
-      <div role="note" style={{
-        padding: '8px 12px', marginBottom: 12, borderRadius: 6,
-        border: '1px solid color-mix(in oklab, var(--warn, #d97706) 35%, var(--border))',
-        background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
-        fontSize: 12, color: 'var(--text-2)',
-      }}>
-        <strong>Circuit-breaker dashboard is demo data.</strong>{' '}
-        The current values driving the progress bars and the 'armed /
-        triggered / approaching limit' counts are hardcoded examples.
-        Per-user circuit state and live metric ingestion haven't shipped
-        yet. The 'Run halt drill' button is a UI placeholder.
-      </div>
+      {/* T-180 (SCREENS-AUDIT F-1): banner softened. Several `current`
+          values are now overlaid from /api/system/info (daily loss from
+          paper.realizedPnl, broker-disconnect/tick-lag from broker.health).
+          The remaining metrics (vega, drawdown, VIX, NIFTY %, AI error
+          rate) are still hardcoded — those need dedicated streams. */}
+      {(__isDemoMode || !liveMetrics) && (
+        <div role="note" style={{
+          padding: '8px 12px', marginBottom: 12, borderRadius: 6,
+          border: '1px solid color-mix(in oklab, var(--warn, #d97706) 35%, var(--border))',
+          background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
+          fontSize: 12, color: 'var(--text-2)',
+        }}>
+          <strong>Circuit-breaker dashboard is partially demo data.</strong>{' '}
+          Daily loss, broker WS uptime and tick lag are live (via
+          /api/system/info). Vega, drawdown, VIX, NIFTY % and AI-error
+          rate are still hardcoded examples until those streams ship.
+          The 'Run halt drill' button is a UI placeholder.
+        </div>
+      )}
 
       {/* Status overview */}
       <div className="grid grid-4" style={{ marginBottom: 18 }}>

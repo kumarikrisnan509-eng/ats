@@ -44,6 +44,25 @@ const TradingScreen = () => {
   const [orderType, setOrderType] = useState("LIMIT");
   const [segment, setSegment] = useState("NSE");
 
+  // T-180 (SCREENS-AUDIT item 5): poll /api/system/info for kill switch state.
+  // Order form must be explicitly disabled when killSwitch is engaged — the
+  // audit flagged that buttons would "go live the moment kill switch flips".
+  // We piggyback on the same 15s cadence the risk screen uses.
+  const [killSwitch, setKillSwitch] = React.useState(false);
+  React.useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const info = await window.fetchApi('/api/system/info');
+        if (cancelled) return;
+        setKillSwitch(!!(info && info.killSwitch));
+      } catch (_e) { /* leave previous state */ }
+    };
+    load();
+    const id = setInterval(load, 15000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
   // Default mode → Product mapping (intraday=MIS, swing=CNC, options/futures=NRML)
   const MODE_TO_PRODUCT = { intraday: "MIS", swing: "CNC", options: "NRML", futures: "NRML" };
   const getDefaultMode = () => {
@@ -239,12 +258,22 @@ const TradingScreen = () => {
 
           {(() => {
             const conn = useConnectionState();
-            const disabled = conn !== "connected";
+            // T-180 (SCREENS-AUDIT item 5): block order placement whenever
+            // KILL_SWITCH=true on the backend. Tooltip shows the reason so
+            // it's obvious why the button is greyed out.
+            const connDisabled = conn !== "connected";
+            const disabled = connDisabled || killSwitch;
+            const reason = killSwitch
+              ? 'Kill switch engaged — all order placement halted server-side'
+              : connDisabled
+              ? `Feed ${conn} — orders paused`
+              : '';
             return (
               <button
                 className={"btn btn--accent"}
                 onClick={disabled ? null : openSim}
                 disabled={disabled}
+                title={disabled ? reason : ''}
                 style={{
                   width: "100%", marginTop: 14, justifyContent: "center",
                   background: disabled ? "var(--bg-soft)" : (side === "BUY" ? "var(--up)" : "var(--down)"),
@@ -253,7 +282,9 @@ const TradingScreen = () => {
                   cursor: disabled ? "not-allowed" : "pointer",
                 }}
               >
-                {disabled ? `Feed ${conn} — orders paused` : `${side} ${sym} @ ₹${parseFloat(price).toFixed(2)}`}
+                {killSwitch ? 'Kill switch engaged — orders blocked'
+                  : connDisabled ? `Feed ${conn} — orders paused`
+                  : `${side} ${sym} @ ₹${parseFloat(price).toFixed(2)}`}
               </button>
             );
           })()}
