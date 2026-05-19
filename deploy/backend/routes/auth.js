@@ -1,22 +1,29 @@
 // T-216 (CODE-AUDIT F.5 M1.4 piece 2): /api/auth/* handlers.
+// T-228 (P0 FIX): rewired to use getter pattern.
 //
-// Lifted from server.js where 7 routes (signup, login, logout, me, verify-
-// email, forgot-password, reset-password) were inline. All 7 are thin HTTP
-// wrappers around the existing users.js module's auth.* methods.
+// Why getters: server.js declares `let auth` at module scope and only assigns
+// it inside `init()` which runs at the bottom of server.js (L5200+). All
+// `app.post(...)` and `mountXxxRoutes(...)` calls execute at TOP LEVEL when
+// server.js loads, BEFORE init() runs. If we destructure `{ auth, emailAlerts }`
+// from the deps object at mount time we capture `undefined` permanently --
+// the handlers then forever return "auth_not_initialized". This was a P0:
+// prod /api/auth/login etc. have been broken since T-216 deployed.
+//
+// Fix: server.js now passes getters that close over the live `let` bindings.
+// Handlers call `getAuth()` AT REQUEST time, getting the populated value.
 //
 // External deps (passed via mount function options):
-//   auth         - the auth module instance (from createAuth in server.js)
-//   emailAlerts  - the email module (used by signup to send verification)
-//
-// Tests inherited from the existing backend test suite -- no new tests in
-// this commit; handler behavior is byte-identical to the previous inline form.
+//   getAuth         - () => auth (the auth module instance)
+//   getEmailAlerts  - () => emailAlerts (the email module)
 
 'use strict';
 
 function mountAuthRoutes(app, deps) {
-  const { auth, emailAlerts } = deps;
+  const { getAuth, getEmailAlerts } = deps;
 
   app.post('/api/auth/signup', async (req, res) => {
+    const auth = getAuth();
+    const emailAlerts = getEmailAlerts();
     if (!auth) return res.status(503).json({ ok:false, reason:'auth_not_initialized' });
     try {
       const { email, password, name } = req.body || {};
@@ -33,6 +40,7 @@ function mountAuthRoutes(app, deps) {
   });
 
   app.post('/api/auth/login', async (req, res) => {
+    const auth = getAuth();
     if (!auth) return res.status(503).json({ ok:false, reason:'auth_not_initialized' });
     try {
       const { email, password } = req.body || {};
@@ -49,6 +57,7 @@ function mountAuthRoutes(app, deps) {
   });
 
   app.post('/api/auth/logout', (req, res) => {
+    const auth = getAuth();
     if (auth && req.sessionId) auth.logout(req.sessionId);
     if (auth) auth._clearCookie(res);
     res.json({ ok:true });
@@ -60,6 +69,7 @@ function mountAuthRoutes(app, deps) {
   });
 
   app.post('/api/auth/verify-email', async (req, res) => {
+    const auth = getAuth();
     if (!auth) return res.status(503).json({ ok:false, reason:'auth_not_initialized' });
     try {
       const { token } = req.body || {};
@@ -71,6 +81,7 @@ function mountAuthRoutes(app, deps) {
   });
 
   app.post('/api/auth/forgot-password', async (req, res) => {
+    const auth = getAuth();
     if (!auth) return res.status(503).json({ ok:false, reason:'auth_not_initialized' });
     const { email } = req.body || {};
     const r = await auth.requestPasswordReset({ email, baseUrl: req.protocol + '://' + req.headers.host });
@@ -79,6 +90,7 @@ function mountAuthRoutes(app, deps) {
   });
 
   app.post('/api/auth/reset-password', async (req, res) => {
+    const auth = getAuth();
     if (!auth) return res.status(503).json({ ok:false, reason:'auth_not_initialized' });
     try {
       const { token, newPassword } = req.body || {};

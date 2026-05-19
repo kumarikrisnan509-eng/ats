@@ -4045,7 +4045,7 @@ app.get('/api/me/broker-callback', _zerodhaCallback);          // legacy alias (
 app.get('/api/v1/oauth/zerodha/callback', _zerodhaCallback);   // v1 path (Tier 81)
 
 // ---------- Tier 50/51: auth endpoints (signup, login, logout, verify, reset) ----------
-mountAuthRoutes(app, { auth, emailAlerts }); // T-216: was 7 inline /api/auth/* routes; see routes/auth.js
+mountAuthRoutes(app, { getAuth: () => auth, getEmailAlerts: () => emailAlerts }); // T-216 + T-228 fix: getter pattern (auth is `let` populated in init, was captured undefined)
 
 app.get('/api/security/my-ip', (req, res) => {
   const xrip = req.headers['x-real-ip'];
