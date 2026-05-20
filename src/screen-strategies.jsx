@@ -224,7 +224,7 @@ const StrategiesScreen = () => {
         name: s.name || s.id,
         mode: 'live',
         stage: 'live',
-        sharpe: null, winR: null, pnl30d: 0,
+        sharpe: null, winR: null, pnl30: 0,    // T-234: was pnl30d -- field mismatch with consumers (L265/298/303) caused ₹NaN
         signals24h: 0, status: 'live',
         params: s.params || {}, defaults: s.defaults || {},
         description: s.description || s.name,
