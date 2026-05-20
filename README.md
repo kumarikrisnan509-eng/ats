@@ -110,3 +110,5 @@ UNLICENSED — private. See `LICENSE` once added.
 ## Author
 
 Rajasekar Selvam (<rajasekarjavaee@gmail.com>) — built with Claude.
+
+<!-- T-248f re-trigger: app.html hotfix deploy bump -->
