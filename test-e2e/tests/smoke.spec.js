@@ -73,4 +73,5 @@ test('/api/preflight returns shape', async ({ request }) => {
   expect(r.ok()).toBeTruthy();
   const j = await r.json();
   expect(j).toHaveProperty('checks');
-  expe
+  expect(Array.isArray(j.checks)).toBeTruthy();
+});

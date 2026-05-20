@@ -26,9 +26,8 @@ for (const p of PATHS) {
   });
 }
 
-// T-67 added /api/me/portfolio/etf — auth-protected.
-// T-248: /api/me/portfolio/mf retired. Returns 410 Gone for ~30 days (compat
-// window), then deleted entirely. No auth check on the stub.
+// T-248: /api/me/portfolio/mf retired (Kite Connect MF API is read-only by SEBI design).
+// 410 Gone for ~30 days compat window; no auth check on the stub.
 test('/api/me/portfolio/mf retired -- returns 410 Gone (T-248)', async ({ request }) => {
   const r = await request.get('/api/me/portfolio/mf');
   expect(r.status()).toBe(410);
@@ -37,4 +36,7 @@ test('/api/me/portfolio/mf retired -- returns 410 Gone (T-248)', async ({ reques
   expect(j.reason).toBe('gone');
 });
 
-test('/api/me
+test('/api/me/portfolio/etf requires auth (T-66)', async ({ request }) => {
+  const r = await request.get('/api/me/portfolio/etf');
+  expect(r.status()).toBe(401);
+});
