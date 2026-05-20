@@ -123,9 +123,15 @@ class PaperTrading {
       if (side === 'SELL' && !(tgt < sl)) throw new Error('BRACKET SELL needs targetPrice < stopLoss');
     }
     const strat = (strategy && typeof strategy === 'string') ? strategy.trim().slice(0, 64) : null;
+    // T-238 (P1 FIX): strip Indian exchange prefix so the order's stored symbol
+    // matches the bare symbol that Kite delivers via WebSocket ticks. Otherwise
+    // a user placing `NSE:RELIANCE` from the UI sits eternally PENDING because
+    // tick.symbol is `RELIANCE` and the onTick() matcher uses strict equality
+    // (line 221: `o.symbol !== tick.symbol`). Caught by live A/B test in T-237.
+    const _bareSymbol = String(symbol).trim().replace(/^(NSE|BSE|NFO|BFO|MCX|CDS):/, '');
     const order = {
       id: crypto.randomUUID(),
-      symbol: symbol.trim(),
+      symbol: _bareSymbol,
       side, qty: q, type,
       price: p, triggerPrice: tp, targetPrice: tgt, stopLoss: sl,
       strategy: strat,
