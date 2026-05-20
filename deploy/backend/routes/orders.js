@@ -242,6 +242,46 @@ function mountOrdersRoutes(app, deps) {
       });
     }
 
+    // T-245 (P1): F&O lot-size pre-flight. Kite (and every other broker) rejects
+    // F&O orders whose quantity isn't a multiple of the contract lot size --
+    // NIFTY=50, BANKNIFTY=15, FINNIFTY=40, and so on. The broker's error
+    // ("Quantity not in multiples of lot size") is technically correct but
+    // happens AFTER the 2FA prompt, AFTER the order rate-limit increments,
+    // and shows up to the user as a generic `broker.placeError`. Checking
+    // here gives a clean 400 with the offending lot-size and suggested
+    // alternative quantities, before any of those side effects fire.
+    //
+    // Scope: only F&O segments. Equity (NSE/BSE) has no lot-size concept --
+    // 1 share is a valid quantity. Brokers that don't expose symbolMeta
+    // (Mock/Upstox/Dhan/AngelOne adapters as of T-230) are skipped silently;
+    // their own server-side validation still catches misuse.
+    const FNO_EXCHANGES = new Set(['NFO', 'BFO', 'MCX', 'CDS']);
+    if (FNO_EXCHANGES.has(exchange) && typeof _preCheckBroker.broker.symbolMeta === 'function') {
+      try {
+        const meta = _preCheckBroker.broker.symbolMeta(`${exchange}:${symbol}`);
+        const lot = meta && Number(meta.lotSize) || 0;
+        if (lot > 0 && (quantity % lot) !== 0) {
+          const down = Math.floor(quantity / lot) * lot;
+          const up   = Math.ceil(quantity  / lot) * lot;
+          audit('order.blocked.lotSize', { ...normalizedPayload, lotSize: lot, qty: quantity });
+          return res.status(400).json({
+            ok: false,
+            reason: 'LOT_SIZE_MISMATCH',
+            lotSize: lot,
+            quantity,
+            suggested: { down, up },
+            message: `${exchange}:${symbol} trades in lots of ${lot}. Quantity ${quantity} is not a multiple. Try ${down > 0 ? down : up} (next valid down/up).`,
+            clientOrderId,
+            validatedPayload: normalizedPayload,
+          });
+        }
+      } catch (_e) {
+        // Instruments master miss is non-fatal -- fall through and let the
+        // broker's own validation catch it. (Logging the lookup miss to audit
+        // would be noisy; the broker.placeError on the next call is enough.)
+      }
+    }
+
     // Tier 38: 2FA confirm-before-trade gate. Fires on the FIRST order of the
     // day per {userId, strategyTag} pair. If active, the order is held in a
     // 5-minute bucket and the user is asked to confirm via Telegram.

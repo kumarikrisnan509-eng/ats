@@ -213,3 +213,22 @@ test('Sanity: /api/orders/place uses pickBroker(req).broker.placeOrder, not bare
     'place-order handler must NOT call `broker.placeOrder` on the module-level singleton ' +
     '(that would re-introduce the T-196 P0: every user\'s order would execute on the operator\'s broker).');
 });
+
+test('T-245: F&O lot-size gate fires before broker.placeOrder', () => {
+  const handler = getPlaceOrderHandler();
+  // The gate is keyed on FNO_EXCHANGES + symbolMeta + LOT_SIZE_MISMATCH.
+  // Source-grep keeps the invariant pinned: removing or renaming any of these
+  // means the lot-size error stops being surfaced before broker rejection.
+  assert.ok(handler.includes("FNO_EXCHANGES = new Set(['NFO'"),
+    'F&O exchange set must be defined in the place handler');
+  assert.ok(handler.includes('symbolMeta(`'),
+    'symbolMeta must be queried for lot-size lookup');
+  assert.ok(handler.includes("reason: 'LOT_SIZE_MISMATCH'"),
+    'LOT_SIZE_MISMATCH error code must be the response reason on mismatch');
+  // And the gate must run BEFORE the 2FA challenge (otherwise the user is
+  // asked for 2FA for an order that will be rejected anyway).
+  const lotIdx = handler.indexOf("LOT_SIZE_MISMATCH");
+  const twoFaIdx = handler.indexOf("twoFactor.shouldChallenge");
+  assert.ok(lotIdx > 0 && twoFaIdx > 0 && lotIdx < twoFaIdx,
+    `lot-size gate must precede the 2FA challenge issue. lotIdx=${lotIdx} twoFaIdx=${twoFaIdx}`);
+});
