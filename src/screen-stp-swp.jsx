@@ -3,11 +3,9 @@
    Replaces the prior fully-hardcoded version. Spec §2 Stage 5: "SIP manager — scheduled mutual fund / direct equity / ETF investments" + "Retirement withdrawal simulator — SWP modelling, safe withdrawal rate under Indian tax regime".
 */
 
-// T-248: T-242 CoinSipsPanel removed entirely. Kite Connect MF API is
-// GET-only by SEBI design, so we could only show Coin SIPs as read-only and
-// link to coin.zerodha.com to modify -- a misleading affordance. The local
-// ATS SIP manager (below) covers the scheduled-purchase use case for
-// exchange-traded ETFs which ARE buyable through /api/orders/place.
+// T-248: T-242 CoinSipsPanel removed entirely. Kite Connect MF API is GET-only
+// by SEBI design, so the read-only Coin SIPs section was a misleading affordance.
+// Long-term passive investing pivots to ETF baskets at #longterm.
 
 const StpSwpScreen = () => {
   const [tab, setTab] = React.useState("sips");
@@ -112,9 +110,6 @@ const StpSwpScreen = () => {
 
       {tab === 'sips' && (
         <>
-          {/* T-248: Coin SIPs section removed (was T-242). MF read-only surface
-              retired because Kite Connect can't actually place MF orders.
-              Local ATS SIP manager below handles ETF-based scheduled buys. */}
           {stats && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
               <SipStat label="Active SIPs" value={`${stats.enabledSips} / ${stats.sipCount}`}/>
@@ -278,4 +273,17 @@ const StpSwpScreen = () => {
 
 const sipInp = { width: '100%', padding: '6px 10px', fontSize: 13, background: 'var(--bg-soft)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-1)' };
 const sipBtn = { fontSize: 11, padding: '4px 10px', background: 'var(--bg-soft)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer' };
-const SipFi
+const SipField = ({ label, children }) => (
+  <div style={{ marginTop: 8 }}>
+    <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4 }}>{label}</div>
+    {children}
+  </div>
+);
+const SipStat = ({ label, value, tone }) => (
+  <div style={{ padding: 12, background: 'var(--bg-soft)', borderRadius: 8 }}>
+    <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{label}</div>
+    <div style={{ fontSize: 18, fontWeight: 600, marginTop: 2, color: tone === 'up' ? 'var(--up)' : tone === 'down' ? 'var(--down)' : 'var(--text-1)' }}>{value}</div>
+  </div>
+);
+
+window.StpSwpScreen = StpSwpScreen;

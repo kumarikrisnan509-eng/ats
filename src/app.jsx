@@ -37,9 +37,7 @@ const TITLES = {
   money:      ["Wealth",       "Money (profits → long-term)"],
   lab:        ["Validate",     "Strategy Lab"],
   insights:   ["Wealth",       "AI insights"],
-  // T-248: 'mf' route retired -- Kite Connect MF API is GET-only by design.
-  // Replaced by 'longterm' which surfaces exchange-traded ETF baskets fully
-  // buyable via /api/orders/place (no MF bank-mandate constraint).
+  // T-248: mf -> longterm (ETF baskets; Kite MF API is read-only by SEBI)
   longterm:   ["Long-term",   "Long-term basket"],
   'ai-keys':  ["System",       "AI providers"],
 };
@@ -244,7 +242,7 @@ function App() {
     money:      window.MoneyScreen ? <window.MoneyScreen/> : null,
     lab:        window.StrategyLabScreen ? <window.StrategyLabScreen/> : null,
     'ai-keys':  window.AiKeysScreen ? <window.AiKeysScreen/> : null,
-    // T-248: 'mf' route registration removed; MF picker screen deleted.
+    // T-248: mf route retired; replaced by longterm ETF basket screen.
     longterm:   window.LongTermScreen ? <window.LongTermScreen/> : null,
   };
 
@@ -306,4 +304,14 @@ function App() {
                     border: "1px solid var(--border)",
                   }}>{d}</button>
                 ))}
-         
+              </div>
+              <button onClick={() => setShortcutsOpen(false)} style={{ fontSize: 11, color: "var(--text-3)" }}>Close (Esc)</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);

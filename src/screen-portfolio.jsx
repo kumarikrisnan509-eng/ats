@@ -275,14 +275,12 @@ const PortfolioScreen = () => {
     return () => { cancelled = true; };
   }, []);
 
-  // T-248: MF state + fetch removed. Kite Connect MF API is GET-only by SEBI
-  // design and the platform never had MF placement -- read-only surface was a
-  // misleading affordance. Long-term passive investing pivots to ETF baskets
-  // at #longterm. ETF fetch retained (ETFs ARE buyable via /api/orders/place).
+  // T-248: mf state removed (MF endpoints retired).
   const [etf, setEtf] = React.useState([]);
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
+      // T-248: mf-load try block removed; ETF fetch retained below.
       try {
         const j2 = await window.fetchApi('/api/me/portfolio/etf');
         if (!cancelled && j2 && j2.ok) setEtf(j2.holdings || []);
@@ -382,7 +380,7 @@ const PortfolioScreen = () => {
         </div>
       </Card>
 
-      {/* T-248: was grid-2 with MF as second column; collapsed to single. */}
+      {/* T-248: was grid-2 with MF as 2nd column; collapsed to single. */}
       <div style={{ marginBottom: 16 }}>
         <Card title="Direct equity" sub={`${holdings.length} holdings`} flush>
           <table className="table">
@@ -409,11 +407,9 @@ const PortfolioScreen = () => {
           </table>
         </Card>
 
-        {/* T-248: "Mutual funds" Card removed. Kite Connect MF API is GET-only
-            by SEBI design (bank-mandate constraint) -- platform never had MF
-            placement. Long-term passive investing pivots to ETF baskets at
-            #longterm which use NIFTYBEES/JUNIORBEES/GOLDBEES/MOM100 and ARE
-            fully buyable via /api/orders/place. */}
+        {/* T-248: "Mutual funds" Card removed (Kite Connect MF API is read-only by SEBI design;
+            platform never had MF placement). Long-term passive investing pivots to ETF baskets
+            at #longterm. */}
       </div>
 
       <Card title="ETFs" flush>
@@ -450,4 +446,3 @@ const PortfolioScreen = () => {
 };
 
 Object.assign(window, { PortfolioScreen });
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
