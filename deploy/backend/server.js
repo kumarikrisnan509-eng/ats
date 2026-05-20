@@ -1193,12 +1193,26 @@ app.use('/api', (req, res, next) => {
   const got = req.headers['x-csrf-token'] || '';
   if (!got) {
     audit('csrf.token.missing', { path: req.path, method: m, ip: req.ip });
-    // SOFT-FAIL: let through. Flip to res.status(403) in the hard-fail commit.
-    return next();
+    // T-247 (M2.1 phase 2): HARD-FAIL. T-246 frontend pre-flight ships
+    // X-CSRF-Token on every same-origin mutating fetch (mock-data.jsx).
+    // After verifying csrf.token.missing audit count stayed flat post-deploy,
+    // we flip to 403 here. Anonymous users were already bypassed above
+    // (sid null) so the only requests that hit this branch are authed
+    // mutating requests without the header -- exactly what CSRF protects
+    // against.
+    return res.status(403).json({
+      ok: false,
+      reason: 'csrf_token_invalid',
+      detail: 'Missing X-CSRF-Token header. Reload the page; the frontend should attach it automatically on every mutating call.',
+    });
   }
   if (got !== expected) {
     audit('csrf.token.mismatch', { path: req.path, method: m, ip: req.ip });
-    return next();
+    return res.status(403).json({
+      ok: false,
+      reason: 'csrf_token_invalid',
+      detail: 'X-CSRF-Token did not match the HMAC expected for this session. Session may have rotated; reload the page.',
+    });
   }
   return next();
 });
