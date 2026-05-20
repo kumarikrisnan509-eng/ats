@@ -119,9 +119,6 @@ const NAV_GROUPS = [
       { id: "modes",      label: "Trading modes",  icon: I.layers },
       { id: "strategies", label: "Strategies",     icon: I.strategy,  badge: { text: "8" } },
       // overflow -- still reachable, just not in primary scan path
-      { id: "compare",    label: "Compare",           icon: I.scale,   overflow: true },
-      { id: "alerts",     label: "Alerts builder",    icon: I.pulse,   overflow: true },
-      { id: "options",    label: "Options builder",   icon: I.options, overflow: true },
       { id: "circuits",   label: "Circuit breakers",  icon: I.gauge,   overflow: true },
       { id: "audit",      label: "Audit trail",       icon: I.check,   overflow: true },
       { id: "margin",     label: "Margin calc",       icon: I.scale,   overflow: true },
@@ -135,9 +132,7 @@ const NAV_GROUPS = [
       { id: "portfolio",  label: "Portfolio",            icon: I.portfolio },
       // T-248: "Mutual funds" replaced by "Long-term basket" (ETF baskets buyable via API)
       { id: "longterm",   label: "Long-term basket",     icon: I.basket },
-      { id: "goals",      label: "Life goals",           icon: I.target,    overflow: true },
       { id: "stpswp",     label: "STP / SWP plans",      icon: I.refresh,   overflow: true },
-      { id: "tax",        label: "Tax & ITR",            icon: I.calc,      overflow: true },
     ],
   },
   {
@@ -155,7 +150,6 @@ const NAV_GROUPS = [
       { id: "ai-keys",    label: "AI providers",   icon: I.sparkle },
       { id: "risk",       label: "Risk",           icon: I.shield,      overflow: true },
       { id: "compliance", label: "Compliance",     icon: I.shieldCheck, overflow: true },
-      { id: "apidocs",    label: "API & Webhooks", icon: I.code,        overflow: true },
       // T-164 (v11-I3): link to the user-docs static page. external:true so
       // the click opens /docs.html as a real navigation instead of trying
       // to mount a hash-route screen.
