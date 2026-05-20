@@ -275,18 +275,36 @@ const PortfolioScreen = () => {
     return () => { cancelled = true; };
   }, []);
 
-  // T99-T66: real per-user MF + ETF holdings from backend (no more sample data).
-  // Backend endpoints currently return empty until CAS-upload persistence lands;
-  // the empty-state UI guides the user to upload their CAS PDF.
+  // T-242 (and T-243 alias): real per-user MF holdings from Kite Connect MF API.
+  // Was previously a CAS-upload stub. Now /api/me/mf/holdings returns the user's
+  // actual Coin holdings via kc.getMFHoldings(). Normalise the new shape into
+  // the keys the existing table rendering already uses (n/t/inv/cur).
+  // SIP per-fund is not a holdings field -- it lives on /api/me/mf/sips (the
+  // STP/SWP screen). We render '-' for that column here. Same for XIRR which
+  // needs a cashflow ledger to compute.
   const [mf, setMf] = React.useState([]);
   const [etf, setEtf] = React.useState([]);
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const j = await window.fetchApi('/api/me/portfolio/mf');
-        if (!cancelled && j && j.ok) setMf(j.holdings || []);
-      } catch (e) { console.warn('[screen-portfolio] swallowed:', e && e.message); }
+        const j = await fetch('/api/me/mf/holdings', { credentials: 'include' }).then(r => r.json());
+        if (!cancelled && j && j.ok) {
+          const rows = (j.holdings || []).map(h => ({
+            n:    h.fund,
+            t:    h.isin,                                    // ISIN as the sub-line
+            sip:  null,                                       // not provided by holdings API
+            inv:  (h.quantity || 0) * (h.avgPrice || 0),     // computed invested
+            cur:  (h.quantity || 0) * (h.nav || 0),          // computed current value
+            xirr: null,                                       // needs cashflow ledger
+            folio:h.folio,                                    // for tooltip / future detail row
+            nav:  h.nav,
+            navDate: h.navDate,
+            qty:  h.quantity,
+          }));
+          setMf(rows);
+        }
+      } catch (e) { console.warn('[screen-portfolio] mf load:', e && e.message); }
       try {
         const j2 = await window.fetchApi('/api/me/portfolio/etf');
         if (!cancelled && j2 && j2.ok) setEtf(j2.holdings || []);
@@ -416,25 +434,30 @@ const PortfolioScreen = () => {
           {mf.length === 0 ? (
             <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>
               <div style={{ fontSize: 24, marginBottom: 8 }}>📈</div>
-              <div style={{ fontWeight: 500, marginBottom: 4, color: 'var(--text-2)' }}>No mutual fund holdings yet</div>
-              <div style={{ fontSize: 12 }}>Upload your CAS (Consolidated Account Statement) PDF on the Mutual Funds screen to populate.</div>
+              <div style={{ fontWeight: 500, marginBottom: 4, color: 'var(--text-2)' }}>No Coin mutual fund holdings yet</div>
+              <div style={{ fontSize: 12 }}>Holdings on Zerodha Coin appear here automatically. <a href="https://coin.zerodha.com" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--acc, var(--text-1))' }}>Open coin.zerodha.com</a> to start investing, or upload a CAS PDF if you hold MFs at other registrars.</div>
             </div>
           ) : (
             <table className="table">
-              <thead><tr><th>Fund</th><th className="num-l">SIP</th><th className="num-l">Invested</th><th className="num-l">Current</th><th className="num-l">XIRR</th></tr></thead>
+              <thead><tr><th>Fund</th><th className="num-l">Units</th><th className="num-l">NAV</th><th className="num-l">Invested</th><th className="num-l">Current</th><th className="num-l">P&L</th></tr></thead>
               <tbody>
-                {mf.map((m, i) => (
-                  <tr key={i}>
-                    <td>
-                      <div style={{ fontWeight: 500 }}>{m.n}</div>
-                      <div className="muted" style={{ fontSize: 11 }}>{m.t}</div>
-                    </td>
-                    <td className="num">{inr(m.sip)}/mo</td>
-                    <td className="num">{inrCompact(m.inv)}</td>
-                    <td className="num">{inrCompact(m.cur)}</td>
-                    <td className="num up">{pct(m.xirr, 1)}</td>
-                  </tr>
-                ))}
+                {mf.map((m, i) => {
+                  const pnlVal = (m.cur || 0) - (m.inv || 0);
+                  const pnlCls = pnlVal > 0 ? 'up' : pnlVal < 0 ? 'down' : '';
+                  return (
+                    <tr key={i}>
+                      <td>
+                        <div style={{ fontWeight: 500 }}>{m.n}</div>
+                        <div className="muted" style={{ fontSize: 11 }}>{m.t}{m.folio ? ' · folio ' + m.folio : ''}</div>
+                      </td>
+                      <td className="num">{Number(m.qty || 0).toFixed(3)}</td>
+                      <td className="num">{Number(m.nav || 0).toFixed(2)}</td>
+                      <td className="num">{inrCompact(m.inv)}</td>
+                      <td className="num">{inrCompact(m.cur)}</td>
+                      <td className={"num " + pnlCls}>{pnlVal >= 0 ? '+' : ''}{inrCompact(pnlVal)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}

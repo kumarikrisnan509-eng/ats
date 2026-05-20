@@ -126,10 +126,18 @@ function mountMfRoutes(app, deps) {
           return hay.includes(q);
         });
       }
-      // Only purchase-allowed direct-plan growth options by default
-      // unless ?all=1
+      // Default: direct-plan only (regular plans have higher expense ratios so
+      // they're a worse choice for users). Caller can pass ?all=1 to include
+      // regular plans too.
+      //
+      // T-244 (P3 fix): used to also filter by `r.purchaseAllowed` but that
+      // returned 0 rows on a fresh demat -- looks like Coin sets the flag
+      // off until the user completes nomination/KYC inside Coin itself, so
+      // gating the master list on it hides schemes the user could otherwise
+      // research. Just default to direct plans; the BUY flow already requires
+      // going to Coin where Coin enforces its own purchaseAllowed gate.
       if (req.query.all !== '1') {
-        filtered = filtered.filter(r => r.purchaseAllowed && r.plan === 'direct');
+        filtered = filtered.filter(r => r.plan === 'direct');
       }
       filtered = filtered.slice(0, limit);
 
