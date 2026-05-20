@@ -250,7 +250,9 @@ const Sidebar = ({ route, setRoute }) => {
 
     <div style={{ padding: "4px 14px 8px" }}>
       <div style={{ position: "relative" }}>
-        <I.search size={12}/>
+        {/* T-232: removed a stray bare <I.search size={12}/> here that had
+            no wrapper or positioning -- it flowed as a block above the input.
+            The properly absolute-positioned icon is in the <span> below. */}
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter nav…" style={{
           width: "100%", padding: "6px 8px 6px 26px", fontSize: 12,
           background: "var(--bg-soft)", border: "1px solid var(--border)", borderRadius: 6,
