@@ -26,16 +26,32 @@ function mountPortfolioRoutes(app, deps) {
     }
   });
 
-  // T99-T66: per-user mutual-fund holdings. Kite has no MF API; data comes
-  // from the user uploading their CAS (Consolidated Account Statement) PDF
-  // via /api/cas/parse + future UI. Until that pipeline persists results
-  // to a per-user table, this endpoint returns an empty list so the frontend
-  // can render a clean 'no MF data yet, upload your CAS' empty state instead
-  // of showing hardcoded sample data.
-  app.get('/api/me/portfolio/mf', (req, res) => {
+  // T-243 (correction): the comment that used to live here said "Kite has no
+  // MF API" -- that was wrong. Kite Connect HAS a Mutual Fund API
+  // (https://kite.trade/docs/connect/v3/mutual-funds), but it is GET-only:
+  // holdings + SIPs + last-7-day orders + instruments master. ORDER PLACEMENT
+  // is NOT supported by Zerodha because Coin requires a bank-account payment
+  // that the API can't broker. We now expose the read endpoints under
+  // /api/me/mf/* (see routes/mf.js, T-241). This route stays as a thin
+  // backwards-compat alias to /api/me/mf/holdings so older frontends keep
+  // working. CAS upload remains a future option for users who hold MFs
+  // OUTSIDE Zerodha (other registrars, AMC-direct, etc).
+  app.get('/api/me/portfolio/mf', async (req, res) => {
     if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
-    // TODO: when CAS-upload persistence lands, query a per-user mf_holdings table here.
-    res.json({ ok: true, holdings: [], source: 'awaiting_cas_upload' });
+    try {
+      const r = await resolveUserBroker(req);
+      if (!r.broker || typeof r.broker.getMFHoldings !== 'function') {
+        return res.json({
+          ok: true, holdings: [],
+          source: r.broker ? 'broker_has_no_mf_api' : 'no_broker_connected',
+          note: 'Connect a Zerodha account to see Coin MF holdings, or upload a CAS PDF for cross-registrar coverage (CAS upload pipeline pending).',
+        });
+      }
+      const holdings = await r.broker.getMFHoldings();
+      res.json({ ok: true, holdings, source: 'zerodha_kite_mf' });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: e.message });
+    }
   });
 
   // T99-T66: per-user ETF holdings. ETFs trade on NSE/BSE so they DO show up

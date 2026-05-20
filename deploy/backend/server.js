@@ -22,6 +22,8 @@ const _orderRateRecord = _orderRateLimit.orderRateRecord;
 const { VALID_SIDES, VALID_PRODUCTS, VALID_ORDER_TYPES, VALID_VARIETIES, VALID_VALIDITY } = require('./services/order-validation');
 // T-218 (CODE-AUDIT F.5 M1.4 piece 4): /api/portfolio + /api/me/portfolio routes extracted.
 const { mountPortfolioRoutes } = require('./routes/portfolio');
+// T-241: Mutual-fund read-side endpoints (Kite Connect MF is GET-only)
+const { mountMfRoutes } = require('./routes/mf');
 // T-217 (CODE-AUDIT F.5 M1.4 piece 3 + A.2 fix): OAuth state-signer.
 const _oauthState = require('./services/oauth-state');
 const _pendingNonces = _oauthState._pendingNonces;
@@ -2622,6 +2624,7 @@ app.get('/api/quotes', async (req, res) => {
 // Tier 58: route through user's own broker. If not connected, return empty + flag.
 
 mountPortfolioRoutes(app, { resolveUserBroker }); // T-218: was 4 inline /api/portfolio + /api/me/portfolio routes; see routes/portfolio.js
+mountMfRoutes(app, { resolveUserBroker, audit }); // T-241: /api/me/mf/{holdings,sips,orders,instruments}
 
 app.get('/api/orders', async (req, res) => {
   try {
