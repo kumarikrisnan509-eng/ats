@@ -133,7 +133,10 @@ const NAV_GROUPS = [
     label: "Long-term",
     items: [
       { id: "portfolio",  label: "Portfolio",            icon: I.portfolio },
-      { id: "mf",         label: "Mutual funds",         icon: I.basket },
+      // T-248: "Mutual funds" replaced by "Long-term basket" -- ETF-based
+      // (NIFTYBEES/JUNIORBEES/GOLDBEES/MOM100), API-buyable through
+      // /api/orders/place. Kite Connect MF API is GET-only by SEBI design.
+      { id: "longterm",   label: "Long-term basket",     icon: I.basket },
       { id: "goals",      label: "Life goals",           icon: I.target,    overflow: true },
       { id: "stpswp",     label: "STP / SWP plans",      icon: I.refresh,   overflow: true },
       { id: "tax",        label: "Tax & ITR",            icon: I.calc,      overflow: true },
@@ -635,30 +638,4 @@ const ProfileMenu = ({ setRoute }) => {
             <div style={{ padding: "6px 0" }}>
               {[
                 { label: "Profile",        route: "profile",  icon: I.user },
-                { label: "Brokers",        route: "brokers",  icon: I.link },
-                { label: "AI sources",     route: "settings", icon: I.sparkle },
-                { label: "Compliance",     route: "compliance", icon: I.shieldCheck },
-              ].map(it => (
-                <button key={it.route} className="btn btn--ghost" onClick={() => nav(it.route)} style={{ width: "100%", justifyContent: "flex-start", padding: "8px 16px", borderRadius: 0, fontSize: 13 }}>
-                  <it.icon size={14}/> {it.label}
-                </button>
-              ))}
-            </div>
-
-            <div style={{ borderTop: "1px solid var(--border)", padding: "6px 0" }}>
-              <button
-                className="btn btn--ghost"
-                onClick={() => { window.dispatchEvent(new CustomEvent("logout")); setOpen(false); }}
-                style={{ width: "100%", justifyContent: "flex-start", padding: "8px 16px", borderRadius: 0, fontSize: 13, color: "var(--down)" }}
-              >
-                <I.stop size={14}/> Sign out
-              </button>
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  );
-};
-
-Object.assign(window, { Sidebar, TopBar }); 
+                { label: "Brokers",        route: "brokers",  ic

@@ -705,112 +705,15 @@ class ZerodhaBroker extends BrokerGateway {
 
   /** Health snapshot for /api/health */
   // -------------------------------------------------------------------------
-  // T-240: Mutual Fund read-side. Kite Connect MF API is GET-only — placement
-  // requires bank-account payment via Coin, not exposed over the API. The
-  // 4 methods below are kc.getMFHoldings/getMFSIPs/getMFOrders/getMFInstruments
-  // each remapped to camelCase shape the frontend already uses for equities.
-  //
-  // Field-name reference: https://kite.trade/docs/connect/v3/mutual-funds/
+  // T-248 (2026-05-20): T-240 MF read-side methods REMOVED.
+  // getMFHoldings / getMFSIPs / getMFOrders / getMFInstruments deleted.
+  // Reason: Kite Connect MF API is GET-only by Zerodha/SEBI bank-mandate
+  // design -- platform never had MF placement and the read-only surface
+  // was a misleading affordance. Long-term passive investing pivots to
+  // exchange-traded ETF baskets (#longterm in the frontend) which are
+  // fully buyable via the same /api/orders/place pipeline as equities.
   // -------------------------------------------------------------------------
 
-  /** Mutual-fund holdings (Coin-routed only). Folio + ISIN + units + NAV. */
-  async getMFHoldings() {
-    if (!this.accessToken) throw new Error('not authenticated');
-    const rows = await this.kc.getMFHoldings();
-    return (rows || []).map((h) => ({
-      folio:         h.folio,
-      fund:          h.fund,
-      isin:          h.tradingsymbol,        // ISIN is the trading symbol for MFs
-      quantity:      h.quantity,
-      avgPrice:      h.average_price,
-      nav:           h.last_price,
-      navDate:       h.last_price_date,
-      pnl:           h.pnl,
-      pledgedQty:    h.pledged_quantity,
-    }));
-  }
-
-  /** Active + paused SIPs registered via Coin. */
-  async getMFSIPs() {
-    if (!this.accessToken) throw new Error('not authenticated');
-    const rows = await this.kc.getMFSIPS();   // SDK uses uppercase plural
-    return (rows || []).map((s) => ({
-      sipId:                 s.sip_id,
-      sipRegNum:             s.sip_reg_num,
-      isin:                  s.tradingsymbol,
-      fund:                  s.fund,
-      sipType:               s.sip_type,           // 'sip' or 'amc_sip'
-      transactionType:       s.transaction_type,
-      status:                s.status,             // ACTIVE / PAUSED / CANCELLED
-      frequency:             s.frequency,          // weekly / monthly / quarterly
-      instalmentAmount:      s.instalment_amount,
-      instalmentDay:         s.instalment_day,
-      nextInstalment:        s.next_instalment,
-      lastInstalment:        s.last_instalment,
-      completedInstalments:  s.completed_instalments,
-      pendingInstalments:    s.pending_instalments,
-      totalInstalments:      s.instalments,
-      dividendType:          s.dividend_type,
-      triggerPrice:          s.trigger_price,
-      stepUp:                s.step_up,
-      tag:                   s.tag,
-      created:               s.created,
-    }));
-  }
-
-  /** MF orders placed in the last 7 days. */
-  async getMFOrders() {
-    if (!this.accessToken) throw new Error('not authenticated');
-    const rows = await this.kc.getMFOrders();
-    return (rows || []).map((o) => ({
-      orderId:           o.order_id,
-      exchangeOrderId:   o.exchange_order_id,
-      status:            o.status,                 // OPEN / COMPLETE / REJECTED / CANCELLED
-      statusMessage:     o.status_message,
-      isin:              o.tradingsymbol,
-      fund:              o.fund,
-      folio:             o.folio,
-      settlementId:      o.settlement_id,
-      transactionType:   o.transaction_type,       // BUY / SELL
-      amount:            o.amount,
-      quantity:          o.quantity,
-      price:             o.price,
-      nav:               o.last_price,
-      navDate:           o.last_price_date,
-      avgPrice:          o.average_price,
-      variety:           o.variety,                // regular / sip / amc_sip
-      purchaseType:      o.purchase_type,          // FRESH / ADDITIONAL
-      orderTimestamp:    o.order_timestamp,
-      exchangeTimestamp: o.exchange_timestamp,
-      tag:               o.tag,
-      placedBy:          o.placed_by,
-    }));
-  }
-
-  /** Full Coin scheme master. ~16k+ rows. Cache locally for 24h to avoid hammering. */
-  async getMFInstruments() {
-    if (!this.accessToken) throw new Error('not authenticated');
-    // kiteconnect v5 returns parsed CSV as Array<object> with snake_case columns.
-    const rows = await this.kc.getMFInstruments();
-    return (rows || []).map((r) => ({
-      isin:                          r.tradingsymbol,
-      amc:                           r.amc,
-      name:                          r.name,
-      purchaseAllowed:               String(r.purchase_allowed) === '1',
-      redemptionAllowed:             String(r.redemption_allowed) === '1',
-      minPurchase:                   Number(r.minimum_purchase_amount) || 0,
-      purchaseMultiplier:            Number(r.purchase_amount_multiplier) || 1,
-      minAdditionalPurchase:         Number(r.minimum_additional_purchase_amount) || 0,
-      minRedemption:                 Number(r.minimum_redemption_quantity) || 0,
-      redemptionMultiplier:          Number(r.redemption_quantity_multiplier) || 0.001,
-      dividendType:                  r.dividend_type,
-      schemeType:                    r.scheme_type,
-      plan:                          r.plan,                  // direct / regular
-      settlementType:                r.settlement_type,       // T1 / T2 / T3 ...
-      nav:                           Number(r.last_price) || 0,
-      navDate:                       r.last_price_date,
-    }));
-  }
 
   health() {
     return {

@@ -26,33 +26,11 @@ function mountPortfolioRoutes(app, deps) {
     }
   });
 
-  // T-243 (correction): the comment that used to live here said "Kite has no
-  // MF API" -- that was wrong. Kite Connect HAS a Mutual Fund API
-  // (https://kite.trade/docs/connect/v3/mutual-funds), but it is GET-only:
-  // holdings + SIPs + last-7-day orders + instruments master. ORDER PLACEMENT
-  // is NOT supported by Zerodha because Coin requires a bank-account payment
-  // that the API can't broker. We now expose the read endpoints under
-  // /api/me/mf/* (see routes/mf.js, T-241). This route stays as a thin
-  // backwards-compat alias to /api/me/mf/holdings so older frontends keep
-  // working. CAS upload remains a future option for users who hold MFs
-  // OUTSIDE Zerodha (other registrars, AMC-direct, etc).
-  app.get('/api/me/portfolio/mf', async (req, res) => {
-    if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
-    try {
-      const r = await resolveUserBroker(req);
-      if (!r.broker || typeof r.broker.getMFHoldings !== 'function') {
-        return res.json({
-          ok: true, holdings: [],
-          source: r.broker ? 'broker_has_no_mf_api' : 'no_broker_connected',
-          note: 'Connect a Zerodha account to see Coin MF holdings, or upload a CAS PDF for cross-registrar coverage (CAS upload pipeline pending).',
-        });
-      }
-      const holdings = await r.broker.getMFHoldings();
-      res.json({ ok: true, holdings, source: 'zerodha_kite_mf' });
-    } catch (e) {
-      res.status(500).json({ ok: false, reason: e.message });
-    }
-  });
+  // T-248: /api/me/portfolio/mf alias REMOVED (was T-243). Kite Connect MF
+  // API is read-only by Zerodha/SEBI design -- platform never had MF
+  // placement, making the alias a misleading affordance. 410 Gone stub
+  // lives in server.js for ~30 days backward compat. Long-term passive
+  // investing has moved to ETF baskets at #longterm via /api/orders/place.
 
   // T99-T66: per-user ETF holdings. ETFs trade on NSE/BSE so they DO show up
   // in Kite's getHoldings() — they're listed alongside equity holdings (just

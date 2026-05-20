@@ -129,7 +129,7 @@ test.describe('Auth gate enforced on per-user endpoints', () => {
   const PROTECTED = [
     '/api/me/identity',
     '/api/me/prefs',
-    '/api/me/portfolio/mf',
+    // T-248: /api/me/portfolio/mf retired (now returns 410 Gone, not 401).
     '/api/me/portfolio/etf',
     '/api/me/watchlist',
   ];
@@ -288,7 +288,4 @@ test.describe('health-deep operational fields', () => {
     if (c.broker === true) {
       expect(typeof c.brokerWsConnected).toBe('boolean');
       expect(typeof c.brokerWsStalled).toBe('boolean');
-      expect(typeof c.brokerTickStale).toBe('boolean');
-    }
-  });
-});
+      expect(typeof c.broker

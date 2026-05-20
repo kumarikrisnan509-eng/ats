@@ -26,15 +26,15 @@ for (const p of PATHS) {
   });
 }
 
-// T-67 also added /api/me/portfolio/mf + /api/me/portfolio/etf — same auth contract.
-test('/api/me/portfolio/mf requires auth (T-66)', async ({ request }) => {
+// T-67 added /api/me/portfolio/etf — auth-protected.
+// T-248: /api/me/portfolio/mf retired. Returns 410 Gone for ~30 days (compat
+// window), then deleted entirely. No auth check on the stub.
+test('/api/me/portfolio/mf retired -- returns 410 Gone (T-248)', async ({ request }) => {
   const r = await request.get('/api/me/portfolio/mf');
-  expect(r.status()).toBe(401);
+  expect(r.status()).toBe(410);
   const j = await r.json().catch(() => ({}));
   expect(j.ok).toBe(false);
+  expect(j.reason).toBe('gone');
 });
 
-test('/api/me/portfolio/etf requires auth (T-66)', async ({ request }) => {
-  const r = await request.get('/api/me/portfolio/etf');
-  expect(r.status()).toBe(401);
-});
+test('/api/me

@@ -3,85 +3,11 @@
    Replaces the prior fully-hardcoded version. Spec §2 Stage 5: "SIP manager — scheduled mutual fund / direct equity / ETF investments" + "Retirement withdrawal simulator — SWP modelling, safe withdrawal rate under Indian tax regime".
 */
 
-// T-242: Zerodha Coin SIPs panel. Reads /api/me/mf/sips (Kite Connect MF API,
-// GET-only). Lets the user see their real SIPs alongside the local-ATS SIPs
-// above. Modify/cancel must go through Coin -- Kite doesn't expose those over
-// the API. The "Open in Coin" deeplink takes the user there directly.
-const CoinSipsPanel = () => {
-  const [state, setState] = React.useState({ loading: true, sips: [], summary: null, reason: null });
-  React.useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await fetch('/api/me/mf/sips', { credentials: 'include' }).then(r => r.json());
-        if (cancelled) return;
-        if (r.ok && r.brokerConnected) setState({ loading: false, sips: r.sips || [], summary: r.summary, reason: null });
-        else setState({ loading: false, sips: [], summary: null, reason: r.reason || 'no_data' });
-      } catch (e) { if (!cancelled) setState({ loading: false, sips: [], summary: null, reason: e.message }); }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-  const fmtInr = (n) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
-  if (state.loading) {
-    return <div style={{ padding: 12, fontSize: 12, color: 'var(--text-3)' }}>Loading Coin SIPs...</div>;
-  }
-  if (state.reason) {
-    const niceReason = ({
-      'no_broker_connected':        'Connect Zerodha in Settings -> Brokers to see your Coin SIPs here.',
-      'broker_does_not_support_mf': 'Your connected broker doesn\'t expose mutual funds via API. (Currently only Zerodha Kite does.)',
-    })[state.reason] || ('Could not load Coin SIPs: ' + state.reason);
-    return (
-      <div style={{ padding: 12, fontSize: 12, color: 'var(--text-3)', border: '1px dashed var(--border)', borderRadius: 6 }}>
-        {niceReason}
-      </div>
-    );
-  }
-  if (!state.sips.length) {
-    return (
-      <div style={{ padding: 12, fontSize: 12, color: 'var(--text-3)', border: '1px dashed var(--border)', borderRadius: 6 }}>
-        No Coin SIPs registered. Visit <a href="https://coin.zerodha.com" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--acc)' }}>coin.zerodha.com</a> to start one. It will appear here automatically.
-      </div>
-    );
-  }
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ fontSize: 12, color: 'var(--text-3)', display: 'flex', justifyContent: 'space-between' }}>
-        <span>From Zerodha Coin - {state.sips.length} SIP{state.sips.length === 1 ? '' : 's'} ({state.summary && state.summary.active} active)</span>
-        {state.summary && state.summary.monthlyOutlay > 0 && (
-          <span>Monthly outlay <b style={{ color: 'var(--text-1)' }}>{fmtInr(state.summary.monthlyOutlay)}</b></span>
-        )}
-      </div>
-      {state.sips.map(s => (
-        <div key={s.sipId} style={{
-          padding: 12, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
-          display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, alignItems: 'center',
-        }}>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 500 }}>{s.fund}</div>
-            <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <span>{fmtInr(s.instalmentAmount)} {s.frequency}</span>
-              {s.instalmentDay > 0 && <span>day {s.instalmentDay}</span>}
-              <span>ISIN {s.isin}</span>
-              {s.nextInstalment && <span>next {s.nextInstalment}</span>}
-              <span style={{
-                padding: '1px 6px', borderRadius: 3, fontWeight: 500,
-                background: s.status === 'ACTIVE' ? 'var(--up-soft)' : s.status === 'PAUSED' ? 'var(--warn-soft)' : 'var(--bg-sunk)',
-                color: s.status === 'ACTIVE' ? 'var(--up)' : s.status === 'PAUSED' ? 'var(--warn)' : 'var(--text-3)',
-              }}>{s.status}</span>
-            </div>
-          </div>
-          <a href="https://coin.zerodha.com/dashboard" target="_blank" rel="noopener noreferrer" style={{
-            padding: '4px 10px', fontSize: 11, fontWeight: 500,
-            background: 'var(--bg-soft)', color: 'var(--text-2)', borderRadius: 4, textDecoration: 'none',
-          }}>Open in Coin -&gt;</a>
-        </div>
-      ))}
-      <div style={{ fontSize: 10, color: 'var(--text-4)', marginTop: 4 }}>
-        Source: Kite Connect MF API (read-only). Modify or cancel SIPs at coin.zerodha.com.
-      </div>
-    </div>
-  );
-};
+// T-248: T-242 CoinSipsPanel removed entirely. Kite Connect MF API is
+// GET-only by SEBI design, so we could only show Coin SIPs as read-only and
+// link to coin.zerodha.com to modify -- a misleading affordance. The local
+// ATS SIP manager (below) covers the scheduled-purchase use case for
+// exchange-traded ETFs which ARE buyable through /api/orders/place.
 
 const StpSwpScreen = () => {
   const [tab, setTab] = React.useState("sips");
@@ -186,11 +112,9 @@ const StpSwpScreen = () => {
 
       {tab === 'sips' && (
         <>
-          {/* T-242: real Zerodha Coin SIPs (read-only from Kite Connect) */}
-          <div style={{ paddingBottom: 12, borderBottom: '1px solid var(--border)', marginBottom: 4 }}>
-            <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 8 }}>Coin SIPs</div>
-            <CoinSipsPanel />
-          </div>
+          {/* T-248: Coin SIPs section removed (was T-242). MF read-only surface
+              retired because Kite Connect can't actually place MF orders.
+              Local ATS SIP manager below handles ETF-based scheduled buys. */}
           {stats && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
               <SipStat label="Active SIPs" value={`${stats.enabledSips} / ${stats.sipCount}`}/>
@@ -354,17 +278,4 @@ const StpSwpScreen = () => {
 
 const sipInp = { width: '100%', padding: '6px 10px', fontSize: 13, background: 'var(--bg-soft)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-1)' };
 const sipBtn = { fontSize: 11, padding: '4px 10px', background: 'var(--bg-soft)', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer' };
-const SipField = ({ label, children }) => (
-  <div style={{ marginTop: 8 }}>
-    <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4 }}>{label}</div>
-    {children}
-  </div>
-);
-const SipStat = ({ label, value, tone }) => (
-  <div style={{ padding: 12, background: 'var(--bg-soft)', borderRadius: 8 }}>
-    <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{label}</div>
-    <div style={{ fontSize: 18, fontWeight: 600, marginTop: 2, color: tone === 'up' ? 'var(--up)' : tone === 'down' ? 'var(--down)' : 'var(--text-1)' }}>{value}</div>
-  </div>
-);
-
-window.StpSwpScreen = StpSwpScreen;
+const SipFi

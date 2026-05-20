@@ -275,36 +275,14 @@ const PortfolioScreen = () => {
     return () => { cancelled = true; };
   }, []);
 
-  // T-242 (and T-243 alias): real per-user MF holdings from Kite Connect MF API.
-  // Was previously a CAS-upload stub. Now /api/me/mf/holdings returns the user's
-  // actual Coin holdings via kc.getMFHoldings(). Normalise the new shape into
-  // the keys the existing table rendering already uses (n/t/inv/cur).
-  // SIP per-fund is not a holdings field -- it lives on /api/me/mf/sips (the
-  // STP/SWP screen). We render '-' for that column here. Same for XIRR which
-  // needs a cashflow ledger to compute.
-  const [mf, setMf] = React.useState([]);
+  // T-248: MF state + fetch removed. Kite Connect MF API is GET-only by SEBI
+  // design and the platform never had MF placement -- read-only surface was a
+  // misleading affordance. Long-term passive investing pivots to ETF baskets
+  // at #longterm. ETF fetch retained (ETFs ARE buyable via /api/orders/place).
   const [etf, setEtf] = React.useState([]);
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        const j = await fetch('/api/me/mf/holdings', { credentials: 'include' }).then(r => r.json());
-        if (!cancelled && j && j.ok) {
-          const rows = (j.holdings || []).map(h => ({
-            n:    h.fund,
-            t:    h.isin,                                    // ISIN as the sub-line
-            sip:  null,                                       // not provided by holdings API
-            inv:  (h.quantity || 0) * (h.avgPrice || 0),     // computed invested
-            cur:  (h.quantity || 0) * (h.nav || 0),          // computed current value
-            xirr: null,                                       // needs cashflow ledger
-            folio:h.folio,                                    // for tooltip / future detail row
-            nav:  h.nav,
-            navDate: h.navDate,
-            qty:  h.quantity,
-          }));
-          setMf(rows);
-        }
-      } catch (e) { console.warn('[screen-portfolio] mf load:', e && e.message); }
       try {
         const j2 = await window.fetchApi('/api/me/portfolio/etf');
         if (!cancelled && j2 && j2.ok) setEtf(j2.holdings || []);
@@ -320,7 +298,7 @@ const PortfolioScreen = () => {
   // a cashflow ledger so it stays '—'.)
   const invested = holdings.reduce((s, h) => s + (Number(h.qty) || 0) * (Number(h.avg) || 0), 0);
   const unrealizedGain = totalEquity - invested;
-  const totalMF = mf.reduce((s, m) => s + m.cur, 0);
+  // T-248: totalMF removed alongside MF holdings table.
   const totalETF = etf.reduce((s, e) => s + e.q * e.ltp, 0);
 
   return (
@@ -328,7 +306,7 @@ const PortfolioScreen = () => {
       <div className="page-header">
         <div>
           <h1 className="page-header__title">Portfolio</h1>
-          <div className="page-header__sub">Long-term wealth — equity, mutual funds, ETFs. Fed by trading profit sweep.</div>
+          <div className="page-header__sub">Long-term wealth — equity & ETFs. Fed by trading profit sweep.</div>
         </div>
         <div className="page-header__right">
           <button className="btn"><I.download size={14}/> Statement</button>
@@ -348,7 +326,7 @@ const PortfolioScreen = () => {
       {/* T99-T98: Invested + Unrealized gain now real (derived from broker
           cost basis in holdings). XIRR still needs a cashflow ledger. */}
       <div className="grid grid-4" style={{ marginBottom: 16 }}>
-        <Card><Stat label="Long-term value" value={inrCompact(totalEquity + totalMF + totalETF)} sub="today"/></Card>
+        <Card><Stat label="Long-term value" value={inrCompact(totalEquity + totalETF)} sub="today"/></Card>
         <Card><Stat label="Invested" value={invested > 0 ? inrCompact(invested) : "—"} sub={invested > 0 ? "cost basis · equity only" : "needs broker holdings"}/></Card>
         <Card><Stat label="Unrealized gain" value={invested > 0 ? inrCompact(unrealizedGain) : "—"} sub={invested > 0 ? (totalEquity > 0 ? ((unrealizedGain / invested) * 100).toFixed(1) + "% on cost" : "—") : "needs broker holdings"}/></Card>
         <Card><Stat label="XIRR" value="—" sub="needs cashflow ledger"/></Card>
@@ -404,7 +382,8 @@ const PortfolioScreen = () => {
         </div>
       </Card>
 
-      <div className="grid grid-2" style={{ marginBottom: 16 }}>
+      {/* T-248: was grid-2 with MF as second column; collapsed to single. */}
+      <div style={{ marginBottom: 16 }}>
         <Card title="Direct equity" sub={`${holdings.length} holdings`} flush>
           <table className="table">
             <thead><tr><th>Symbol</th><th>Sector</th><th className="num-l">Qty</th><th className="num-l">Avg</th><th className="num-l">LTP</th><th className="num-l">P&L</th></tr></thead>
@@ -430,38 +409,11 @@ const PortfolioScreen = () => {
           </table>
         </Card>
 
-        <Card title="Mutual funds" sub="Active SIPs" flush>
-          {mf.length === 0 ? (
-            <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>
-              <div style={{ fontSize: 24, marginBottom: 8 }}>📈</div>
-              <div style={{ fontWeight: 500, marginBottom: 4, color: 'var(--text-2)' }}>No Coin mutual fund holdings yet</div>
-              <div style={{ fontSize: 12 }}>Holdings on Zerodha Coin appear here automatically. <a href="https://coin.zerodha.com" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--acc, var(--text-1))' }}>Open coin.zerodha.com</a> to start investing, or upload a CAS PDF if you hold MFs at other registrars.</div>
-            </div>
-          ) : (
-            <table className="table">
-              <thead><tr><th>Fund</th><th className="num-l">Units</th><th className="num-l">NAV</th><th className="num-l">Invested</th><th className="num-l">Current</th><th className="num-l">P&L</th></tr></thead>
-              <tbody>
-                {mf.map((m, i) => {
-                  const pnlVal = (m.cur || 0) - (m.inv || 0);
-                  const pnlCls = pnlVal > 0 ? 'up' : pnlVal < 0 ? 'down' : '';
-                  return (
-                    <tr key={i}>
-                      <td>
-                        <div style={{ fontWeight: 500 }}>{m.n}</div>
-                        <div className="muted" style={{ fontSize: 11 }}>{m.t}{m.folio ? ' · folio ' + m.folio : ''}</div>
-                      </td>
-                      <td className="num">{Number(m.qty || 0).toFixed(3)}</td>
-                      <td className="num">{Number(m.nav || 0).toFixed(2)}</td>
-                      <td className="num">{inrCompact(m.inv)}</td>
-                      <td className="num">{inrCompact(m.cur)}</td>
-                      <td className={"num " + pnlCls}>{pnlVal >= 0 ? '+' : ''}{inrCompact(pnlVal)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </Card>
+        {/* T-248: "Mutual funds" Card removed. Kite Connect MF API is GET-only
+            by SEBI design (bank-mandate constraint) -- platform never had MF
+            placement. Long-term passive investing pivots to ETF baskets at
+            #longterm which use NIFTYBEES/JUNIORBEES/GOLDBEES/MOM100 and ARE
+            fully buyable via /api/orders/place. */}
       </div>
 
       <Card title="ETFs" flush>
@@ -498,3 +450,4 @@ const PortfolioScreen = () => {
 };
 
 Object.assign(window, { PortfolioScreen });
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            

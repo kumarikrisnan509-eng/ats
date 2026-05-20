@@ -24,7 +24,7 @@ const ROUTES = [
   '#paper', '#backtest', '#circuits', '#lab',
   // Wealth / long-term
   '#portfolio', '#goals', '#stpswp', '#smallcase', '#fixed', '#harvest', '#tax',
-  '#brokers', '#money', '#mf', '#insights',
+  '#brokers', '#money', '#longterm', '#insights',  // T-248: #mf -> #longterm (ETF baskets)
   // Operations / AI
   '#recon', '#attribution', '#review', '#ai-keys',
 ];
@@ -73,5 +73,4 @@ test('/api/preflight returns shape', async ({ request }) => {
   expect(r.ok()).toBeTruthy();
   const j = await r.json();
   expect(j).toHaveProperty('checks');
-  expect(Array.isArray(j.checks)).toBeTruthy();
-});
+  expe

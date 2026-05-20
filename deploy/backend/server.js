@@ -23,7 +23,7 @@ const { VALID_SIDES, VALID_PRODUCTS, VALID_ORDER_TYPES, VALID_VARIETIES, VALID_V
 // T-218 (CODE-AUDIT F.5 M1.4 piece 4): /api/portfolio + /api/me/portfolio routes extracted.
 const { mountPortfolioRoutes } = require('./routes/portfolio');
 // T-241: Mutual-fund read-side endpoints (Kite Connect MF is GET-only)
-const { mountMfRoutes } = require('./routes/mf');
+// T-248: mountMfRoutes require removed (routes/mf.js deleted; 410 Gone stubs serve the URLs).
 // T-217 (CODE-AUDIT F.5 M1.4 piece 3 + A.2 fix): OAuth state-signer.
 const _oauthState = require('./services/oauth-state');
 const _pendingNonces = _oauthState._pendingNonces;
@@ -57,12 +57,12 @@ const { NseSurveillance } = require('./nse-surveillance');     // T99-E2 ASM/GSM
 const { EarningsCalendar } = require('./earnings-calendar');   // E4 NSE event-calendar feed
 const { FiiDii } = require('./fii-dii');                       // E7 NSE FII/DII activity feed
 const { BulkDeals } = require('./bulk-deals');                 // E8 NSE bulk + block deals
-const { MfData } = require('./mf-data');                       // G8 AMFI scheme master + MFAPI NAVs
+// T-248: MfData require removed -- mf-data.js can be deleted after 2026-06-19.
 let _surveillance = null;     // T99-E2 NseSurveillance instance (lazy refresh)
 let _earningsCal = null;       // E4 EarningsCalendar instance (lazy refresh)
 let _fiidii = null;             // E7 FiiDii instance (lazy refresh)
 let _bulkDeals = null;          // E8 BulkDeals instance (lazy refresh)
-let _mfData = null;             // G8 MfData instance (lazy refresh)
+// T-248: _mfData binding removed; nothing references it anymore.
 const { runBacktest, computeSignal } = require('./backtest');
 const { PaperTrading } = require('./paper');
 const { PnlAttribution } = require('./pnl-attribution');
@@ -179,9 +179,8 @@ async function init() {
   _bulkDeals = new BulkDeals({});
   _bulkDeals.refresh().catch(e => console.warn('[server] bulk-deals warm-up failed:', e.message));
 
-  // G8 mutual-fund scheme master + NAVs
-  _mfData = new MfData({});
-  _mfData.refreshMaster().catch(e => console.warn('[server] mf-data warm-up failed:', e.message));
+  // T-248: G8 MfData init removed -- scheme master + NAV refresh no longer needed
+  // now that MF endpoints are retired. Stays null so straggler refs no-op.
 
   scanner = new Scanner({
     broker,
@@ -829,15 +828,7 @@ app.get('/api/health-deep', async (_req, res) => {
       checks.bulkDealsCounts = { bulk: st.bulk, block: st.block, short: st.short };
     } else { checks.bulkDeals = false; }
   } catch (e) { checks.bulkDeals = false; }
-  // G8 MF data staleness
-  try {
-    if (_mfData) {
-      const st = _mfData.status();
-      checks.mfData = st.ready;
-      checks.mfSchemeCount = st.schemeCount;
-      checks.mfAgeMin = st.ageMs != null ? Math.round(st.ageMs / 60000) : null;
-    } else { checks.mfData = false; }
-  } catch (e) { checks.mfData = false; }
+  // T-248: G8 MF data staleness check removed (MfData retired).
 
   // T-I1: surface last DR test status (warns when >30 days old)
   try {
@@ -2024,31 +2015,25 @@ app.get('/api/me/bulk-deals/symbol/:sym', async (req, res) => {
   }
 });
 
-// ============ G8: mutual-fund search + NAV history ============
-app.get('/api/me/mf/search', async (req, res) => {
-  if (!req.user || !req.user.id) return res.status(401).json({ ok: false, reason: 'auth_required' });
-  if (!_mfData) return res.status(503).json({ ok: false, reason: 'mf_not_ready' });
-  try {
-    const q = req.query.q || '';
-    if (!q || q.length < 2) return res.json({ ok: true, q, count: 0, schemes: [] });
-    const limit = Math.max(5, Math.min(50, parseInt(req.query.limit || '20', 10)));
-    const schemes = await _mfData.search(q, { limit });
-    res.json({ ok: true, q, count: schemes.length, schemes });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: 'mf_search_failed', detail: e.message });
-  }
+// ============ T-248: ALL /api/me/mf/* endpoints retired ============
+// 6 endpoints were serving MF data: 2 inline (search + nav) using AMFI scheme
+// master (G8 MfData), 4 in routes/mf.js (holdings/sips/orders/instruments)
+// wrapping Kite Connect's MF API. All retired because Kite's MF API is
+// GET-only by Zerodha/SEBI bank-mandate design -- the platform never had
+// MF placement and the surface was a misleading affordance. Long-term
+// passive investing pivots to ETF baskets at #longterm via /api/orders/place.
+// Compat: 410 Gone for ~30 days. Drop the stubs on or after 2026-06-19.
+const _mfGone = (which) => (_req, res) => res.status(410).json({
+  ok: false, reason: 'gone', endpoint: which,
+  detail: 'MF endpoints retired in T-248. Kite Connect MF API is read-only by Zerodha/SEBI design; platform never had MF placement. Long-term investing moved to ETF baskets at #longterm. Refresh the page for the new UI.',
 });
-
-app.get('/api/me/mf/nav/:code', async (req, res) => {
-  if (!req.user || !req.user.id) return res.status(401).json({ ok: false, reason: 'auth_required' });
-  if (!_mfData) return res.status(503).json({ ok: false, reason: 'mf_not_ready' });
-  try {
-    const data = await _mfData.navHistory(req.params.code);
-    res.json({ ok: true, ...data, navs_count: data.navs.length });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: 'mf_nav_failed', detail: e.message });
-  }
-});
+app.get('/api/me/mf/search',      _mfGone('search'));
+app.get('/api/me/mf/nav/:code',   _mfGone('nav'));
+app.get('/api/me/mf/holdings',    _mfGone('holdings'));
+app.get('/api/me/mf/sips',        _mfGone('sips'));
+app.get('/api/me/mf/orders',      _mfGone('orders'));
+app.get('/api/me/mf/instruments', _mfGone('instruments'));
+app.get('/api/me/portfolio/mf',   _mfGone('portfolio_mf'));   // T-243 alias retired with the rest
 
 // ---------- P&L Attribution ----------
 // GET /api/pnl/daily?days=30 -- equity time series
@@ -2638,7 +2623,7 @@ app.get('/api/quotes', async (req, res) => {
 // Tier 58: route through user's own broker. If not connected, return empty + flag.
 
 mountPortfolioRoutes(app, { resolveUserBroker }); // T-218: was 4 inline /api/portfolio + /api/me/portfolio routes; see routes/portfolio.js
-mountMfRoutes(app, { resolveUserBroker, audit }); // T-241: /api/me/mf/{holdings,sips,orders,instruments}
+// T-248: mountMfRoutes removed (routes/mf.js deleted). 410 Gone stubs added inline below at the search/nav block for all 6 retired /api/me/mf/* + /api/me/portfolio/mf endpoints.
 
 app.get('/api/orders', async (req, res) => {
   try {
@@ -3784,7 +3769,7 @@ app.use('/api/me/ai-workflows', (req, res, next) => {
       _aiWorkflowsRouter = createAiWorkflowsRouter({
         db, vault, requireAuth: auth.requireAuth, STRATEGIES,
         brokerResolver: _brokerResolver, surveillance: _surveillance,
-        earningsCal: _earningsCal, bulkDeals: _bulkDeals, mfData: _mfData,
+        earningsCal: _earningsCal, bulkDeals: _bulkDeals, // T-248: mfData arg removed (workflow retired)
       });
       return _aiWorkflowsRouter(req, res, next);
     }
