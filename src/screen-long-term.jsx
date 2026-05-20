@@ -132,7 +132,7 @@ window.LongTermScreen = function LongTermScreen() {
           window.location.hash = '#trading';
         }
       } else {
-        setMsg(`Dry-run rejected: ${j.reason || 'unknown'}${j.detail ? ' \u2014 ' + j.detail : ''}`);
+        setMsg(`Dry-run rejected: ${j.reason || 'unknown'}${j.detail ? ' — ' + j.detail : ''}`);
       }
     } catch (e) { setMsg('Buy failed: ' + (e && e.message)); }
     finally { setBuying(null); }
@@ -143,7 +143,7 @@ window.LongTermScreen = function LongTermScreen() {
     const amtStr = window.prompt(`Monthly DCA amount for ${entry.symbol} (INR):`, '5000');
     if (!amtStr) return;
     const amt = Number(amtStr);
-    if (!Number.isFinite(amt) || amt < 100) { setMsg('Amount must be \u2265 \u20b9100'); return; }
+    if (!Number.isFinite(amt) || amt < 100) { setMsg('Amount must be ≥ ₹100'); return; }
     setDcaBusy(entry.symbol); setMsg('');
     try {
       // First GET current SIPs, then PUT the new list (the API is replace-all)
@@ -169,7 +169,7 @@ window.LongTermScreen = function LongTermScreen() {
       });
       const j = await r.json().catch(() => ({}));
       if (r.ok && j.ok) {
-        setMsg(`DCA scheduled: \u20b9${amt}/mo into ${entry.symbol} on day 5. See #stpswp.`);
+        setMsg(`DCA scheduled: ₹${amt}/mo into ${entry.symbol} on day 5. See #stpswp.`);
       } else {
         setMsg(`DCA save failed: ${j.reason || 'unknown'}`);
       }
@@ -221,7 +221,7 @@ window.LongTermScreen = function LongTermScreen() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
                   <div style={{ fontSize: 16, fontWeight: 600 }}>{entry.symbol}</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{entry.title} \u00b7 {entry.issuer}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{entry.title} · {entry.issuer}</div>
                 </div>
                 <span style={{
                   padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 500, textTransform: 'uppercase',
@@ -235,7 +235,7 @@ window.LongTermScreen = function LongTermScreen() {
                 <div>
                   <div style={{ textTransform: 'uppercase', fontSize: 9, letterSpacing: 0.5 }}>LTP</div>
                   <div style={{ fontSize: 13, color: 'var(--text-1)', fontFamily: 'var(--mono, monospace)' }}>
-                    {q && q.ltp ? '\u20b9' + Number(q.ltp).toFixed(2) : '\u2014'}
+                    {q && q.ltp ? '₹' + Number(q.ltp).toFixed(2) : '—'}
                   </div>
                   {q && q.changePct != null && Math.abs(q.changePct) > 0.001 && (
                     <div style={{ fontSize: 10, color: q.changePct >= 0 ? 'var(--up)' : 'var(--down)', fontFamily: 'var(--mono, monospace)' }}>
@@ -266,7 +266,7 @@ window.LongTermScreen = function LongTermScreen() {
                   }}
                   title="Schedule a monthly DCA buy via /api/sip"
                 >
-                  {dcaBusy === entry.symbol ? '\u2026' : '+ Auto-DCA'}
+                  {dcaBusy === entry.symbol ? '…' : '+ Auto-DCA'}
                 </button>
               </div>
             </div>
@@ -292,7 +292,7 @@ const BuyControl = ({ entry, onBuy, busy }) => {
         background: busy ? 'var(--bg-sunk)' : 'var(--accent, #38a169)',
         color: 'white', border: 'none', borderRadius: 4,
         cursor: busy ? 'wait' : 'pointer',
-      }}>{busy ? 'Checking\\u2026' : 'Buy'}</button>
+      }}>{busy ? 'Checking…' : 'Buy'}</button>
     </div>
   );
 };
