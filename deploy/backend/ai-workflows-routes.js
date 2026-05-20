@@ -973,4 +973,4 @@ Rules:
   return router;
 }
 
-module.exports
+module.exports = { createAiWorkflowsRouter, buildCritiquePrompt, buildExplainPrompt };
