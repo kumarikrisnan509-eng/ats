@@ -328,12 +328,24 @@ const TopBar = ({ title, crumb, theme, setTheme, setRoute }) => {
         <div className="top__title">{title}</div>
       </div>
 
+      {/* T-232b: the .top__search CSS in index.html styles `.top__search input`
+          for the visual (padding/border/background), but the JSX renders a
+          <button> with <span>s -- no <input>. So the CSS never applied and
+          the icon (absolute, left:10px) overlapped the placeholder text
+          (which had no padding-left). Reproduce the intended look inline so
+          the button doesn't depend on a child that no longer exists. */}
       <button
         type="button"
         className="top__search"
         onClick={() => window.dispatchEvent(new CustomEvent("open-palette"))}
         title="Open command palette"
-        style={{ cursor: "pointer", textAlign: "left" }}
+        style={{
+          cursor: "pointer", textAlign: "left",
+          display: "flex", alignItems: "center", gap: 8,
+          padding: "8px 12px 8px 34px",
+          background: "var(--surface)", border: "1px solid var(--border)",
+          borderRadius: "var(--r-md)", fontSize: 13, lineHeight: 1.2,
+        }}
       >
         <I.search size={14}/>
         <span style={{ flex: 1, color: "var(--text-3)", fontSize: 13 }}>Search pages, actions, symbols…</span>
