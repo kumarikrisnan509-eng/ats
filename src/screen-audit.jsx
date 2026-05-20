@@ -3,11 +3,20 @@
    Filterable, exportable, immutable. Required for SEBI compliance + post-mortem. */
 
 
-// T-208 (CODE-AUDIT F.5 M2.4): visible "data unavailable" pill. Renders
+// T-208 (CODE-AUDIT F.5 M2.4) + T-231 (P0 FIX): visible "data unavailable" pill. Renders
 // only when the primary data fetch fails. Conservative inline component
 // so this commit doesn't touch shared primitives; the pattern can be
 // hoisted later if it spreads to more screens.
-const _LoadErrPill = ({ err, onRetry }) => {
+//
+// T-231: const was originally `_LoadErrPill` in all 3 files (paper/audit/recon
+// were considered but only audit/recon/harvest got it). Classic <script> tags
+// share top-level `const` scope -- the 2nd file to load threw SyntaxError
+// "Identifier already declared", which killed the script, which left the
+// screen-X global undefined, which broke app.js render with ReferenceError
+// (HarvestScreen is not defined). Renamed to file-unique names. The fix
+// could also use IIFE wrapping or a shared module, but renaming is the
+// minimal change.
+const _AuditLoadErrPill = ({ err, onRetry }) => {
   if (!err) return null;
   return (
     <div style={{
@@ -160,7 +169,7 @@ const AuditScreen = () => {
 
   return (
     <>
-      <_LoadErrPill err={loadErr} />
+      <_AuditLoadErrPill err={loadErr} />
       <div className="page-header">
         <div>
           <h1 className="page-header__title">Order audit trail</h1>
