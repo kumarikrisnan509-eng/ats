@@ -75,6 +75,92 @@ const MockData = {
 
 window.MockData = MockData;
 
+// ---------- T-246 (CODE-AUDIT F.5 M2.1 phase 1): CSRF token pre-flight ----------
+//
+// The backend's T-205 soft-fail middleware audits any mutating /api/* request
+// that lacks an X-CSRF-Token header but lets it through. This client-side
+// pre-flight (a) loads the token from /api/csrf-token on app boot and (b)
+// monkey-patches window.fetch so EVERY mutating call (POST/PUT/PATCH/DELETE)
+// to a same-origin URL automatically carries the header.
+//
+// Touching window.fetch directly (rather than just window.fetchApi) means we
+// also cover the dozens of bare fetch() call sites across screen-*.jsx files
+// without having to touch each one. Third-party fetch URLs (unpkg, fonts,
+// telegram-bridge, etc.) are skipped by the same-origin check.
+//
+// After this ships and the soft-fail audit log goes quiet for legitimate
+// users, a follow-up commit (T-247) flips the backend middleware to return
+// 403 csrf_token_invalid on missing/wrong tokens.
+
+(function setupCsrfPreflight() {
+  // Step 1: load the token. Auth-gated (returns 401 if not signed in), so we
+  // accept that gracefully -- unauthenticated mutations are blocked elsewhere
+  // anyway. Cache the promise so concurrent first-mutations all share one
+  // fetch.
+  let _csrfTokenPromise = null;
+  function ensureCsrfToken() {
+    if (window._csrfToken) return Promise.resolve(window._csrfToken);
+    if (_csrfTokenPromise) return _csrfTokenPromise;
+    _csrfTokenPromise = fetch('/api/csrf-token', { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(j => { window._csrfToken = j && j.csrfToken || null; return window._csrfToken; })
+      .catch(() => { _csrfTokenPromise = null; return null; });
+    return _csrfTokenPromise;
+  }
+  // Kick it off at boot so subsequent mutations don't all wait for a fresh
+  // round-trip. Fires once, harmless if it fails (anonymous users just don't
+  // get a token, and CSRF middleware skips anonymous requests anyway).
+  ensureCsrfToken();
+  // Re-fetch the token when the auth state changes (login/logout). The auth
+  // module dispatches `ats-auth-changed` on these transitions (see app.jsx).
+  window.addEventListener('ats-auth-changed', () => {
+    window._csrfToken = null;
+    _csrfTokenPromise = null;
+    ensureCsrfToken();
+  });
+
+  // Step 2: monkey-patch fetch. Synchronous part: same-origin + mutating
+  // method detection. Async part: if we don't have the token yet, await
+  // ensureCsrfToken() then attach. Falls back to the original fetch if
+  // anything goes wrong.
+  const _origFetch = window.fetch.bind(window);
+  function isMutating(method) {
+    const m = (method || 'GET').toUpperCase();
+    return m === 'POST' || m === 'PUT' || m === 'PATCH' || m === 'DELETE';
+  }
+  function isSameOriginUrl(url) {
+    if (typeof url !== 'string') {
+      try { url = (url && url.url) || ''; } catch (_) { url = ''; }
+    }
+    if (!url) return false;
+    // Relative paths are always same-origin
+    if (url.startsWith('/') && !url.startsWith('//')) return true;
+    try {
+      const u = new URL(url, location.href);
+      return u.origin === location.origin;
+    } catch (_) { return false; }
+  }
+  window.fetch = function csrfFetch(input, init) {
+    const safeInit = init || {};
+    if (!isMutating(safeInit.method) || !isSameOriginUrl(input)) {
+      return _origFetch(input, safeInit);
+    }
+    // Existing X-CSRF-Token wins (e.g. tests that pre-set it).
+    const existingHeaders = new Headers(safeInit.headers || {});
+    if (existingHeaders.has('X-CSRF-Token')) return _origFetch(input, safeInit);
+    // Attach. If the token isn't ready yet, await and retry once.
+    return ensureCsrfToken().then(token => {
+      if (token) {
+        existingHeaders.set('X-CSRF-Token', token);
+        return _origFetch(input, { ...safeInit, headers: existingHeaders });
+      }
+      // No token (anonymous or token endpoint failed) -- proceed without; the
+      // backend's soft-fail middleware will audit but allow.
+      return _origFetch(input, safeInit);
+    });
+  };
+})();
+
 // ---------- Tiny fetch helper for screens migrating off hardcoded arrays ----------
 // Returns parsed JSON or throws. Screens typically wrap with try/catch and fall back
 // to MockData.* when isDemoOn().
