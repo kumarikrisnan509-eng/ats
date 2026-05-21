@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* Trading Modes screen — master controls for Intraday / Swing / Options / Futures */
 
 const ModesScreen = () => {
@@ -188,7 +189,7 @@ const ModesScreen = () => {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                 <div>
                   <div className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 0.4 }}>Today</div>
-                  <div className="mono" style={{ fontSize: 14, fontWeight: 500 }} className={rt.todayPnl > 0 ? "up mono" : rt.todayPnl < 0 ? "down mono" : "mono muted"}>
+                  <div style={{ fontSize: 14, fontWeight: 500 }} className={rt.todayPnl > 0 ? "up mono" : rt.todayPnl < 0 ? "down mono" : "mono muted"}>
                     {rt.todayPnl >= 0 ? "+" : ""}{window.inrCompact ? window.inrCompact(rt.todayPnl) : "₹" + rt.todayPnl.toLocaleString("en-IN")}
                   </div>
                 </div>

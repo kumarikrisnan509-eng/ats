@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* T-274 -- Risk Cockpit screen (Phase 2 of the vision doc).
  *
  * Read-only dashboard surfacing GET /api/me/portfolio/aggregates. Becomes the

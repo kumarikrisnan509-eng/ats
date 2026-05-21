@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* Paper Trading screen — Stage 2 of the pipeline */
 
 

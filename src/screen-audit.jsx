@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* Order Audit Trail — every order's full lifecycle: signal → decision → submit → fills → settlement.
    Filterable, exportable, immutable. Required for SEBI compliance + post-mortem. */
 

@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* T-262 — Risk Management config screen.
  *
  * Replaces scripts/SETUP-TRADING.cmd with a real Settings -> Risk Management

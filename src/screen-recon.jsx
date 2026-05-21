@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* Broker reconciliation — daily match between our books vs broker contract notes.
    Critical for tax filing and catching any order/fill/fee discrepancy. */
 

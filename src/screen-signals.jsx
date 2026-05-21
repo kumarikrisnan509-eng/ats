@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 
 // Phase 2 / E6: Live Scanner row with on-demand /critique-rich call.
 function SignalRow({ sig, isFirst }) {

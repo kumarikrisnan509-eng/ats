@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* Tier 69-70: Aladdin-style insights panel.
    - Live risk metrics from /api/me/risk-metrics
    - Factor exposure + concentration warnings from /api/me/factor-exposure

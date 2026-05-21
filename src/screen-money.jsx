@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* Money — the heart of the wealth loop.
    AI Signal -> Paper trade -> Live trade -> PROFITS -> Reinvest long-term.
    This screen is the "PROFITS -> Reinvest" hub. Three sections:

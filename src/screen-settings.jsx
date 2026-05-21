@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* Tier 85: Settings page polish — sticky side-nav, 2-col layout, sticky save bar,
    section icons, custom time picker, skeleton loaders, danger zone visual treatment,
    inline Test buttons for notification channels, mobile responsive. */

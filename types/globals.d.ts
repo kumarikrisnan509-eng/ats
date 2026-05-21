@@ -19,12 +19,11 @@ interface Window {
   [key: string]: any;
 }
 
-// Our screens use these helpers via window-export; treating them as `any`
-// avoids cascade errors when typechecking partial-adoption files.
-declare const _inr: any;
-declare const _fmtTime: any;
-declare const _fmtDate: any;
-declare const _pnlColor: any;
+// Phase B-1 originally declared _inr/_fmtTime/_fmtDate/_pnlColor as
+// ambient globals here. Those have been removed because screens now either
+// IIFE-wrap their own copy (T-274c pattern) or declare them at top level;
+// the ambient declarations conflicted with TS2451 "Cannot redeclare
+// block-scoped variable".
 
 // Phase B-3: cross-file globals exported via the window-namespace pattern.
 // Every .jsx ships as its own <script>; primitives, formatters, icons, and
@@ -75,3 +74,29 @@ declare const useLivePnL: any;
 declare const useLiveTick: any;
 declare const useConnectionState: any;
 declare const seriesRandom: any;
+
+
+// Phase B-4: JSX permissive component-prop typing.
+// Our 52 .jsx files declare local components like
+//   const MetricRow = ({ label, value, hint }) => ...
+// TypeScript infers MetricRow as REQUIRING {label, value, hint}, so any
+// call site that omits one fails with TS2741. In a window-globals app
+// where the same component is reused with different prop subsets, that
+// strictness is noise, not signal. The shape-mismatch bug class we
+// actually care about (UI reads r.regime as string when backend ships
+// {label,confidence}) is caught by the api-shapes.d.ts typedefs on
+// fetch() returns, not by component-prop strictness.
+//
+// React uses LibraryManagedAttributes to derive a JSX element's expected
+// props from a component's declared props. Mapping it to `any` tells tsc
+// "any props are fine for any component," which lets us @ts-check screens
+// without making every local component perfectly polymorphic by hand.
+
+declare namespace JSX {
+  interface IntrinsicElements { [k: string]: any }
+  type Element = any;
+  type ElementClass = any;
+  type ElementAttributesProperty = { props: any };
+  type ElementChildrenAttribute = { children: any };
+  type LibraryManagedAttributes<C, P> = any;
+}

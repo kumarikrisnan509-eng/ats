@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* STP / SWP — Tier 19: live SIP manager + SWP simulator backed by /api/sip + /api/swp/simulate.
    Replaces the prior fully-hardcoded version. Spec §2 Stage 5: "SIP manager — scheduled mutual fund / direct equity / ETF investments" + "Retirement withdrawal simulator — SWP modelling, safe withdrawal rate under Indian tax regime".
 */

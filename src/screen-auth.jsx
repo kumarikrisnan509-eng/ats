@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* Tier 67: Auth screens redesigned with two-panel layout, password strength meter,
    show/hide password toggles, inline validation, anti-enumeration messaging.
    Single component handles 5 modes: login, signup, forgot, reset, verify.

@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* Brokers screen — broker adapter pattern.
    Tier 57: per-user broker credentials. Each user can connect their own Zerodha (or other broker)
             from this screen. Credentials are libsodium-sealed server-side and never returned.
