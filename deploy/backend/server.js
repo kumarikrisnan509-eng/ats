@@ -1238,8 +1238,27 @@ function authMiddleware(req, res, next) {
   next();
 }
 
+// T-261 (P0 INCIDENT FIX): public auth endpoints MUST bypass the bearer gate.
+// Otherwise users can't sign up, log in, log out, verify email, or reset their
+// password — every POST gets blocked with 401 missing_bearer the moment
+// ATS_OPS_KEY is set in backend.env. (Discovered when T-254 enabled the key
+// in prod, locking out the operator's own account for ~12h.)
+//
+// These paths run their own cookie/session/CSRF stack; gating them with the
+// ops bearer makes zero sense.
+const PUBLIC_AUTH_PATHS = new Set([
+  '/auth/signup',
+  '/auth/login',
+  '/auth/logout',
+  '/auth/verify-email',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+]);
+
 // Apply: gate all mutating methods + /api/audit
 app.use('/api', (req, res, next) => {
+  // T-261: skip bearer check for public auth endpoints.
+  if (PUBLIC_AUTH_PATHS.has(req.path)) return next();
   if (req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE' || req.method === 'PATCH') {
     return authMiddleware(req, res, next);
   }
@@ -4703,29 +4722,4 @@ setTimeout(() => {
   } catch (err) {
     console.error('FATAL boot error:', err);
     audit('server.bootError', { msg: err.message });
-    process.exit(1);
-  }
-})();
-
-// ---------- Shutdown ----------
-function shutdown(sig) {
-  audit('server.stop', { signal: sig });
-  console.log(`\nCaught ${sig}, shutting down...`);
-  Promise.resolve(broker && broker.stop()).finally(() => {
-    server.close(() => process.exit(0));
-    setTimeout(() => process.exit(1), 10000).unref();
-  });
-}
-process.on('SIGINT',  () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-
-process.on('unhandledRejection', (r) => {
-  audit('error.unhandledRejection', { reason: String(r) });
-  console.error('unhandledRejection:', r);
-});
-process.on('uncaughtException', (e) => {
-  audit('error.uncaughtException', { message: e.message, stack: e.stack });
-  console.error('uncaughtException:', e);
-  process.exit(1);
-});
- 
+    process.exit(1)
