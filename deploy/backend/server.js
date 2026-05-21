@@ -66,6 +66,8 @@ const mountOptionChainRoutes = require('./routes/option-chain');
 const { OptionsScanner } = require('./services/options-scanner');
 // T-294b: rollupOptionGreeks helper from portfolio-aggregates.
 const { rollupOptionGreeks } = require('./services/portfolio-aggregates');
+// T-302a/T-303a: signal calibration + auto-retire recommender (pure service).
+const { createSignalCalibration } = require('./services/signal-calibration');
 const http    = require('http');
 const fs      = require('fs');
 const path    = require('path');
@@ -168,7 +170,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, db, auth, rebalance, replay, emailAlerts, whatsAppAlerts, riskConfigService, sipRunner, portfolioAggregates, regimeDetector, attribution, slippageTracker, preTradeCheck, optionChainFetcher, optionsScanner;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, db, auth, rebalance, replay, emailAlerts, whatsAppAlerts, riskConfigService, sipRunner, portfolioAggregates, regimeDetector, attribution, slippageTracker, preTradeCheck, optionChainFetcher, optionsScanner, signalCalibration;
 
 async function init() {
   broker = createBroker(process.env);
@@ -497,6 +499,19 @@ async function init() {
   } catch (e) {
     console.error('!! optionsScanner init failed:', e.message);
     optionsScanner = null;
+  }
+
+  // T-302a/T-303a: signal calibration + auto-retire recommender. Pure: just
+  // takes injected readers; no DB handle, no engine touch.
+  try {
+    signalCalibration = createSignalCalibration({
+      getClosedTrades:    (n) => paper ? paper.trades(n || 2000) : [],
+      getAutorunHistory:  (n) => autorun ? autorun.history(n || 1000) : [],
+    });
+    console.log('[server] signal calibration armed (advisory only -- never auto-retires)');
+  } catch (e) {
+    console.error('!! signalCalibration init failed:', e.message);
+    signalCalibration = null;
   }
 
     wormAudit = new WormAudit({
@@ -4345,6 +4360,28 @@ app.post('/api/options/opportunities/:id/review', (req, res) => {
     res.status(500).json({ ok: false, reason: e.message });
   }
 });
+// T-302a/T-303a: signal calibration + auto-retire recommendation read endpoints
+app.get('/api/me/calibration', (req, res) => {
+  if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
+  if (!signalCalibration) return res.status(503).json({ ok: false, reason: 'signal_calibration_not_initialized' });
+  const windowDays = Math.max(1, Math.min(365, parseInt(req.query.windowDays, 10) || 30));
+  try {
+    res.json({ ok: true, windowDays, calibration: signalCalibration.calibrate(windowDays) });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+app.get('/api/me/recommend-retire', (req, res) => {
+  if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
+  if (!signalCalibration) return res.status(503).json({ ok: false, reason: 'signal_calibration_not_initialized' });
+  const windowDays = Math.max(1, Math.min(365, parseInt(req.query.windowDays, 10) || 30));
+  try {
+    res.json({ ok: true, ...signalCalibration.recommend(windowDays) });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
 app.get('/api/options/scanner/status', (req, res) => {
   if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
   res.json({

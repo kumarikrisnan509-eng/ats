@@ -31,6 +31,7 @@ const TITLES = {
   sip:        ["System",       "SIP plan & history"],
   attribution:["System",       "Daily attribution"],
   slippage:   ["System",       "Slippage tracker"],
+  calibration:["System",       "Strategy calibration"],
   'ai-keys':  ["System",       "AI providers"],
 };
 
@@ -228,6 +229,7 @@ function App() {
     sip:        window.SipScreen ? <window.SipScreen/> : null,
     attribution: window.AttributionScreen ? <window.AttributionScreen/> : null,
     slippage:   window.SlippageScreen ? <window.SlippageScreen/> : null,
+    calibration: window.CalibrationScreen ? <window.CalibrationScreen/> : null,
   };
 
   const [crumb, title] = TITLES[route] || TITLES.dashboard;
