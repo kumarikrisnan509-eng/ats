@@ -61,6 +61,11 @@ function mountOrdersRoutes(app, deps) {
     // (env-only gating). When present, paper-mode users are blocked from live
     // order placement even with KILL_SWITCH off + LIVE_TRADING on.
     getRiskConfig,
+    // T-273: consolidated pre-trade pipeline. If provided, replaces the
+    // KILL_SWITCH + LIVE_TRADING + tradingMode inline gates AND adds the
+    // new leverage + sector concentration gates. Backward compatible: when
+    // absent, the existing inline gates still apply.
+    getPreTradeCheck,
   } = deps;
 
   // ---------- /api/orders/dry-run (moved here in T-223 piece 6a) ----------
@@ -144,6 +149,31 @@ function mountOrdersRoutes(app, deps) {
       rationale:   body.rationale ? String(body.rationale).slice(0, 500) : null,
     };
 
+    // T-273: consolidated pre-trade pipeline. If wired, this single call
+    // replaces the next THREE gates (KILL_SWITCH, LIVE_TRADING, tradingMode)
+    // and adds two more (leverage, sector concentration). When the dep is
+    // absent (e.g. older deploy or test config), the legacy inline gates
+    // below still fire -- always have a backstop, never depend on a service
+    // being initialised for safety.
+    const _pt = (typeof getPreTradeCheck === 'function') ? getPreTradeCheck() : null;
+    if (_pt && typeof _pt.check === 'function') {
+      const verdict = _pt.check({ userId: req.user && req.user.id, payload: normalizedPayload });
+      if (!verdict.ok) {
+        audit('order.blocked.preTrade', { ...normalizedPayload, reason: verdict.reason });
+        return res.status(verdict.status || 503).json({
+          ok: false,
+          reason: verdict.reason,
+          message: verdict.message,
+          detail: verdict.detail,
+          clientOrderId,
+          validatedPayload: normalizedPayload,
+        });
+      }
+      // All gates passed -- skip the legacy inline checks below. They're
+      // duplicates of GATES 1-3 in pre-trade.js and would be no-ops anyway,
+      // but the early-return avoids running them twice.
+    } else {
+      // ---- Legacy inline gates (fallback when preTradeCheck unavailable) ----
     // Hard safety: while kill-switch is on, NEVER route to broker. Just audit.
     if (KILL_SWITCH) {
       audit('order.blocked.killSwitch', normalizedPayload);
@@ -197,6 +227,7 @@ function mountOrdersRoutes(app, deps) {
         audit('order.riskConfigLookup.failed', { msg: e.message, userId: req.user.id });
       }
     }
+    } // close T-273 else fallback
 
     // Tier 15 pre-trade risk-gate #1: order-rate circuit
     if (!_orderRateOk()) {

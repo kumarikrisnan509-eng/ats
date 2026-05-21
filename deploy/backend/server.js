@@ -42,6 +42,12 @@ const { createSipRunner } = require('./services/sip-runner');
 const { createPortfolioAggregates } = require('./services/portfolio-aggregates');
 // T-280: market regime detector (Phase 3).
 const { createRegimeDetector } = require('./services/regime-detector');
+// T-283: daily performance attribution (Phase 3 close-out).
+const { createAttribution } = require('./services/attribution');
+// T-300: slippage observational service (Phase 5 kickoff).
+const { createSlippageTracker } = require('./services/slippage-tracker');
+// T-273: consolidated pre-trade gate pipeline.
+const { createPreTradeCheck } = require('./services/pre-trade');
 // T-268: full notify namespace (AutoRunner needs notify.notifyOrderPlaced etc).
 const _notifyModule = require('./notify');
 const _tradeEconomics = createTradeEconomics();
@@ -155,7 +161,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, db, auth, rebalance, replay, emailAlerts, whatsAppAlerts, riskConfigService, sipRunner, portfolioAggregates, regimeDetector;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, db, auth, rebalance, replay, emailAlerts, whatsAppAlerts, riskConfigService, sipRunner, portfolioAggregates, regimeDetector, attribution, slippageTracker, preTradeCheck;
 
 async function init() {
   broker = createBroker(process.env);
@@ -366,6 +372,55 @@ async function init() {
   } catch (e) {
     console.error('!! regimeDetector init failed:', e.message);
     regimeDetector = null;
+  }
+
+  // T-283: daily attribution writer (post-close 16:00 IST snapshot)
+  try {
+    if (paper) {
+      attribution = createAttribution({
+        getTrades:               (n) => paper.trades ? paper.trades(n) : [],
+        getAutorunHistory:       (n) => autorun ? autorun.history(n) : [],
+        getRegime:               () => null,   // sync only; regime fetch is async, skipped in snapshot v1
+        getPortfolioAggregates:  () => portfolioAggregates ? portfolioAggregates.compute() : null,
+        storePath: process.env.ATTRIBUTION_PATH || '/var/lib/ats/tokens/_attribution.jsonl',
+        audit,
+      });
+      attribution.start();
+      console.log('[server] daily attribution armed (16:00 IST snapshot)');
+    }
+  } catch (e) {
+    console.error('!! attribution init failed:', e.message);
+    attribution = null;
+  }
+
+  // T-300: slippage tracker (observational read service)
+  try {
+    if (paper) {
+      slippageTracker = createSlippageTracker({
+        getTrades: (n) => paper.trades ? paper.trades(n) : [],
+        getOrders: ()  => paper.list   ? paper.list()    : [],
+      });
+      console.log('[server] slippage tracker armed');
+    }
+  } catch (e) {
+    console.error('!! slippageTracker init failed:', e.message);
+    slippageTracker = null;
+  }
+
+  // T-273: pre-trade pipeline (consolidates KILL_SWITCH + LIVE_TRADING +
+  // tradingMode + new leverage + sector gates). routes/orders.js delegates
+  // to this; autorun.js still has its own 8-gate chain (different concerns).
+  try {
+    preTradeCheck = createPreTradeCheck({
+      KILL_SWITCH, LIVE_TRADING,
+      getRiskConfig: (userId) => riskConfigService ? riskConfigService.cachedGet(userId) : null,
+      getPortfolioAggregates: () => portfolioAggregates ? portfolioAggregates.compute() : null,
+      audit,
+    });
+    console.log('[server] pre-trade pipeline armed (3 legacy + 2 new gates)');
+  } catch (e) {
+    console.error('!! preTradeCheck init failed:', e.message);
+    preTradeCheck = null;
   }
 
     wormAudit = new WormAudit({
@@ -4230,6 +4285,28 @@ app.get('/api/me/regime/history', (req, res) => {
   res.json({ ok:true, history: regimeDetector.history(n) });
 });
 
+// T-283: daily attribution snapshots
+app.get('/api/me/attribution', (req, res) => {
+  if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
+  if (!attribution) return res.status(503).json({ ok:false, reason:'attribution_not_initialized' });
+  const n = Math.max(1, Math.min(365, parseInt(req.query.n, 10) || 30));
+  res.json({ ok:true, recent: attribution.recent(n), stats: attribution.stats() });
+});
+app.post('/api/me/attribution/snapshot', (req, res) => {
+  if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
+  if (!attribution) return res.status(503).json({ ok:false, reason:'attribution_not_initialized' });
+  try { res.json({ ok:true, row: attribution.snapshot() }); }
+  catch (e) { res.status(500).json({ ok:false, reason: e.message }); }
+});
+
+// T-300: slippage analytics
+app.get('/api/me/slippage', (req, res) => {
+  if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
+  if (!slippageTracker) return res.status(503).json({ ok:false, reason:'slippage_tracker_not_initialized' });
+  try { res.json({ ok:true, slippage: slippageTracker.compute() }); }
+  catch (e) { res.status(500).json({ ok:false, reason: e.message }); }
+});
+
 app.get('/api/security/my-ip', (req, res) => {
   const xrip = req.headers['x-real-ip'];
   const xff  = req.headers['x-forwarded-for'];
@@ -4471,6 +4548,9 @@ mountOrdersRoutes(app, {
   // T-277: per-user trading-mode guard. Live orders are refused when the
   // operator's risk config says tradingMode='paper'.
   getRiskConfig: (userId) => riskConfigService ? riskConfigService.cachedGet(userId) : null,
+  // T-273: consolidated pre-trade pipeline. orders.js uses this if available;
+  // otherwise falls back to the inline gates (backward-compatible).
+  getPreTradeCheck: () => preTradeCheck,
 });
 
 // Tier 38: confirm a 2FA-pending order. Replays the held payload through
