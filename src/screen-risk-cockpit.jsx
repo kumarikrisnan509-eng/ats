@@ -55,6 +55,9 @@ const SECTOR_COLOURS = {
 
 window.RiskCockpitScreen = function RiskCockpitScreen() {
   const [data, setData] = React.useState(null);
+  const [regime, setRegime] = React.useState(null);     // T-280: market regime banner
+  const [stress, setStress] = React.useState(null);     // T-275: scenario stress preview
+  const [shockPct, setShockPct] = React.useState(-3);
   const [error, setError] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
   const [lastUpdated, setLastUpdated] = React.useState(null);
@@ -76,11 +79,35 @@ window.RiskCockpitScreen = function RiskCockpitScreen() {
     }
   };
 
+  const fetchRegime = async () => {
+    try {
+      const r = await window.fetchApi('/api/me/regime');
+      if (r && r.ok) setRegime(r.regime);
+    } catch (_e) { /* non-critical */ }
+  };
+
+  const fetchStress = async (pct) => {
+    try {
+      const r = await window.fetchApi('/api/me/portfolio/stress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ broadPct: Number(pct) || 0 }),
+      });
+      if (r && r.ok) setStress(r.stress);
+    } catch (_e) { /* non-critical */ }
+  };
+
   React.useEffect(() => {
     fetchAggregates();
-    const t = setInterval(fetchAggregates, 30000);
+    fetchRegime();
+    fetchStress(shockPct);
+    const t = setInterval(() => { fetchAggregates(); fetchRegime(); }, 30000);
     return () => clearInterval(t);
   }, []);
+
+  React.useEffect(() => {
+    if (data) fetchStress(shockPct);
+  }, [shockPct, data && data.positionCount]);
 
   if (loading && !data) {
     return <div style={{ padding: 24, color: 'var(--text-3)' }}>Loading risk cockpit...</div>;
@@ -116,6 +143,29 @@ window.RiskCockpitScreen = function RiskCockpitScreen() {
         </div>
         <button onClick={fetchAggregates} style={_btnStyle}>Refresh</button>
       </div>
+
+      {regime && (
+        <div style={{
+          padding: '10px 14px', marginBottom: 16,
+          background: _regimeBgColor(regime.regime),
+          border: `1px solid ${_regimeBorderColor(regime.regime)}`,
+          borderRadius: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <div>
+            <strong style={{ fontSize: 13, color: _regimeTextColor(regime.regime), textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              Regime: {regime.regime}
+            </strong>
+            <span style={{ marginLeft: 12, fontSize: 12, color: 'var(--text-3)' }}>
+              confidence {(regime.confidence * 100).toFixed(0)}%
+              {regime.inputs && regime.inputs.vix != null && ` · VIX ${regime.inputs.vix}`}
+              {regime.inputs && regime.inputs.niftyClose != null && ` · NIFTY ${regime.inputs.niftyClose}`}
+            </span>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-4)', maxWidth: 480, textAlign: 'right' }}>
+            {Array.isArray(regime.reasoning) && regime.reasoning.length > 0 ? regime.reasoning[0] : ''}
+          </div>
+        </div>
+      )}
 
       {/* KPI row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 20 }}>
@@ -238,8 +288,38 @@ window.RiskCockpitScreen = function RiskCockpitScreen() {
         </div>
       </div>
 
+      {stress && positions.length > 0 && (
+        <section style={{ ..._panelStyle, marginTop: 20 }}>
+          <div style={_panelHeader}>Scenario stress test</div>
+          <div style={{ padding: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: 'var(--text-2)' }}>Broad market shock (%):</label>
+              <input type="range" min="-15" max="15" step="0.5"
+                value={shockPct}
+                onChange={e => setShockPct(Number(e.target.value))}
+                style={{ flex: 1 }}
+              />
+              <span style={{ fontSize: 14, fontWeight: 600, color: shockPct < 0 ? 'var(--down, #b91c1c)' : (shockPct > 0 ? 'var(--up, #15803d)' : 'var(--text-1)'), minWidth: 50, textAlign: 'right' }}>
+                {shockPct > 0 ? '+' : ''}{shockPct}%
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: 24, fontSize: 13, flexWrap: 'wrap' }}>
+              <span style={{ color: 'var(--text-3)' }}>
+                Portfolio would move <strong style={{ color: _pnlColor(stress.portfolioMovePct) }}>{_pct(stress.portfolioMovePct)}</strong>
+              </span>
+              <span style={{ color: 'var(--text-3)' }}>
+                Hypothetical PnL: <strong style={{ color: _pnlColor(stress.totalShockPnl) }}>{_inr(stress.totalShockPnl)}</strong>
+              </span>
+              <span style={{ color: 'var(--text-3)' }}>
+                from baseline {_inr(stress.totalBaselineMV)} to {_inr(stress.totalShockedMV)}
+              </span>
+            </div>
+          </div>
+        </section>
+      )}
+
       <div style={{ marginTop: 16, padding: 12, fontSize: 11, color: 'var(--text-4)', textAlign: 'center' }}>
-        T-272 + T-274 (Phase 2 of the vision doc). Schema: <code>{data._schema}</code>. Equity-only — option Greeks (delta/vega/theta) come in Phase 4.
+        T-272 + T-274 + T-275 + T-280 (Phase 2 + Phase 3 partial). Schema: <code>{data._schema}</code>. Equity-only -- option Greeks (delta/vega/theta) come in Phase 4.
       </div>
     </div>
   );
@@ -265,6 +345,20 @@ const SectorPill = ({ sector }) => (
     background: SECTOR_COLOURS[sector] || SECTOR_COLOURS.other,
   }}>{sector}</span>
 );
+
+// T-280: regime banner colour helpers.
+const _regimeBgColor = (r) => ({
+  bull: '#dcfce7', bear: '#fee2e2', neutral: '#f5f5f5',
+  volatile: '#fef9c3', crisis: '#fecaca',
+})[r] || '#f5f5f5';
+const _regimeBorderColor = (r) => ({
+  bull: '#15803d', bear: '#b91c1c', neutral: '#a3a3a3',
+  volatile: '#a16207', crisis: '#991b1b',
+})[r] || '#a3a3a3';
+const _regimeTextColor = (r) => ({
+  bull: '#15803d', bear: '#b91c1c', neutral: '#525252',
+  volatile: '#a16207', crisis: '#991b1b',
+})[r] || '#525252';
 
 const _btnStyle = {
   padding: '6px 12px', fontSize: 12, fontWeight: 500,

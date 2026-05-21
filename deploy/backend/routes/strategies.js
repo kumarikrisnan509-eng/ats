@@ -237,10 +237,70 @@ const STRATEGIES = [
   },
 ];
 
+// T-281 -- strategy -> preferred market regime mapping.
+//
+// Sits next to the strategy registry (not embedded in each object) to keep the
+// existing entries untouched and avoid a 22-way edit. The regime detector
+// (T-280) outputs one of bull|bear|neutral|volatile|crisis; the autorun strategy
+// selector consults this map to decide which strategies are eligible to fire
+// in the current regime.
+//
+// Rules (derived from each strategy's documented bias):
+//   - Trend-followers (EMA cross, MACD, Supertrend, Donchian breakout, ADX,
+//     PSAR, Aroon, OBV, Ichimoku, Heikin-Ashi, ATR trail, TRIX, CMF) -> bull + bear
+//   - Mean-reverters (RSI, Bollinger, Stochastic, Williams %R, VWAP rev, MFI,
+//     Pivot, CCI, Keltner) -> neutral
+//   - Crisis regime: NO strategies eligible (capital preservation mode)
+//   - Volatile regime: only the most robust trend-followers (Supertrend, ATR trail)
+//     plus options-only strategies (added in Phase 4)
+const STRATEGY_REGIME_MAP = Object.freeze({
+  rsi_mean_revert:  ['neutral'],
+  ema_cross:        ['bull', 'bear'],
+  macd_cross:       ['bull', 'bear'],
+  bollinger:        ['neutral'],
+  supertrend:       ['bull', 'bear', 'volatile'],
+  adx_trend:        ['bull', 'bear'],
+  donchian:         ['bull', 'bear'],
+  stochastic:       ['neutral'],
+  williams_r:       ['neutral'],
+  heikin_ashi:      ['bull', 'bear'],
+  cci:              ['neutral', 'bull'],
+  keltner:          ['neutral'],
+  obv:              ['bull', 'bear'],
+  psar:             ['bull', 'bear'],
+  aroon:            ['bull', 'bear'],
+  cmf:              ['bull', 'bear'],
+  atr_trail:        ['bull', 'bear', 'volatile'],
+  ichimoku:         ['bull', 'bear'],
+  vwap:             ['neutral'],
+  pivot:            ['neutral'],
+  mfi:              ['neutral'],
+  trix:             ['bull', 'bear'],
+});
+
+/**
+ * Returns true if the given strategy id is eligible to fire under the given
+ * regime label. Unknown strategies default to ALL regimes (permissive) so a
+ * new strategy doesn't accidentally get silenced before it gets a regime map
+ * entry.
+ */
+function isStrategyEligibleInRegime(strategyId, regime) {
+  const prefs = STRATEGY_REGIME_MAP[strategyId];
+  if (!prefs) return true;        // not yet mapped -> permissive default
+  if (regime === 'crisis') return false; // crisis: nothing fires
+  return prefs.includes(regime);
+}
+
 function mountStrategiesRoutes(app) {
   app.get('/api/strategies', (_req, res) => {
-    res.json({ ok: true, strategies: STRATEGIES });
+    // T-281: return each strategy with its regimePreference attached so the
+    // UI can render the Risk Cockpit / Strategy Lab without a second roundtrip.
+    const enriched = STRATEGIES.map(s => ({
+      ...s,
+      regimePreference: STRATEGY_REGIME_MAP[s.id] || ['bull', 'bear', 'neutral', 'volatile'],
+    }));
+    res.json({ ok: true, strategies: enriched });
   });
 }
 
-module.exports = { STRATEGIES, mountStrategiesRoutes };
+module.exports = { STRATEGIES, STRATEGY_REGIME_MAP, isStrategyEligibleInRegime, mountStrategiesRoutes };

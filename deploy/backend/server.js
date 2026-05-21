@@ -40,6 +40,8 @@ const { createTradeEconomics } = require('./services/trade-economics');
 const { createSipRunner } = require('./services/sip-runner');
 // T-272: unified position view aggregator (Phase 2).
 const { createPortfolioAggregates } = require('./services/portfolio-aggregates');
+// T-280: market regime detector (Phase 3).
+const { createRegimeDetector } = require('./services/regime-detector');
 // T-268: full notify namespace (AutoRunner needs notify.notifyOrderPlaced etc).
 const _notifyModule = require('./notify');
 const _tradeEconomics = createTradeEconomics();
@@ -153,7 +155,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, db, auth, rebalance, replay, emailAlerts, whatsAppAlerts, riskConfigService, sipRunner, portfolioAggregates;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, db, auth, rebalance, replay, emailAlerts, whatsAppAlerts, riskConfigService, sipRunner, portfolioAggregates, regimeDetector;
 
 async function init() {
   broker = createBroker(process.env);
@@ -346,6 +348,18 @@ async function init() {
   } catch (e) {
     console.error('!! portfolioAggregates init failed:', e.message);
     portfolioAggregates = null;
+  }
+
+  // T-280: regime detector. Reads NIFTY 50 daily candles + India VIX from
+  // the live broker connection. Cached 5 min so callers can poll cheaply.
+  try {
+    if (broker) {
+      regimeDetector = createRegimeDetector({ broker, audit });
+      console.log('[server] regime detector armed (NIFTY + VIX classifier)');
+    }
+  } catch (e) {
+    console.error('!! regimeDetector init failed:', e.message);
+    regimeDetector = null;
   }
 
     wormAudit = new WormAudit({
@@ -4178,6 +4192,36 @@ app.get('/api/me/portfolio/aggregates', (req, res) => {
   } catch (e) {
     res.status(500).json({ ok:false, reason: e.message });
   }
+});
+
+// T-275: scenario stress test. Pass {broadPct, bySector{}, bySymbol{}} in body.
+app.post('/api/me/portfolio/stress', (req, res) => {
+  if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
+  if (!portfolioAggregates) return res.status(503).json({ ok:false, reason:'portfolio_aggregates_not_initialized' });
+  try {
+    const shock = req.body || {};
+    res.json({ ok:true, stress: portfolioAggregates.stress(shock) });
+  } catch (e) {
+    res.status(400).json({ ok:false, reason: e.message });
+  }
+});
+
+// T-280: market regime detector.
+app.get('/api/me/regime', async (req, res) => {
+  if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
+  if (!regimeDetector) return res.status(503).json({ ok:false, reason:'regime_detector_not_initialized' });
+  try {
+    const r = await regimeDetector.cachedDetect();
+    res.json({ ok:true, regime: r });
+  } catch (e) {
+    res.status(500).json({ ok:false, reason: e.message });
+  }
+});
+app.get('/api/me/regime/history', (req, res) => {
+  if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
+  if (!regimeDetector) return res.status(503).json({ ok:false, reason:'regime_detector_not_initialized' });
+  const n = Math.max(1, Math.min(200, parseInt(req.query.n, 10) || 50));
+  res.json({ ok:true, history: regimeDetector.history(n) });
 });
 
 app.get('/api/security/my-ip', (req, res) => {

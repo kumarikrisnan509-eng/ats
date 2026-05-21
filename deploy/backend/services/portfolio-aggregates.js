@@ -239,7 +239,65 @@ function createPortfolioAggregates({ getPositions, getCash, getTicks, getTrades 
     };
   }
 
-  return { compute, bySymbol, _sectorOf };
+  // T-275: scenario stress test. Applies a shock vector to current positions
+  // and returns hypothetical PnL. Pure function -- no state mutation.
+  //
+  // shock = {
+  //   broadPct:     -3,            // applies to every position uniformly (e.g. NIFTY -3%)
+  //   bySector:     { it: -8 },    // applies on TOP of broad to specific sectors
+  //   bySymbol:     { TCS: -12 },  // applies on TOP of broad+sector to specific symbols
+  // }
+  // The composition is multiplicative: each level multiplies the price.
+  function stress(shock = {}) {
+    const positions = bySymbol();
+    const broadPct  = Number(shock.broadPct)  || 0;
+    const bySector  = (shock.bySector  && typeof shock.bySector  === 'object') ? shock.bySector  : {};
+    const bySymbol2 = (shock.bySymbol  && typeof shock.bySymbol  === 'object') ? shock.bySymbol  : {};
+
+    const shockedPositions = positions.map(p => {
+      const basePrice = (p.ltp != null) ? p.ltp : p.avgPrice;
+      let pctMove = broadPct;
+      if (bySector[p.sector] != null) pctMove += Number(bySector[p.sector]) || 0;
+      if (bySymbol2[p.symbol] != null) pctMove += Number(bySymbol2[p.symbol]) || 0;
+      const shockedPrice = basePrice * (1 + pctMove / 100);
+      const shockedMV    = shockedPrice * p.qty;
+      const baselineMV   = basePrice    * p.qty;
+      const shockPnl     = shockedMV - baselineMV;
+      return {
+        symbol: p.symbol,
+        qty: p.qty,
+        basePrice: _round(basePrice, 2),
+        shockedPrice: _round(shockedPrice, 2),
+        pctMove: _round(pctMove, 2),
+        baselineMV: _round(baselineMV, 2),
+        shockedMV: _round(shockedMV, 2),
+        shockPnl: _round(shockPnl, 2),
+        sector: p.sector,
+      };
+    });
+
+    let totalBaselineMV = 0, totalShockedMV = 0, totalShockPnl = 0;
+    for (const s of shockedPositions) {
+      totalBaselineMV += s.baselineMV;
+      totalShockedMV  += s.shockedMV;
+      totalShockPnl   += s.shockPnl;
+    }
+    const portfolioMovePct = totalBaselineMV > 0
+      ? (totalShockPnl / totalBaselineMV) * 100
+      : 0;
+
+    return {
+      shock,
+      positions: shockedPositions,
+      totalBaselineMV: _round(totalBaselineMV, 2),
+      totalShockedMV:  _round(totalShockedMV, 2),
+      totalShockPnl:   _round(totalShockPnl, 2),
+      portfolioMovePct: _round(portfolioMovePct, 2),
+      asOf: new Date().toISOString(),
+    };
+  }
+
+  return { compute, bySymbol, stress, _sectorOf };
 }
 
 module.exports = { createPortfolioAggregates, SECTOR_MAP };
