@@ -32,29 +32,45 @@ jobs:
 
     steps:
       - name: GET /api/health (must return ok:true)
+        # Retry once with a 15s wait to ride out a docker compose restart
+        # window (typical ~15-20s). Only the SECOND failure fails the workflow.
         run: |
           set -e
           BASE="${ATS_BASE_URL:-https://ats.rajasekarselvam.com}"
-          RESP=$(curl -sS -m 10 -w "\nHTTP_STATUS=%{http_code}" "${BASE}/api/health")
-          STATUS=$(echo "$RESP" | grep -oP 'HTTP_STATUS=\K\d+')
-          BODY=$(echo "$RESP" | sed '/^HTTP_STATUS=/d')
-          if [ "$STATUS" != "200" ]; then
-            echo "::error::health endpoint returned HTTP ${STATUS}"
-            echo "$BODY"
-            exit 1
-          fi
-          if ! echo "$BODY" | grep -q '"ok":true'; then
-            echo "::error::health endpoint returned ok:false"
-            echo "$BODY"
-            exit 1
-          fi
-          echo "::notice::/api/health ok"
+          probe() {
+            RESP=$(curl -sS -m 10 -w "\nHTTP_STATUS=%{http_code}" "${BASE}/api/health" || true)
+            STATUS=$(echo "$RESP" | grep -oP 'HTTP_STATUS=\K\d+' || echo 0)
+            BODY=$(echo "$RESP" | sed '/^HTTP_STATUS=/d')
+            if [ "$STATUS" = "200" ] && echo "$BODY" | grep -q '"ok":true'; then
+              echo "::notice::/api/health ok (HTTP $STATUS)"
+              return 0
+            fi
+            echo "probe attempt failed: HTTP=$STATUS body=$(echo "$BODY" | head -c 200)"
+            return 1
+          }
+          probe || { echo "::warning::1st probe failed, sleeping 15s then retrying once (likely deploy restart)"; sleep 15; probe || { echo "::error::/api/health still failing after retry"; exit 1; }; }
 
       - name: GET /api/health-deep (broker + DR + market signals)
+        # Retry once with a 15s wait. The deep endpoint is slightly heavier
+        # than /api/health, so it's more likely to return an empty body during
+        # restart -- which is what triggered the 2026-05-21 14:20 UTC false
+        # positive.
         run: |
           set -e
           BASE="${ATS_BASE_URL:-https://ats.rajasekarselvam.com}"
-          RESP=$(curl -sS -m 10 "${BASE}/api/health-deep")
+          fetch_deep() {
+            curl -sS -m 10 "${BASE}/api/health-deep" || true
+          }
+          RESP=$(fetch_deep)
+          if [ -z "$RESP" ] || ! echo "$RESP" | head -c 1 | grep -q '{'; then
+            echo "::warning::1st deep probe returned empty/non-JSON, sleeping 15s then retrying once"
+            sleep 15
+            RESP=$(fetch_deep)
+            if [ -z "$RESP" ] || ! echo "$RESP" | head -c 1 | grep -q '{'; then
+              echo "::error::health-deep returned non-JSON twice (after 15s retry): $(echo "$RESP" | head -c 200)"
+              exit 1
+            fi
+          fi
           # Parse with python because jq isn't guaranteed on ubuntu-latest
           # (it is, but this is more portable + lets us emit GH-style annotations).
           echo "$RESP" | python3 - <<'PY'
