@@ -34,6 +34,21 @@ seconds.
   render their empty / loading states, which is what you want when you're
   iterating on UI code.
 
+## Your local database is NOT a copy of prod
+
+This trips everyone up the first time. The local backend writes to a fresh
+SQLite file at `.local-dev/ats.db`. **Your prod login does not exist here.**
+Sign up a brand-new account with any email/password on the local login
+screen. That account lives only in `.local-dev/` and never touches prod.
+
+To wipe local state and start over:
+
+```
+rm -rf .local-dev/
+```
+
+(On Windows PowerShell: `Remove-Item -Recurse -Force .local-dev`)
+
 ## First-time setup
 
 You need **Node.js 20+** installed on your laptop.

@@ -45,6 +45,41 @@ const proxyUrl = new URL(PROXY_TARGET);
 const proxyIsHttps = proxyUrl.protocol === 'https:';
 const proxyHttp = proxyIsHttps ? https : http;
 
+// Phase A.1: detect ports already in use BEFORE spawning anything, so the
+// operator gets a clear error instead of a silent EADDRINUSE crash deep in
+// nodemon's stack. Common cause: forgot to Ctrl-C a previous `npm run dev`.
+function portInUse(port) {
+  return new Promise((resolve) => {
+    const probe = require('net').createServer();
+    probe.once('error', (e) => resolve(e.code === 'EADDRINUSE'));
+    probe.once('listening', () => { probe.close(() => resolve(false)); });
+    probe.listen(port, '127.0.0.1');
+  });
+}
+
+async function preflight() {
+  const conflicts = [];
+  if (await portInUse(PORT)) conflicts.push({ port: PORT, who: 'static + proxy server (this script)' });
+  if (!NO_BACKEND && await portInUse(BACKEND_PORT)) conflicts.push({ port: BACKEND_PORT, who: 'backend (deploy/backend/server.js)' });
+  if (conflicts.length === 0) return;
+
+  console.error('');
+  console.error('  Port conflict -- cannot start the local dev loop:');
+  for (const c of conflicts) {
+    console.error(`    × port ${c.port} is already in use (needed for ${c.who})`);
+  }
+  console.error('');
+  console.error('  Most likely cause: a previous `npm run dev` is still running in another terminal.');
+  console.error('  Fix: focus that terminal and press Ctrl-C, or in a new terminal run:');
+  if (process.platform === 'win32') {
+    console.error('    Get-Process -Id (Get-NetTCPConnection -LocalPort ' + conflicts[0].port + ').OwningProcess | Stop-Process');
+  } else {
+    console.error('    kill $(lsof -ti:' + conflicts[0].port + ')');
+  }
+  console.error('');
+  process.exit(1);
+}
+
 const children = [];
 function spawnChild(name, cmd, args, opts) {
   const c = spawn(cmd, args, { stdio: 'inherit', shell: process.platform === 'win32', ...opts });
@@ -63,6 +98,14 @@ function shutdown() {
 process.on('SIGINT',  shutdown);
 process.on('SIGTERM', shutdown);
 
+// ---- 0. Preflight: ports must be free ----
+//     (Phase A.1: catch the "forgot to Ctrl-C" case with a clear message)
+preflight().then(() => bootstrap()).catch((e) => {
+  console.error('[dev-server] preflight failed:', e.message);
+  process.exit(1);
+});
+
+function bootstrap() {
 // ---- 1. Backend (optional) ----
 if (!NO_BACKEND) {
   console.log(`[dev-server] starting backend on :${BACKEND_PORT}...`);
@@ -196,5 +239,24 @@ server.listen(PORT, () => {
   console.log(`  /api/* proxy:     ${PROXY_TARGET}`);
   console.log('=======================================================');
   console.log('Edit any src/*.jsx and refresh the browser -- changes apply within ~1s.');
+  if (!NO_BACKEND && PROXY_TARGET.startsWith('http://localhost')) {
+    console.log('');
+    console.log('NOTE: this is a LOCAL database in .local-dev/, not a copy of prod.');
+    console.log('      Your prod login will NOT work here. Sign up a fresh account');
+    console.log('      with any email/password the first time. Wipe the local DB');
+    console.log('      anytime with: rm -rf .local-dev/');
+  }
   console.log('Stop with Ctrl+C.');
 });
+
+// also surface EADDRINUSE if it sneaks through (e.g. race between preflight + listen)
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    console.error(`[dev-server] port ${PORT} taken after preflight -- another process grabbed it. Retry.`);
+  } else {
+    console.error('[dev-server] server error:', e.message);
+  }
+  process.exit(1);
+});
+
+} // end bootstrap()
