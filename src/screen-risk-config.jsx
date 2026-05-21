@@ -198,7 +198,7 @@ window.RiskConfigScreen = function RiskConfigScreen() {
       )}
 
       {/* RcSection 1: Capital & caps */}
-      <RcSection title="Capital & caps" sub="Trading capital and percentage-based risk caps. INR caps derive from capital * pct, so they scale automatically.">
+      <RcSection title="Capital & caps" sub="Trading capital and percentage-based risk caps. INR caps derive from capital * pct, so they scale automatically." status="partial">
         <Field label="Trading capital (INR)" hint="1,000 – 10,000,000">
           <input type="number" min="1000" max="10000000" step="1000"
             value={config.capital}
@@ -227,23 +227,22 @@ window.RiskConfigScreen = function RiskConfigScreen() {
       <RcSection
         title="Risk gates"
         sub="Time windows + daily caps + trailing-stop behavior. Engine reads these on every signal evaluation and short-circuits if any gate fails."
+        status="wired"
       >
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <Field label="Golden window start" hint="HH:MM (IST, 24h). Default 09:20 -- avoids opening volatility.">
-            <input type="text" pattern="[0-2][0-9]:[0-5][0-9]" placeholder="09:20"
-              value={config.goldenStartHHMM || '09:20'}
-              onChange={e => update({ goldenStartHHMM: e.target.value })}
-              style={_inputStyle}
-            />
-          </Field>
-          <Field label="Golden window end" hint="HH:MM (IST, 24h). Default 15:10 -- before 15:30 auto-square-off.">
-            <input type="text" pattern="[0-2][0-9]:[0-5][0-9]" placeholder="15:10"
-              value={config.goldenEndHHMM || '15:10'}
-              onChange={e => update({ goldenEndHHMM: e.target.value })}
-              style={_inputStyle}
-            />
-          </Field>
-        </div>
+        <Field label="Golden window start" hint="HH:MM (IST, 24h). Default 09:20 -- avoids opening volatility.">
+          <input type="time" pattern="[0-2][0-9]:[0-5][0-9]"
+            value={config.goldenStartHHMM || '09:20'}
+            onChange={e => update({ goldenStartHHMM: e.target.value })}
+            style={_inputStyle}
+          />
+        </Field>
+        <Field label="Golden window end" hint="HH:MM (IST, 24h). Default 15:10 -- before 15:30 auto-square-off.">
+          <input type="time" pattern="[0-2][0-9]:[0-5][0-9]"
+            value={config.goldenEndHHMM || '15:10'}
+            onChange={e => update({ goldenEndHHMM: e.target.value })}
+            style={_inputStyle}
+          />
+        </Field>
         <Field label="Max daily trades" hint="1 - 100. Default 5. Research shows edge drops after 2-3 trades; cap prevents overtrading.">
           <input type="number" min="1" max="100" step="1"
             value={config.maxDailyTrades || 5}
@@ -273,6 +272,7 @@ window.RiskConfigScreen = function RiskConfigScreen() {
       <RcSection
         title="DCA mix (monthly SIP allocation)"
         sub="Each value is a fraction of capital deployed monthly to that ETF. Total must be <= 100% of capital. The remainder is held as cash buffer."
+        status="partial"
       >
         {DCA_SYMBOLS.map(sym => (
           <Field key={sym} label={sym} hint={`${_inr((config.capital || 0) * (config.dcaAllocation[sym] || 0))} / month at current capital`}>
@@ -299,6 +299,7 @@ window.RiskConfigScreen = function RiskConfigScreen() {
       <RcSection
         title="Strategy voting"
         sub={`Trades fire only when at least N of the active strategies agree. ${(config.activeStrategies || []).length} active, threshold ${config.votingThreshold}.`}
+        status="cosmetic"
       >
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8, marginBottom: 16 }}>
           {strategies.map(s => {
@@ -329,6 +330,7 @@ window.RiskConfigScreen = function RiskConfigScreen() {
       <RcSection
         title="Trading mode"
         sub="Paper is fully simulated. Micro-live trades 10% real / 90% paper with caps shrunk 10x. Full-live is real money."
+        status="cosmetic"
       >
         {[
           { id: 'paper', label: 'Paper (simulated)', sub: 'No real money. Recommended for Phase 1 validation.' },
@@ -360,8 +362,9 @@ window.RiskConfigScreen = function RiskConfigScreen() {
         ))}
       </RcSection>
 
-      <div style={{ marginTop: 24, padding: 12, fontSize: 11, color: 'var(--text-4)', textAlign: 'center' }}>
-        T-262. Replaces scripts/SETUP-TRADING.cmd. Configuration is per-user and persisted in user_risk_config.
+      <div style={{ marginTop: 24, padding: 12, fontSize: 11, color: 'var(--text-4)', textAlign: 'center', lineHeight: 1.7 }}>
+        T-262 + T-263..T-268 (Phase 1). Configuration is per-user, persisted in <code>user_risk_config</code>.<br/>
+        <strong style={{ color: 'var(--text-3)' }}>Honest UI:</strong> sections tagged <em>Live</em> are enforced by the engine; <em>Partial</em> are half-wired; <em>Preview</em> are persisted-only (wiring tracked in Phase 2/3).
       </div>
     </>
   );
@@ -408,18 +411,40 @@ const _inputStyle = {
 
 // Tiny presentational helpers (no external dep on primitives.jsx so this
 // screen stays self-contained and won't break if those are renamed).
-const RcSection = ({ title, sub, children }) => (
-  <section style={{
-    marginBottom: 18, padding: 16,
-    background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
-  }}>
-    <div style={{ marginBottom: 12 }}>
-      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)' }}>{title}</div>
-      {sub && <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{sub}</div>}
-    </div>
-    {children}
-  </section>
-);
+// status='wired' | 'partial' | 'cosmetic' shows operator at-a-glance which sections
+// the engine actually consults. Honest UI principle: do not promise behavior the
+// engine doesn't deliver. Hover the badge for the exact wiring state.
+const _STATUS_BADGES = {
+  wired:    { label: 'Live',     color: '#15803d', bg: '#f0fdf4', tip: 'Engine reads and enforces these fields on every signal.' },
+  partial:  { label: 'Partial',  color: '#a16207', bg: '#fef9c3', tip: 'Persisted to DB. Engine reads SOME of these fields; others tracked in T-263 followups.' },
+  cosmetic: { label: 'Preview',  color: '#525252', bg: '#f5f5f5', tip: 'Persisted to DB but engine does not yet act on this section. Wiring tracked in Phase 2/3 of the vision doc.' },
+};
+
+const RcSection = ({ title, sub, children, status }) => {
+  const badge = status ? _STATUS_BADGES[status] : null;
+  return (
+    <section style={{
+      marginBottom: 18, padding: 16,
+      background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
+    }}>
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)' }}>{title}</div>
+          {badge && (
+            <span title={badge.tip} style={{
+              fontSize: 10, fontWeight: 600, letterSpacing: 0.3,
+              padding: '2px 8px', borderRadius: 999,
+              color: badge.color, background: badge.bg,
+              border: '1px solid ' + badge.color + '33',
+            }}>{badge.label}</span>
+          )}
+        </div>
+        {sub && <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 2 }}>{sub}</div>}
+      </div>
+      {children}
+    </section>
+  );
+};
 
 const Field = ({ label, hint, children }) => (
   <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
