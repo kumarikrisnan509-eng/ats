@@ -33,6 +33,7 @@ const TITLES = {
   slippage:   ["System",       "Slippage tracker"],
   calibration:["System",       "Strategy calibration"],
   'macro-signals':["System",  "Macro signals"],
+  'walk-forward':["System",  "Walk-forward opt"],
   'ai-keys':  ["System",       "AI providers"],
 };
 
@@ -232,6 +233,7 @@ function App() {
     slippage:   window.SlippageScreen ? <window.SlippageScreen/> : null,
     calibration: window.CalibrationScreen ? <window.CalibrationScreen/> : null,
     'macro-signals': window.MacroSignalsScreen ? <window.MacroSignalsScreen/> : null,
+    'walk-forward': window.WalkForwardScreen ? <window.WalkForwardScreen/> : null,
   };
 
   const [crumb, title] = TITLES[route] || TITLES.dashboard;

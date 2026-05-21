@@ -68,6 +68,11 @@ const { OptionsScanner } = require('./services/options-scanner');
 const { rollupOptionGreeks } = require('./services/portfolio-aggregates');
 // T-302a/T-303a: signal calibration + auto-retire recommender (pure service).
 const { createSignalCalibration } = require('./services/signal-calibration');
+// T-280c: NSE macro fetcher (FII/DII, breadth, 52w highs/lows) -- env-gated cron.
+const { NseMacroFetcher } = require('./services/nse-macro-fetcher');
+// T-301a: walk-forward parameter optimization helpers.
+const { createWalkForward } = require('./services/walk-forward');
+const { runBacktest: _wfRunBacktest } = require('./backtest');
 const http    = require('http');
 const fs      = require('fs');
 const path    = require('path');
@@ -4377,6 +4382,36 @@ app.post('/api/options/opportunities/:id/review', (req, res) => {
   }
 });
 // T-302a/T-303a: signal calibration + auto-retire recommendation read endpoints
+// T-301a: walk-forward parameter optimization (advisory).
+// POST body: { strategy, symbol, paramGrid?, opts? }
+// Fetches 1-year daily candles from broker, runs walk-forward sweep,
+// returns ranked + summary + recommendation. CPU-bound but bounded by
+// paramGrid size; combos > 200 rejected.
+app.post('/api/me/walk-forward', async (req, res) => {
+  if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
+  try {
+    const { strategy, symbol, paramGrid, opts } = req.body || {};
+    if (!strategy || typeof strategy !== 'string') return res.status(400).json({ ok: false, reason: 'strategy required' });
+    if (!symbol || typeof symbol !== 'string')     return res.status(400).json({ ok: false, reason: 'symbol required' });
+    const grid = paramGrid && typeof paramGrid === 'object' ? paramGrid : {};
+    let comboCount = 1;
+    for (const v of Object.values(grid)) comboCount *= Array.isArray(v) ? Math.max(1, v.length) : 1;
+    if (comboCount > 200) return res.status(400).json({ ok: false, reason: `paramGrid too large (${comboCount} combos > 200 cap)` });
+    if (!broker || typeof broker.getHistorical !== 'function') {
+      return res.status(503).json({ ok: false, reason: 'broker_not_initialized' });
+    }
+    const candles = await broker.getHistorical(symbol, { interval: 'day', days: 365 });
+    if (!Array.isArray(candles) || candles.length < 90) {
+      return res.status(400).json({ ok: false, reason: `not enough historical candles for ${symbol} (got ${candles ? candles.length : 0})` });
+    }
+    const wf = createWalkForward({ runBacktest: _wfRunBacktest });
+    const result = wf.run({ candles, strategy, paramGrid: grid, opts: opts || {} });
+    res.json({ ok: true, symbol, ...result });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
 app.get('/api/me/calibration', (req, res) => {
   if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
   if (!signalCalibration) return res.status(503).json({ ok: false, reason: 'signal_calibration_not_initialized' });

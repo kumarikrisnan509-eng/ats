@@ -155,6 +155,7 @@ const NAV_GROUPS = [
       { id: "slippage",   label: "Slippage",       icon: I.activity || I.target },
       { id: "calibration",label: "Calibration",    icon: I.chart || I.target },
       { id: "macro-signals",label: "Macro signals",  icon: I.trend || I.target },
+      { id: "walk-forward",label: "Walk-forward",  icon: I.chart || I.target },
       { id: "compliance", label: "Compliance",     icon: I.shieldCheck, overflow: true },
       // T-164 (v11-I3): link to the user-docs static page. external:true so
       // the click opens /docs.html as a real navigation instead of trying
