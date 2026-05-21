@@ -107,7 +107,6 @@ const NAV_GROUPS = [
     label: "Wealth loop",
     items: [
       { id: "signals",    label: "AI Signals",     icon: I.brain,    badge: { text: "LIVE", kind: "live" } },
-      { id: "lab",        label: "Strategy Lab",   icon: I.code,     badge: { text: "NEW" } },
       { id: "paper",      label: "Paper trading",  icon: I.flame },
       { id: "trading",    label: "Live trading",   icon: I.trade },
       { id: "money",      label: "Money",          icon: I.coin,     badge: { text: "NEW", kind: "live" } },
@@ -119,7 +118,6 @@ const NAV_GROUPS = [
       { id: "modes",      label: "Trading modes",  icon: I.layers },
       { id: "strategies", label: "Strategies",     icon: I.strategy,  badge: { text: "8" } },
       // overflow -- still reachable, just not in primary scan path
-      { id: "circuits",   label: "Circuit breakers",  icon: I.gauge,   overflow: true },
       { id: "audit",      label: "Audit trail",       icon: I.check,   overflow: true },
       { id: "margin",     label: "Margin calc",       icon: I.scale,   overflow: true },
     ],

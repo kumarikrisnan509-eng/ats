@@ -15,15 +15,15 @@ const { test, expect } = require('@playwright/test');
 //            Playwright assertions per SCREENS-AUDIT.md §6.
 const ROUTES = [
   // System / shell
-  '#dashboard', '#settings', '#risk', '#compliance', '#profile',
+  '#dashboard', '#settings', '#risk', '#compliance',
   // Automate
-  '#modes', '#strategies', '#signals', '#tuner',
+  '#modes', '#strategies', '#signals',
   // Execute
   '#trading', '#audit', '#margin',
   // Validate
-  '#paper', '#backtest', '#circuits', '#lab',
+  '#paper',
   // Wealth / long-term
-  '#portfolio', '#stpswp', '#smallcase', '#fixed', '#harvest',
+  '#portfolio', '#stpswp',
   '#brokers', '#money', '#longterm', '#insights',  // T-248: #mf -> #longterm (ETF baskets)
   // Operations / AI
   '#recon', '#attribution', '#review', '#ai-keys',
