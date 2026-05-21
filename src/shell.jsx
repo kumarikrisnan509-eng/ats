@@ -142,25 +142,38 @@ const NAV_GROUPS = [
     ],
   },
   {
+    // T-274c: split off "Analytics" (observability for what already happened)
+    // and "Intelligence" (advisory surfaces from Phases 4/5) into their own
+    // clusters so SYSTEM stays focused on admin/risk.
+    label: "Analytics",
+    items: [
+      { id: "sip",                label: "SIP plan & history", icon: I.clock || I.target },
+      { id: "daily-attribution",  label: "Daily attribution",  icon: I.breakdown || I.chart || I.target },
+      { id: "slippage",           label: "Slippage",           icon: I.activity || I.target },
+    ],
+  },
+  {
+    label: "Intelligence",
+    items: [
+      { id: "macro-signals",  label: "Macro signals",    icon: I.trend || I.target },
+      { id: "options-opps",   label: "Options ops",      icon: I.target },
+      { id: "calibration",    label: "Strategy calibration", icon: I.chart || I.target },
+      { id: "walk-forward",   label: "Walk-forward opt", icon: I.chart || I.target },
+    ],
+  },
+  {
     label: "System",
     items: [
-      { id: "settings",   label: "Settings",       icon: I.settings },
-      { id: "ai-keys",    label: "AI providers",   icon: I.sparkle },
-      { id: "risk",       label: "Risk",           icon: I.shield,      overflow: true },
-      { id: "riskconfig", label: "Risk management",icon: I.shield },
-      { id: "riskcockpit",label: "Risk cockpit",   icon: I.target },
-      { id: "options-opps",label: "Options ops",   icon: I.target },
-      { id: "sip",        label: "SIP",            icon: I.clock || I.target },
-      { id: "attribution",label: "Attribution",    icon: I.chart || I.target },
-      { id: "slippage",   label: "Slippage",       icon: I.activity || I.target },
-      { id: "calibration",label: "Calibration",    icon: I.chart || I.target },
-      { id: "macro-signals",label: "Macro signals",  icon: I.trend || I.target },
-      { id: "walk-forward",label: "Walk-forward",  icon: I.chart || I.target },
-      { id: "compliance", label: "Compliance",     icon: I.shieldCheck, overflow: true },
+      { id: "settings",     label: "Settings",        icon: I.settings },
+      { id: "ai-keys",      label: "AI providers",    icon: I.sparkle },
+      { id: "riskconfig",   label: "Risk management", icon: I.shield },
+      { id: "riskcockpit",  label: "Risk cockpit",    icon: I.target },
+      { id: "risk",         label: "Risk",            icon: I.shield,      overflow: true },
+      { id: "compliance",   label: "Compliance",      icon: I.shieldCheck, overflow: true },
       // T-164 (v11-I3): link to the user-docs static page. external:true so
       // the click opens /docs.html as a real navigation instead of trying
       // to mount a hash-route screen.
-      { id: "user-docs",  label: "Help & docs",    icon: I.help || I.info, overflow: true, external: '/docs.html' },
+      { id: "user-docs",    label: "Help & docs",     icon: I.help || I.info, overflow: true, external: '/docs.html' },
     ],
   },
 ];
