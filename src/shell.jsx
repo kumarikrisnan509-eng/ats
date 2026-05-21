@@ -150,6 +150,9 @@ const NAV_GROUPS = [
       { id: "riskconfig", label: "Risk management",icon: I.shield },
       { id: "riskcockpit",label: "Risk cockpit",   icon: I.target },
       { id: "options-opps",label: "Options ops",   icon: I.target },
+      { id: "sip",        label: "SIP",            icon: I.clock || I.target },
+      { id: "attribution",label: "Attribution",    icon: I.chart || I.target },
+      { id: "slippage",   label: "Slippage",       icon: I.activity || I.target },
       { id: "compliance", label: "Compliance",     icon: I.shieldCheck, overflow: true },
       // T-164 (v11-I3): link to the user-docs static page. external:true so
       // the click opens /docs.html as a real navigation instead of trying

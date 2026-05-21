@@ -56,6 +56,7 @@ const SECTOR_COLOURS = {
 window.RiskCockpitScreen = function RiskCockpitScreen() {
   const [data, setData] = React.useState(null);
   const [optionGreeks, setOptionGreeks] = React.useState(null);   // T-294b: net book Greeks
+  const [autorunHistory, setAutorunHistory] = React.useState([]);   // T-313: recent runs
   const [regime, setRegime] = React.useState(null);     // T-280: market regime banner
   const [stress, setStress] = React.useState(null);     // T-275: scenario stress preview
   const [shockPct, setShockPct] = React.useState(-3);
@@ -69,6 +70,10 @@ window.RiskCockpitScreen = function RiskCockpitScreen() {
       if (r && r.ok) {
         setData(r.aggregates);
         setOptionGreeks(r.optionGreeks || null);   // T-294b
+        // T-313: fire-and-forget fetch autorun history; failures silent
+        fetch('/api/autorun').then(x => x.json()).then(ar => {
+          if (ar && ar.ok && Array.isArray(ar.history)) setAutorunHistory(ar.history);
+        }).catch(() => {});
         setError(null);
         setLastUpdated(new Date());
       } else {
@@ -367,6 +372,49 @@ window.RiskCockpitScreen = function RiskCockpitScreen() {
               Unmatched (no quote in option_quotes): {optionGreeks.unmatched.slice(0, 5).join(', ')}{optionGreeks.unmatched.length > 5 ? '...' : ''}
             </div>
           )}
+        </section>
+      )}
+
+      {/* T-313: Autorun recent runs widget */}
+      {autorunHistory.length > 0 && (
+        <section style={{ ..._panelStyle, marginTop: 20 }}>
+          <div style={_panelHeader}>
+            Autorun recent runs
+            <span style={{ marginLeft: 12, fontSize: 11, fontWeight: 400, color: 'var(--text-3)' }}>
+              {autorunHistory.length} runs · skipped patterns reveal which gate is gating
+            </span>
+          </div>
+          <div style={{ padding: 14 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border, #2a3142)', textAlign: 'left', color: 'var(--text-2)' }}>
+                  <th style={{ padding: '4px 6px' }}>When</th>
+                  <th style={{ padding: '4px 6px' }}>Result</th>
+                  <th style={{ padding: '4px 6px' }}>Regime</th>
+                  <th style={{ padding: '4px 6px' }}>Signal</th>
+                  <th style={{ padding: '4px 6px', textAlign: 'right' }}>ms</th>
+                </tr>
+              </thead>
+              <tbody>
+                {autorunHistory.slice(0, 15).map((r, i) => {
+                  const isPlaced = r.result === 'placed';
+                  const isSkipped = String(r.result || '').startsWith('skipped');
+                  const color = isPlaced ? '#15803d' : (isSkipped ? '#f59e0b' : 'var(--text-2)');
+                  return (
+                    <tr key={i} style={{ borderBottom: '1px solid var(--border, #2a3142)' }}>
+                      <td style={{ padding: '4px 6px', whiteSpace: 'nowrap', color: 'var(--text-3)' }}>
+                        {r.ts ? new Date(r.ts).toLocaleTimeString('en-IN', { hour12: false }) : '-'}
+                      </td>
+                      <td style={{ padding: '4px 6px', color, fontWeight: 600 }}>{r.result || '-'}</td>
+                      <td style={{ padding: '4px 6px' }}>{r.regime || '-'}</td>
+                      <td style={{ padding: '4px 6px', fontSize: 11, color: 'var(--text-3)' }}>{r.signal || ''}</td>
+                      <td style={{ padding: '4px 6px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-3)' }}>{r.durationMs || 0}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
 

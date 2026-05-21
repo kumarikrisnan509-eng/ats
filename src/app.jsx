@@ -28,6 +28,9 @@ const TITLES = {
   riskconfig: ["System",       "Risk management"],
   riskcockpit:["System",       "Risk cockpit"],
   'options-opps':["System",     "Options opportunities"],
+  sip:        ["System",       "SIP plan & history"],
+  attribution:["System",       "Daily attribution"],
+  slippage:   ["System",       "Slippage tracker"],
   'ai-keys':  ["System",       "AI providers"],
 };
 
@@ -222,6 +225,9 @@ function App() {
     riskconfig: window.RiskConfigScreen ? <window.RiskConfigScreen/> : null,
     riskcockpit: window.RiskCockpitScreen ? <window.RiskCockpitScreen/> : null,
     'options-opps': window.OptionsOpportunitiesScreen ? <window.OptionsOpportunitiesScreen/> : null,
+    sip:        window.SipScreen ? <window.SipScreen/> : null,
+    attribution: window.AttributionScreen ? <window.AttributionScreen/> : null,
+    slippage:   window.SlippageScreen ? <window.SlippageScreen/> : null,
   };
 
   const [crumb, title] = TITLES[route] || TITLES.dashboard;
