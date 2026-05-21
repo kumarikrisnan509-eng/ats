@@ -213,3 +213,61 @@ ssh -i $KEY ubuntu@ats.rajasekarselvam.com "docker logs --tail 30 ats-backend 2>
 **Solid** (battle-tested or trivial to validate):
 - Auth flow (P0 was fixed, signed-in user can do everything)
 - T-262 Risk Management persistence (UI r
+
+---
+
+## Post-handoff: Phase 4 options logic layer (2026-05-21 continued)
+
+After this doc was first written, the session continued and Phase 4 **logic** (not yet wired to autorun or any live data source) was built out as six pure-function modules.
+
+### New commits
+
+| # | SHA | Ticket | What |
+|---|---|---|---|
+| 15 | `9d81de2` | T-294a | `services/black-scholes.js` — pure math: price, greeks, IV inversion. 6/6 smoke. |
+| 16 | `1449e7e` | T-290a | `services/option-chain.js` — parseKiteInstruments + enrichWithGreeks + pickStrikeByDelta. 8/8 smoke. |
+| 17 | `404c2b2` | T-293a | `services/strategy-covered-call.js` — 1-leg, findOpportunities + priceOpportunity. 13/13 smoke. |
+| 18 | `bd581be` | T-292a | `services/strategy-vertical-spread.js` — 2-leg, bull-call + bear-put + priceSpread. 17/17 smoke. |
+| 19 | `028a7fc` | T-291a | `services/strategy-iron-condor.js` — 4-leg neutral, findIronCondor + priceCondor. 15/15 smoke. |
+| 20 | `7c0a597` | T-295a | `services/strategy-selector.js` — regime dispatcher composing all four. 14/14 smoke. |
+
+Total: ~1,200 LoC across six pure modules. 73/73 smoke tests pass. Each module ships with a `--smoke` flag for ad-hoc verification: `node deploy/backend/services/strategy-X.js --smoke`.
+
+### Public API surface
+
+```js
+const { selectStrategies } = require('./services/strategy-selector');
+const result = selectStrategies({ regime, chain, opts });
+// -> { regime, ranked: [{ template, weight, rawScore, score, opportunity }, ...] }
+```
+
+Templates registered: `covered_call`, `bull_call_spread`, `bear_put_spread`, `iron_condor`.
+
+### Regime playbook (current)
+
+| Regime | Templates dispatched | Notes |
+|---|---|---|
+| `bull` | bull_call_spread (w=1.00), covered_call (w=0.70) | Directional + yield |
+| `bear` | bear_put_spread (w=1.00) | Directional short-bias |
+| `neutral` | iron_condor (w=1.00) | Theta harvest in range |
+| `unknown` / `volatile` / `crisis` | (none — return empty) | Decline to guess |
+
+### What is NOT yet done in Phase 4
+
+These pieces deliberately stayed outside auto-mode and need their own focused sessions:
+
+- **T-290 live integration** — Kite REST fetch of option chain → DB `option_quotes` table → scheduled cron to refresh. Touches network egress + schema migration + a recurring job on prod. Risk-bearing.
+- **T-294 portfolio Greeks threading** — extend `portfolio-aggregates.js` to roll per-position deltas/gammas/vegas/thetas up to book level, and surface them in `screen-risk-cockpit.jsx`. Touches `server.js` (4912 LoC, Edit-tool-unsafe) and the cockpit frontend.
+- **Autorun wiring** — `selectStrategies` is not yet called from `autorun.js`. Doing so requires deciding (a) which underlyings to scan, (b) how to throttle, (c) how scored opportunities translate into virtual signals the existing 8-gate chain can evaluate, and (d) what UI surfaces the proposed trades. This is itself a multi-session design decision.
+
+### Bootstrapping reminders that still apply
+
+All ten gotchas listed in the original handoff section above remain true. In particular:
+
+- KILL_SWITCH stays on.
+- No autorun path can fire real money — the new modules are still pure functions, no `broker.placeOrder` is reachable from any of them.
+- Edit tool is still unsafe on files >300 LoC. The new services are all under that threshold and so were safe to author with the file tools directly, but `server.js` and the larger frontend screens still require python heredoc string-replace.
+- All six new modules are read-only at runtime — they have no side effects, no DB writes, no network I/O.
+
+Phase 4 logic layer: **closed.** Phase 4 integration: **open, waits for a fresh session.**
+
