@@ -38,6 +38,8 @@ const { createRiskConfigService } = require('./services/risk-config');
 const { createTradeEconomics } = require('./services/trade-economics');
 // T-276: daily SIP runner -- cron + idempotent order placer for DCA mix.
 const { createSipRunner } = require('./services/sip-runner');
+// T-272: unified position view aggregator (Phase 2).
+const { createPortfolioAggregates } = require('./services/portfolio-aggregates');
 // T-268: full notify namespace (AutoRunner needs notify.notifyOrderPlaced etc).
 const _notifyModule = require('./notify');
 const _tradeEconomics = createTradeEconomics();
@@ -151,7 +153,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, db, auth, rebalance, replay, emailAlerts, whatsAppAlerts, riskConfigService, sipRunner;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, db, auth, rebalance, replay, emailAlerts, whatsAppAlerts, riskConfigService, sipRunner, portfolioAggregates;
 
 async function init() {
   broker = createBroker(process.env);
@@ -322,6 +324,28 @@ async function init() {
   } catch (e) {
     console.error('!! sipRunner init failed:', e.message);
     sipRunner = null;
+  }
+
+  // T-272: portfolio aggregator (Phase 2). Pure read service -- consults
+  // paper.positions(), paper.stats().cash, broker.getLastTicks(), paper.trades().
+  // Powers GET /api/me/portfolio/aggregates and the Risk Cockpit screen.
+  try {
+    if (paper) {
+      portfolioAggregates = createPortfolioAggregates({
+        getPositions: () => paper.positions ? paper.positions() : [],
+        getCash:      () => (paper.stats && paper.stats().cash) || 0,
+        getTicks:     () => {
+          if (typeof broker.getLastTicks !== 'function') return new Map();
+          const arr = broker.getLastTicks();
+          return new Map(arr.map(t => [t.symbol, t.ltp]));
+        },
+        getTrades:    (n) => paper.trades ? paper.trades(n) : [],
+      });
+      console.log('[server] portfolio aggregator armed');
+    }
+  } catch (e) {
+    console.error('!! portfolioAggregates init failed:', e.message);
+    portfolioAggregates = null;
   }
 
     wormAudit = new WormAudit({
@@ -4143,6 +4167,17 @@ app.get('/api/sip/history', (req, res) => {
   if (!sipRunner) return res.status(503).json({ ok:false, reason:'sip_runner_not_initialized' });
   const days = Math.max(1, Math.min(365, parseInt(req.query.days, 10) || 30));
   res.json({ ok:true, history: sipRunner.history(1, days) });
+});
+
+// T-272: unified position view aggregate. Pure read; no side effects.
+app.get('/api/me/portfolio/aggregates', (req, res) => {
+  if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
+  if (!portfolioAggregates) return res.status(503).json({ ok:false, reason:'portfolio_aggregates_not_initialized' });
+  try {
+    res.json({ ok:true, aggregates: portfolioAggregates.compute() });
+  } catch (e) {
+    res.status(500).json({ ok:false, reason: e.message });
+  }
 });
 
 app.get('/api/security/my-ip', (req, res) => {
