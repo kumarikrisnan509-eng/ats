@@ -1,0 +1,121 @@
+# deploy-staging.yml -- Phase D: gated staging deploy workflow.
+#
+# What it does (when the `staging` branch exists and gets a push):
+#   1. Reuses the existing `validate` job from ci.yml (lint + tsc + parse + dup-const).
+#   2. Reuses `build-and-push` from deploy.yml to publish a staging-tagged image.
+#   3. SSHs into the VM, brings up /opt/ats/staging with the new image.
+#   4. Health-checks staging.ats.rajasekarselvam.com.
+#   5. Runs the Playwright E2E suite against the staging URL.
+#
+# What's required from the operator BEFORE this is useful:
+#   - Follow deploy/staging/SETUP.md steps 1-3 (DNS + VM provisioning + nginx + TLS).
+#   - Create GitHub secrets: STAGING_SSH_KEY, STAGING_GHCR_TOKEN, STAGING_VM_HOST.
+#   - Create a `staging` branch protected from direct pushes.
+#
+# Until those exist, this workflow is dormant -- the `if: github.ref` guard
+# ensures it never runs on push to main / PR. Lands as a no-op so the
+# scaffold is ready when staging is.
+
+name: deploy-staging
+
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch or SHA to deploy to staging'
+        required: true
+        default: 'staging'
+
+permissions:
+  contents: read
+  packages: write
+  deployments: write
+
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/staging' || github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/ci.yml
+
+  build-and-push:
+    needs: validate
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/staging' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build + push staging image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/ats:staging
+            ghcr.io/${{ github.repository_owner }}/ats:staging-${{ github.sha }}
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/staging' || github.event_name == 'workflow_dispatch'
+    environment: staging
+    steps:
+      - name: SSH deploy to /opt/ats/staging
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.STAGING_VM_HOST }}
+          username: deployer
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          script: |
+            set -e
+            echo "${{ secrets.STAGING_GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            cd /opt/ats/staging
+            docker compose pull
+            docker compose --env-file .env up -d --remove-orphans
+            sleep 10
+            for i in 1 2 3 4 5; do
+              if curl -fsS http://127.0.0.1:8081/api/health | grep -q '"ok":true'; then
+                echo "staging health OK"; exit 0
+              fi
+              sleep 5
+            done
+            echo "staging health check failed after 5 retries"; exit 1
+
+      - name: Verify staging via public URL
+        run: |
+          for i in 1 2 3 4 5; do
+            if curl -fsS https://staging.ats.rajasekarselvam.com/api/health | grep -q '"ok":true'; then
+              echo "public staging URL OK"; exit 0
+            fi
+            sleep 5
+          done
+          echo "public staging URL health check failed"; exit 1
+
+  e2e-against-staging:
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/staging' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+      - name: Install Playwright + browsers
+        working-directory: test-e2e
+        run: |
+          npm install --silent --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Run E2E against staging
+        working-directory: test-e2e
+        env:
+          BASE_URL: https://staging.ats.rajasekarselvam.com
+        run: npx playwright test --reporter=list
