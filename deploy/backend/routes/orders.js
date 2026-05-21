@@ -57,6 +57,10 @@ function mountOrdersRoutes(app, deps) {
     VALID_ORDER_TYPES,
     VALID_VARIETIES,
     VALID_VALIDITY,
+    // T-277: per-user tradingMode guard. Optional -- if absent, behaves as before
+    // (env-only gating). When present, paper-mode users are blocked from live
+    // order placement even with KILL_SWITCH off + LIVE_TRADING on.
+    getRiskConfig,
   } = deps;
 
   // ---------- /api/orders/dry-run (moved here in T-223 piece 6a) ----------
@@ -163,6 +167,35 @@ function mountOrdersRoutes(app, deps) {
         clientOrderId,
         validatedPayload: normalizedPayload,
       });
+    }
+
+    // T-277: per-user trading-mode guard. The two env-var gates above protect
+    // against deploy-level misconfiguration. This third gate is the operator's
+    // explicit UI consent: if they have not flipped Settings -> Risk management
+    // -> Trading mode to micro_live or full_live, live orders are refused.
+    // The intent is to make accidental live trading from a UI button
+    // impossible even when env vars are permissive (e.g. operator forgot to
+    // flip them back after a maintenance window).
+    if (typeof getRiskConfig === 'function' && req.user && req.user.id) {
+      try {
+        const cfg = getRiskConfig(req.user.id);
+        if (cfg && cfg.tradingMode === 'paper') {
+          audit('order.blocked.paperMode', { ...normalizedPayload, userId: req.user.id });
+          return res.status(403).json({
+            ok: false,
+            reason: 'LIVE_ORDERS_DISABLED_BY_MODE',
+            message: 'Your account is in Paper mode. Open Settings -> Risk management and switch to Micro-live or Full-live to allow live orders.',
+            currentMode: cfg.tradingMode,
+            clientOrderId,
+            validatedPayload: normalizedPayload,
+          });
+        }
+      } catch (e) {
+        // Reading risk config is best-effort -- if it fails, fall through to
+        // the existing env gates. Never block live trading on a config-read
+        // failure; that would lock the operator out during a DB hiccup.
+        audit('order.riskConfigLookup.failed', { msg: e.message, userId: req.user.id });
+      }
     }
 
     // Tier 15 pre-trade risk-gate #1: order-rate circuit

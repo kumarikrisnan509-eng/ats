@@ -4383,6 +4383,9 @@ mountOrdersRoutes(app, {
   getTwoFactor: () => twoFactor,
   _orderRateOk, _orderRateRecord, _orderTimes,
   VALID_SIDES, VALID_PRODUCTS, VALID_ORDER_TYPES, VALID_VARIETIES, VALID_VALIDITY,
+  // T-277: per-user trading-mode guard. Live orders are refused when the
+  // operator's risk config says tradingMode='paper'.
+  getRiskConfig: (userId) => riskConfigService ? riskConfigService.cachedGet(userId) : null,
 });
 
 // Tier 38: confirm a 2FA-pending order. Replays the held payload through

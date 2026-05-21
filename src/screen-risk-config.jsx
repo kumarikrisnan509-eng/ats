@@ -336,8 +336,8 @@ window.RiskConfigScreen = function RiskConfigScreen() {
       {/* RcSection 4: Trading mode */}
       <RcSection
         title="Trading mode"
-        sub="Paper is fully simulated. Micro-live trades 10% real / 90% paper with caps shrunk 10x. Full-live is real money."
-        status="cosmetic"
+        sub="Paper blocks the live-orders endpoint entirely (extra safety on top of KILL_SWITCH + LIVE_TRADING env gates). Micro-live and Full-live unlock live order placement; Full-live additionally requires 2FA setup."
+        status="wired"
       >
         {[
           { id: 'paper', label: 'Paper (simulated)', sub: 'No real money. Recommended for Phase 1 validation.' },
