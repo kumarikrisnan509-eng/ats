@@ -197,8 +197,8 @@ window.RiskConfigScreen = function RiskConfigScreen() {
         </div>
       )}
 
-      {/* Section 1: Capital & caps */}
-      <Section title="Capital & caps" sub="Trading capital and percentage-based risk caps. INR caps derive from capital * pct, so they scale automatically.">
+      {/* RcSection 1: Capital & caps */}
+      <RcSection title="Capital & caps" sub="Trading capital and percentage-based risk caps. INR caps derive from capital * pct, so they scale automatically.">
         <Field label="Trading capital (INR)" hint="1,000 – 10,000,000">
           <input type="number" min="1000" max="10000000" step="1000"
             value={config.capital}
@@ -219,10 +219,10 @@ window.RiskConfigScreen = function RiskConfigScreen() {
             style={_inputStyle}
           />
         </Field>
-      </Section>
+      </RcSection>
 
-      {/* Section 2: DCA mix */}
-      <Section
+      {/* RcSection 2: DCA mix */}
+      <RcSection
         title="DCA mix (monthly SIP allocation)"
         sub="Each value is a fraction of capital deployed monthly to that ETF. Total must be <= 100% of capital. The remainder is held as cash buffer."
       >
@@ -245,10 +245,10 @@ window.RiskConfigScreen = function RiskConfigScreen() {
           Sum: {dcaSumPct.toFixed(2)}% &nbsp;({cashBufferPct.toFixed(2)}% to cash buffer)
           {dcaSum > 1.000001 && ' — exceeds 100%, please reduce.'}
         </div>
-      </Section>
+      </RcSection>
 
-      {/* Section 3: Strategy voting */}
-      <Section
+      {/* RcSection 3: Strategy voting */}
+      <RcSection
         title="Strategy voting"
         sub={`Trades fire only when at least N of the active strategies agree. ${(config.activeStrategies || []).length} active, threshold ${config.votingThreshold}.`}
       >
@@ -275,10 +275,10 @@ window.RiskConfigScreen = function RiskConfigScreen() {
             style={_inputStyle}
           />
         </Field>
-      </Section>
+      </RcSection>
 
-      {/* Section 4: Trading mode */}
-      <Section
+      {/* RcSection 4: Trading mode */}
+      <RcSection
         title="Trading mode"
         sub="Paper is fully simulated. Micro-live trades 10% real / 90% paper with caps shrunk 10x. Full-live is real money."
       >
@@ -310,7 +310,7 @@ window.RiskConfigScreen = function RiskConfigScreen() {
             </div>
           </label>
         ))}
-      </Section>
+      </RcSection>
 
       <div style={{ marginTop: 24, padding: 12, fontSize: 11, color: 'var(--text-4)', textAlign: 'center' }}>
         T-262. Replaces scripts/SETUP-TRADING.cmd. Configuration is per-user and persisted in user_risk_config.
@@ -360,7 +360,7 @@ const _inputStyle = {
 
 // Tiny presentational helpers (no external dep on primitives.jsx so this
 // screen stays self-contained and won't break if those are renamed).
-const Section = ({ title, sub, children }) => (
+const RcSection = ({ title, sub, children }) => (
   <section style={{
     marginBottom: 18, padding: 16,
     background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
