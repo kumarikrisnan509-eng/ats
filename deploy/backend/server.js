@@ -4387,6 +4387,33 @@ app.get('/api/me/calibration', (req, res) => {
     res.status(500).json({ ok: false, reason: e.message });
   }
 });
+// T-280c: macro signals (NSE FII/DII + breadth + 52w highs/lows) read + manual refresh
+app.get('/api/me/macro-signals', (req, res) => {
+  if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
+  try {
+    const latest = nseMacroFetcher ? nseMacroFetcher.cachedLatest() : null;
+    res.json({
+      ok: true,
+      fetcherEnabled: typeof (require('./services/nse-macro-fetcher').NseMacroFetcher).isEnabled === 'function'
+        ? require('./services/nse-macro-fetcher').NseMacroFetcher.isEnabled() : false,
+      fetcherInstantiated: !!nseMacroFetcher,
+      latest,
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+app.post('/api/me/macro-signals/refresh', async (req, res) => {
+  if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
+  if (!nseMacroFetcher) return res.status(503).json({ ok: false, reason: 'fetcher_not_initialized' });
+  try {
+    const result = await nseMacroFetcher.fetchAll();
+    res.json({ ok: true, ...result, latest: nseMacroFetcher.cachedLatest() });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
 app.get('/api/me/recommend-retire', (req, res) => {
   if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
   if (!signalCalibration) return res.status(503).json({ ok: false, reason: 'signal_calibration_not_initialized' });

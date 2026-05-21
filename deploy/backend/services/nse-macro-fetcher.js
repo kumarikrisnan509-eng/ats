@@ -37,7 +37,11 @@ const NSE_HEADERS = {
 
 const FII_DII_URL    = 'https://www.nseindia.com/api/fiidiiTradeReact';
 const BREADTH_URL    = 'https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%20500';
-const HIGHS_LOWS_URL = 'https://www.nseindia.com/api/live-analysis-data-52Week';
+// NSE retired live-analysis-data-52Week. live-analysis-variations?index=fiftytwoWeek
+// exists but returns single-character strings, not usable. Until a working
+// endpoint is identified the 52w fetcher always returns null and logs a
+// note in errors_json. The classifier handles null inputs without issue.
+const HIGHS_LOWS_URL = null;
 const WARMUP_URL     = 'https://www.nseindia.com/';
 
 const DEFAULT_INTERVAL_MS = 24 * 60 * 60 * 1000;  // once a day
@@ -128,7 +132,9 @@ class NseMacroFetcher {
 
   async _fetchBreadth() {
     const data = await this._getJson(BREADTH_URL);
-    // Shape: { advance: { advances, declines, unchanged }, data: [...] }
+    // Verified shape (2026): { name, advance: {advances:"286", declines:"213",
+    //   unchanged:"5"}, timestamp, data:[...], metadata, marketStatus }.
+    // Values come in as strings; Number() coerces cleanly.
     let adv = null, dec = null;
     if (data && data.advance) {
       adv = Number(data.advance.advances);
@@ -143,8 +149,15 @@ class NseMacroFetcher {
   }
 
   async _fetch52w() {
+    // NSE endpoint retired (2026). Returning null. Future work: aggregate
+    // yearHigh/yearLow against current price across NIFTY 500 instruments
+    // via Kite's getQuotes (heavy: ~500 calls) -- this needs its own
+    // scheduled job. For now the classifier just operates without this
+    // signal; richScore is unaffected.
+    if (!HIGHS_LOWS_URL) {
+      throw new Error('52w endpoint retired; needs alternate source');
+    }
     const data = await this._getJson(HIGHS_LOWS_URL);
-    // Shape: { high: {data: [...]} , low: {data: [...]} }
     const highs = data && data.high && Array.isArray(data.high.data) ? data.high.data.length : null;
     const lows  = data && data.low  && Array.isArray(data.low.data)  ? data.low.data.length  : null;
     if (!Number.isFinite(highs) || !Number.isFinite(lows) || lows === 0) return null;
@@ -226,20 +239,21 @@ const SMOKE = () => {
 
   (async () => {
     const r = await f.fetchAll();
-    check('returned object with 3 fields', r.fiiNetFlow != null && r.marketBreadth != null && r.highLowRatio != null);
+    // 52w endpoint retired -- highLowRatio always null. fii + breadth fetched.
+    check('fii + breadth not null', r.fiiNetFlow != null && r.marketBreadth != null);
+    check('highLowRatio is null (endpoint retired)', r.highLowRatio == null);
     check('fiiNetFlow = 1234.5', Math.abs(r.fiiNetFlow - 1234.5) < 0.01);
     check('marketBreadth = 1.5 (300/200)', Math.abs(r.marketBreadth - 1.5) < 0.001);
-    check('highLowRatio = 3.0 (45/15)', Math.abs(r.highLowRatio - 3.0) < 0.001);
-    check('errors empty on happy path', r.errors.length === 0);
+    check('errors has exactly 1 (52w retired)', r.errors.length === 1 && /retired/.test(r.errors[0]));
 
     const cached = f.cachedLatest();
     check('cachedLatest returns row', cached && cached.fiiNetFlow === 1234.5);
 
-    // Failure mode: NSE returns 403
+    // Failure mode: NSE returns 403 (fii + breadth fail; 52w already null)
     global.fetch = async () => ({ ok: false, status: 403, headers: { get: () => null } });
     const r2 = await f.fetchAll();
     check('all-null on 403', r2.fiiNetFlow == null && r2.marketBreadth == null && r2.highLowRatio == null);
-    check('errors populated on failure', r2.errors.length === 3);
+    check('errors populated on full failure (3: fii + breadth + 52w)', r2.errors.length === 3);
 
     // env gate refuses start
     delete process.env.NSE_MACRO_FETCH_ENABLED;

@@ -32,6 +32,7 @@ const TITLES = {
   attribution:["System",       "Daily attribution"],
   slippage:   ["System",       "Slippage tracker"],
   calibration:["System",       "Strategy calibration"],
+  'macro-signals':["System",  "Macro signals"],
   'ai-keys':  ["System",       "AI providers"],
 };
 
@@ -230,6 +231,7 @@ function App() {
     attribution: window.AttributionScreen ? <window.AttributionScreen/> : null,
     slippage:   window.SlippageScreen ? <window.SlippageScreen/> : null,
     calibration: window.CalibrationScreen ? <window.CalibrationScreen/> : null,
+    'macro-signals': window.MacroSignalsScreen ? <window.MacroSignalsScreen/> : null,
   };
 
   const [crumb, title] = TITLES[route] || TITLES.dashboard;
