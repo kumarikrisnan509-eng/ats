@@ -59,6 +59,13 @@ const { mountOrdersRoutes } = require('./routes/orders');
 const { attachUpstreamFanout } = require('./services/tick-fanout');
 // T-227 (CODE-AUDIT F.5 M1.4 piece 7b): /ws WebSocketServer + connection handler.
 const { mountWs } = require('./routes/ws');
+// T-290e: option-chain fetcher + read routes (env-gated).
+const { OptionChainFetcher } = require('./services/option-chain-fetcher');
+const mountOptionChainRoutes = require('./routes/option-chain');
+// T-298a: options scanner -- SHADOW MODE only, never fires orders.
+const { OptionsScanner } = require('./services/options-scanner');
+// T-294b: rollupOptionGreeks helper from portfolio-aggregates.
+const { rollupOptionGreeks } = require('./services/portfolio-aggregates');
 const http    = require('http');
 const fs      = require('fs');
 const path    = require('path');
@@ -161,7 +168,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, db, auth, rebalance, replay, emailAlerts, whatsAppAlerts, riskConfigService, sipRunner, portfolioAggregates, regimeDetector, attribution, slippageTracker, preTradeCheck;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, db, auth, rebalance, replay, emailAlerts, whatsAppAlerts, riskConfigService, sipRunner, portfolioAggregates, regimeDetector, attribution, slippageTracker, preTradeCheck, optionChainFetcher, optionsScanner;
 
 async function init() {
   broker = createBroker(process.env);
@@ -253,6 +260,22 @@ async function init() {
     // skipped with 'skipped_wrong_regime'. Permissive on detector failure.
     getRegime: async () => regimeDetector ? regimeDetector.cachedDetect() : null,
     isStrategyEligibleInRegime,
+    // T-298b: SHADOW-only options scanner. Passed by reference but unused
+    // until OPTIONS_AUTORUN_ENABLED=true at scan() call time. autorun's
+    // shadow-runner is fire-and-forget after the existing 8-gate chain.
+    // Note: optionsScanner is assigned later in init(); pass a getter
+    // function so autorun resolves the current binding at call time.
+    getOptionsScanner: () => optionsScanner || null,
+    getHoldings: async () => {
+      try {
+        const { loadHoldingsFromBroker } = require('./services/holdings-loader');
+        if (!broker) return [];
+        return await loadHoldingsFromBroker(broker);
+      } catch { return []; }
+    },
+    optionsUnderlyings: (process.env.OPTIONS_SCANNER_UNDERLYINGS || '')
+      .split(',').map(s => s.trim()).filter(Boolean)
+      .map(u => ({ underlying: u, maxRows: 5 })),
   });
   autorun.load();
   autorun.start();   // re-arms timer if config is enabled
@@ -421,6 +444,51 @@ async function init() {
   } catch (e) {
     console.error('!! preTradeCheck init failed:', e.message);
     preTradeCheck = null;
+  }
+
+  // T-290e: option chain fetcher. Env-gated -- OPTION_CHAIN_FETCH_ENABLED
+  // controls both the cron timer AND any auto-start at boot. The module
+  // exists but stays idle until the operator explicitly enables it.
+  try {
+    if (db && broker) {
+      optionChainFetcher = new OptionChainFetcher({
+        db, broker,
+        log: (m) => console.log('[option-chain-fetcher]', m),
+      });
+      // Auto-start the cron ONLY when env var set + at least one underlying configured
+      const enabled = OptionChainFetcher.isEnabled();
+      const cfgUnderlyings = (process.env.OPTION_CHAIN_UNDERLYINGS || '').split(',').map(s => s.trim()).filter(Boolean);
+      if (enabled && cfgUnderlyings.length > 0) {
+        const exp = process.env.OPTION_CHAIN_EXPIRY || null;
+        const underlyings = cfgUnderlyings.map(u => ({ underlying: u, expiry: exp || undefined }));
+        const intervalMs = Math.max(60000, parseInt(process.env.OPTION_CHAIN_INTERVAL_MS, 10) || 5 * 60 * 1000);
+        optionChainFetcher.start({ underlyings, intervalMs });
+        console.log(`[server] option-chain fetcher armed (${cfgUnderlyings.length} underlyings @ ${intervalMs}ms)`);
+      } else {
+        console.log('[server] option-chain fetcher instantiated (idle -- env gate off or no underlyings)');
+      }
+    }
+  } catch (e) {
+    console.error('!! optionChainFetcher init failed:', e.message);
+    optionChainFetcher = null;
+  }
+
+  // T-298a: options scanner SHADOW MODE. Writes proposed opportunities to
+  // option_opportunities table only; never generates signals or places orders.
+  // Gated by OPTIONS_AUTORUN_ENABLED -- with the env var unset the scan()
+  // method short-circuits before touching the DB.
+  try {
+    if (db && regimeDetector) {
+      optionsScanner = new OptionsScanner({
+        db,
+        getRegime: async () => regimeDetector.detect ? regimeDetector.detect() : { regime: 'unknown', confidence: null },
+        log: (m) => console.log('[options-scanner]', m),
+      });
+      console.log('[server] options scanner instantiated (SHADOW only, gated by OPTIONS_AUTORUN_ENABLED)');
+    }
+  } catch (e) {
+    console.error('!! optionsScanner init failed:', e.message);
+    optionsScanner = null;
   }
 
     wormAudit = new WormAudit({
@@ -4223,6 +4291,61 @@ mountAuthRoutes(app, { getAuth: () => auth, getEmailAlerts: () => emailAlerts })
 // because riskConfigService is assigned inside init() (after openDb)
 // but mountX is called at module top-level; capturing now = undefined.
 mountRiskConfigRoutes(app, { getRiskConfig: () => riskConfigService, getAuth: () => auth });
+// T-290e: option-chain READ routes + ops-key gated manual refresh.
+// fetcher may be null if init failed; the route checks for that.
+app.use((req, res, next) => {
+  // Make fetcher available to the mounted routes via deps closure (mounted once at startup).
+  next();
+});
+mountOptionChainRoutes(app, {
+  db: { prepare: (sql) => (db ? db.prepare(sql) : (() => { throw new Error('db_not_initialized'); })) },
+  fetcher: { refresh: async (args) => optionChainFetcher ? optionChainFetcher.refresh(args) : { ok: false, reason: 'fetcher_not_initialized' } },
+  opsKey: process.env.ATS_OPS_KEY || '',
+});
+
+// T-298a: options scanner status + opportunities log endpoints.
+app.get('/api/options/opportunities', (req, res) => {
+  if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
+  if (!db) return res.status(503).json({ ok: false, reason: 'db_not_initialized' });
+  const limit = Math.max(1, Math.min(200, parseInt(req.query.limit, 10) || 50));
+  try {
+    const rows = db.prepare(`
+      SELECT id, scanned_at AS scannedAt, underlying, regime, regime_confidence AS regimeConfidence,
+             template, score, raw_score AS rawScore, weight, opportunity_json AS opportunityJson,
+             reviewed, reviewed_at AS reviewedAt, reviewed_note AS reviewedNote
+      FROM option_opportunities
+      WHERE (user_id = ? OR user_id IS NULL)
+      ORDER BY scanned_at DESC LIMIT ?
+    `).all(req.user.id, limit);
+    res.json({ ok: true, count: rows.length, opportunities: rows });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+app.post('/api/options/opportunities/:id/review', (req, res) => {
+  if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
+  if (!db) return res.status(503).json({ ok: false, reason: 'db_not_initialized' });
+  const id = parseInt(req.params.id, 10);
+  const note = (req.body && req.body.note) ? String(req.body.note).slice(0, 500) : null;
+  try {
+    const r = db.prepare(`UPDATE option_opportunities SET reviewed = 1, reviewed_at = datetime('now'), reviewed_note = ? WHERE id = ?`).run(note, id);
+    res.json({ ok: r.changes === 1, changes: r.changes });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+app.get('/api/options/scanner/status', (req, res) => {
+  if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
+  res.json({
+    ok: true,
+    fetcherEnabled: OptionChainFetcher.isEnabled(),
+    scannerEnabled: OptionsScanner.isEnabled(),
+    fetcherInstantiated: !!optionChainFetcher,
+    scannerInstantiated: !!optionsScanner,
+    note: 'Scanner is SHADOW MODE -- never places orders. Set OPTIONS_AUTORUN_ENABLED=true on backend.env to start logging proposed opportunities.',
+  });
+});
+
 
 // T-276: SIP runner endpoints. Auth-gated; user_id pinned to 1 (operator) for now.
 app.get('/api/sip/plan', (req, res) => {
@@ -4249,7 +4372,33 @@ app.get('/api/me/portfolio/aggregates', (req, res) => {
   if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
   if (!portfolioAggregates) return res.status(503).json({ ok:false, reason:'portfolio_aggregates_not_initialized' });
   try {
-    res.json({ ok:true, aggregates: portfolioAggregates.compute() });
+    const aggregates = portfolioAggregates.compute();
+    // T-294b: optional optionGreeks rollup. Best-effort -- if there are no
+    // option positions or no option_quotes rows, optionGreeks is null.
+    let optionGreeks = null;
+    try {
+      if (db && Array.isArray(aggregates.positions) && aggregates.positions.length > 0) {
+        // Filter positions that look like options (NFO segment or tradingsymbol matches CE/PE pattern)
+        const optPositions = aggregates.positions
+          .map(p => ({ tradingsymbol: p.tradingsymbol || p.symbol, qty: p.qty || p.quantity, lotSize: p.lotSize }))
+          .filter(p => p.tradingsymbol && /(CE|PE)$/.test(p.tradingsymbol));
+        if (optPositions.length > 0) {
+          const symbols = optPositions.map(p => p.tradingsymbol);
+          const placeholders = symbols.map(() => '?').join(',');
+          const quotes = db.prepare(
+            `SELECT tradingsymbol, lot_size, delta, gamma, vega, theta, ltp, spot FROM option_quotes WHERE tradingsymbol IN (${placeholders})`
+          ).all(...symbols);
+          if (quotes.length > 0) {
+            optionGreeks = rollupOptionGreeks(optPositions, quotes);
+          } else {
+            optionGreeks = { note: 'no_matching_option_quotes', positionCount: optPositions.length };
+          }
+        }
+      }
+    } catch (gErr) {
+      optionGreeks = { error: gErr.message };
+    }
+    res.json({ ok:true, aggregates, optionGreeks });
   } catch (e) {
     res.status(500).json({ ok:false, reason: e.message });
   }

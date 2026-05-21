@@ -27,6 +27,7 @@ const TITLES = {
   longterm:   ["Long-term",   "Long-term basket"],
   riskconfig: ["System",       "Risk management"],
   riskcockpit:["System",       "Risk cockpit"],
+  'options-opps':["System",     "Options opportunities"],
   'ai-keys':  ["System",       "AI providers"],
 };
 
@@ -220,6 +221,7 @@ function App() {
     longterm:   window.LongTermScreen ? <window.LongTermScreen/> : null,
     riskconfig: window.RiskConfigScreen ? <window.RiskConfigScreen/> : null,
     riskcockpit: window.RiskCockpitScreen ? <window.RiskCockpitScreen/> : null,
+    'options-opps': window.OptionsOpportunitiesScreen ? <window.OptionsOpportunitiesScreen/> : null,
   };
 
   const [crumb, title] = TITLES[route] || TITLES.dashboard;

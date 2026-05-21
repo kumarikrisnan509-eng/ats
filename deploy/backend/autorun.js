@@ -63,7 +63,8 @@ class AutoRunner {
    */
   constructor({ broker, paper, computeSignal, audit, storePath,
                 getRiskConfig, tradeEconomics, notify, userId,
-                getRegime, isStrategyEligibleInRegime }) {
+                getRegime, isStrategyEligibleInRegime,
+                getOptionsScanner, getHoldings, optionsUnderlyings }) {
     if (!broker)        throw new Error('broker required');
     if (!paper)         throw new Error('paper required');
     if (!computeSignal) throw new Error('computeSignal required');
@@ -84,6 +85,15 @@ class AutoRunner {
     this.getRegime      = (typeof getRegime === 'function') ? getRegime : null;
     this.isStrategyEligibleInRegime = (typeof isStrategyEligibleInRegime === 'function')
       ? isStrategyEligibleInRegime : null;
+    // T-298b: options scanner SHADOW MODE -- no orders fired from this path.
+    // getOptionsScanner is a function returning the scanner instance (or null)
+    // -- using a getter so server.js can construct autorun before scanner.
+    // getHoldings is an optional async fn returning normalised holdings for
+    // the covered-call template. optionsUnderlyings is a list of {underlying}
+    // pairs to scan (e.g. [{underlying:'NIFTY'}, {underlying:'BANKNIFTY'}]).
+    this.getOptionsScanner = (typeof getOptionsScanner === 'function') ? getOptionsScanner : null;
+    this.getHoldings    = (typeof getHoldings === 'function') ? getHoldings : null;
+    this.optionsUnderlyings = Array.isArray(optionsUnderlyings) ? optionsUnderlyings : [];
     this._config        = null;
     this._history       = [];
     this._timer         = null;
@@ -438,7 +448,40 @@ class AutoRunner {
       if (this._history.length > HISTORY_MAX) this._history = this._history.slice(-HISTORY_MAX);
       this._persist();
     }
+
+    // T-298b: SHADOW MODE options scan. Fire-and-forget; errors logged but
+    // never fail the autorun run. Scanner's own env gate (OPTIONS_AUTORUN_ENABLED)
+    // determines whether anything is actually persisted -- with it off, scan()
+    // short-circuits after a single env check.
+    this._runScannerShadow().catch(err => {
+      try { this.audit('options_scanner_error', { error: err.message }); } catch {}
+    });
+
     return run;
+  }
+
+  async _runScannerShadow() {
+    if (!this.getOptionsScanner) return;
+    const scanner = this.getOptionsScanner();
+    if (!scanner) return;
+    if (this.optionsUnderlyings.length === 0) return;
+    let holdings = [];
+    if (this.getHoldings) {
+      try { holdings = await this.getHoldings(); } catch { holdings = []; }
+    }
+    for (const u of this.optionsUnderlyings) {
+      try {
+        await scanner.scan({
+          underlying: u.underlying,
+          expiry: u.expiry,
+          holdings,
+          userId: this.userId,
+          maxRows: u.maxRows || 5,
+        });
+      } catch (err) {
+        // Per-underlying error swallowed; next iteration continues.
+      }
+    }
   }
 
   config()  { return this._config; }
