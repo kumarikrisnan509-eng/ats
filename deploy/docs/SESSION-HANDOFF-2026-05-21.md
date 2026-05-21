@@ -271,3 +271,74 @@ All ten gotchas listed in the original handoff section above remain true. In par
 
 Phase 4 logic layer: **closed.** Phase 4 integration: **open, waits for a fresh session.**
 
+---
+
+## Post-runbook: T-310..T-314 + T-269 + T-263b + Phase 5 opening (2026-05-21 late)
+
+After PHASE-4-TRIAL-RUNBOOK.md was published, the session continued through
+the "smaller carry-overs" list and started Phase 5. All landed on prod via
+CI/deploy; all gated; KILL_SWITCH still on, LIVE_TRADING still off.
+
+### Commits
+
+| # | SHA | Tickets | What |
+|---|---|---|---|
+| 21 | `b19de59` | T-310/311/312/313/314 | SIP screen, Attribution screen, Slippage screen, Autorun-history widget on cockpit, cleanup-test-users.js script. 5 surfaces previously-invisible backends. |
+| 22 | `dfd1e43` | T-269 + T-263b | TSL trailing-stop logic in paper.js (engine, 7/7 unit tests) + maxLeverage/maxSectorWeight UI fields (schema migration + risk-config service + UI). |
+| 23 | `b24b3c2` | hotfix | Stale T-80 regression spec updated to canonical `/api/me/attribution` (was blocking CI/deploy on dfd1e43). |
+| 24 | `afc01c4` | T-302a + T-303a | Signal calibration + auto-retire recommender (Phase 5 opening). Pure service, 13/13 smoke. New endpoints + new screen. Advisory-only; engine still respects operator's activeStrategies list. |
+
+### What the operator can now do without any further code work
+
+| Surface | URL/path | What it shows |
+|---|---|---|
+| SIP | nav -> System -> SIP | Today's plan + 7/30/90/365-day fire history |
+| Attribution | nav -> System -> Attribution | PnL by strategy + daily snapshots |
+| Slippage | nav -> System -> Slippage | Mean/median/p95 + per-strategy + per-symbol |
+| Calibration | nav -> System -> Calibration | Per-strategy hit rate + RETIRE/WATCH/KEEP recommendation |
+| Cockpit autorun-history | nav -> Risk cockpit | Last 15 autorun runs with result + regime |
+| Cockpit Greeks panel | nav -> Risk cockpit | Net delta/gamma/vega/theta when option positions exist |
+| Options opportunities | nav -> System -> Options ops | (after enabling fetcher+scanner per the runbook) |
+
+### Engine behaviour change in dfd1e43
+
+`paper.js` bracket children now trail their stop loss using the operator's
+`tslActivatePct` + `tslGapPct` from risk-config. Set both > 0 (defaults are
+0.5% / 0.3%) to enable. The trigger NEVER widens backward; only tightens
+favourably. Disabled cleanly when either value is 0.
+
+`services/risk-config.js` + `schema.sql` added 2 new user-config fields:
+* `maxLeverage`     (1.0-10.0, default 2.0) -- consumed by services/pre-trade.js
+* `maxSectorWeight` (0..1, default 0.30)   -- consumed by services/pre-trade.js
+
+Both have UI inputs on the Risk management page.
+
+### Tests baseline
+
+* `npm test` in `deploy/backend/`: **569/569 pass** (was 562 before T-269;
+  +7 from the new TSL test file `test/paper-tsl.test.js`).
+* Phase 4 logic-layer smoke: 73/73 across the 6 pure modules.
+* Signal calibration smoke: 13/13.
+* Frontend esbuild on all .jsx files: clean.
+
+### Phase 5 remaining work (truly multi-day, deserves a fresh session)
+
+| Ticket | What | Why deferred |
+|---|---|---|
+| T-301 | Walk-forward parameter re-optimization | Needs backtest harness extension. Saturday cron, 60d in / 14d OOS, propose updates via UI. |
+| T-280b | Richer regime inputs (FII/DII, market breadth, Hindenburg) | Needs real data feeds. No existing connector for SEBI FII/DII flows or NSE breadth in this codebase. |
+
+These two are NOT something to start at hour 14 of a session. They
+deserve a fresh context window with the operator deciding which data
+source to wire in first.
+
+### Safety envelope -- unchanged across all 24 commits
+
+* `KILL_SWITCH=true` on prod env
+* `LIVE_TRADING=false` on prod env
+* `tradingMode=paper` on operator's user_risk_config
+* All Phase 4 options gates: `OPTION_CHAIN_FETCH_ENABLED=false`, `OPTIONS_AUTORUN_ENABLED=false`
+* 5-gate live-orders chain unchanged
+* No new module reaches `broker.placeOrder`
+* All new endpoints either auth-gated (read-only) or ops-key-gated (manual refresh)
+
