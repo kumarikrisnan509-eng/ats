@@ -198,7 +198,7 @@ window.RiskConfigScreen = function RiskConfigScreen() {
       )}
 
       {/* RcSection 1: Capital & caps */}
-      <RcSection title="Capital & caps" sub="Trading capital and percentage-based risk caps. INR caps derive from capital * pct, so they scale automatically." status="partial">
+      <RcSection title="Capital & caps" sub="Trading capital and percentage-based risk caps. maxPositionPct caps qty per fire (capital * pct / price); maxOpenPositions blocks new symbols when cap is reached; maxDailyLossPct gates the daily loss budget." status="wired">
         <Field label="Trading capital (INR)" hint="1,000 – 10,000,000">
           <input type="number" min="1000" max="10000000" step="1000"
             value={config.capital}
@@ -305,8 +305,8 @@ window.RiskConfigScreen = function RiskConfigScreen() {
       {/* RcSection 3: Strategy voting */}
       <RcSection
         title="Strategy voting"
-        sub={`Trades fire only when at least N of the active strategies agree. ${(config.activeStrategies || []).length} active, threshold ${config.votingThreshold}.`}
-        status="cosmetic"
+        sub={`Confirmation gate: when more than 1 strategy is active AND threshold > 1, the autorun primary signal is fired only if at least ${config.votingThreshold} of the ${(config.activeStrategies || []).length} active strategies agree on direction. Acts as a veto on the primary signal, never replaces it.`}
+        status="wired"
       >
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8, marginBottom: 16 }}>
           {strategies.map(s => {
@@ -370,8 +370,8 @@ window.RiskConfigScreen = function RiskConfigScreen() {
       </RcSection>
 
       <div style={{ marginTop: 24, padding: 12, fontSize: 11, color: 'var(--text-4)', textAlign: 'center', lineHeight: 1.7 }}>
-        T-262 + T-263..T-268 (Phase 1). Configuration is per-user, persisted in <code>user_risk_config</code>.<br/>
-        <strong style={{ color: 'var(--text-3)' }}>Honest UI:</strong> sections tagged <em>Live</em> are enforced by the engine; <em>Partial</em> are half-wired; <em>Preview</em> are persisted-only (wiring tracked in Phase 2/3).
+        T-262 + T-263..T-279. Configuration is per-user, persisted in <code>user_risk_config</code>.<br/>
+        <strong style={{ color: 'var(--text-3)' }}>Honest UI:</strong> all 5 sections now <em>Live</em> -- the engine consults every field. Tooltips on each badge explain exactly what's enforced.
       </div>
     </>
   );

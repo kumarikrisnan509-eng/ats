@@ -277,6 +277,87 @@ class AutoRunner {
           }
 
           // ============================================================
+          // T-278: voting confirmation gate. Only enforced when the operator
+          // has >1 active strategy AND votingThreshold > 1. Runs each active
+          // strategy with default params (NOT this._config.params, which is
+          // strategy-specific to the primary). Requires N agreements in the
+          // SAME direction as the primary signal before letting it through.
+          // This is a confirmation gate -- the primary lastSig still drives,
+          // but the ensemble can veto it. Defaults of activeStrategies=3 and
+          // votingThreshold=2 mean "primary + 1 more must agree".
+          // ============================================================
+          if (!run.result && cfg && Array.isArray(cfg.activeStrategies)
+              && cfg.activeStrategies.length > 1
+              && Number.isInteger(cfg.votingThreshold) && cfg.votingThreshold > 1) {
+            const votes = { BUY: 0, SELL: 0, NONE: 0 };
+            const individualSignals = {};
+            for (const stratId of cfg.activeStrategies) {
+              try {
+                const sigArr = this.computeSignal({ candles, strategy: stratId, params: {} });
+                const sig = sigArr && sigArr[sigArr.length - 1];
+                individualSignals[stratId] = sig || null;
+                if (sig === 'BUY')      votes.BUY++;
+                else if (sig === 'SELL') votes.SELL++;
+                else                     votes.NONE++;
+              } catch (_) {
+                individualSignals[stratId] = 'error';
+                votes.NONE++;
+              }
+            }
+            run.votes = votes;
+            run.individualSignals = individualSignals;
+            const sameDirVotes = votes[lastSig] || 0;
+            if (sameDirVotes < cfg.votingThreshold) {
+              run.result = 'skipped_no_consensus';
+              run.consensus = `${sameDirVotes}/${cfg.activeStrategies.length} agreed (threshold ${cfg.votingThreshold})`;
+            }
+          }
+
+          // ============================================================
+          // T-279a: maxPositionPct cap. Computes the maximum INR position
+          // size the operator's config allows for the current capital, then
+          // floor-divides by the last close price to derive a qty ceiling.
+          // The fire qty is min(this._config.qty, qtyCap). If qtyCap < 1,
+          // the trade is uneconomic at this price and we skip.
+          // ============================================================
+          let effectiveQty = this._config.qty;
+          if (!run.result && cfg && Number.isFinite(cfg.capital) && Number.isFinite(cfg.maxPositionPct)
+              && Number.isFinite(lastBar.close) && lastBar.close > 0) {
+            const maxNotional = cfg.capital * cfg.maxPositionPct;
+            const qtyCap = Math.floor(maxNotional / lastBar.close);
+            if (qtyCap < 1) {
+              run.result = 'skipped_position_size_too_small';
+              run.qtyCap = 0;
+              run.maxNotional = Math.round(maxNotional);
+              run.lastClose = lastBar.close;
+            } else if (effectiveQty > qtyCap) {
+              run.qtyCappedFrom = effectiveQty;
+              run.qtyCap = qtyCap;
+              effectiveQty = qtyCap;
+            }
+          }
+
+          // ============================================================
+          // T-279b: maxOpenPositions cap. Counts current open paper
+          // positions; refuses a NEW position (symbol not already owned)
+          // if count >= cap. Existing-position management (adding to or
+          // closing) is allowed since it doesn't increase concurrent
+          // exposure to a new symbol.
+          // ============================================================
+          if (!run.result && cfg && Number.isInteger(cfg.maxOpenPositions)) {
+            try {
+              const positions = (typeof this.paper.positions === 'function') ? this.paper.positions() : [];
+              const openCount = positions.filter(p => p && p.qty !== 0).length;
+              const alreadyOwn = positions.some(p => p && p.symbol === this._config.symbol && p.qty !== 0);
+              if (!alreadyOwn && openCount >= cfg.maxOpenPositions) {
+                run.result = 'skipped_max_open_positions';
+                run.openCount = openCount;
+                run.maxOpenPositions = cfg.maxOpenPositions;
+              }
+            } catch (_e) { /* counting positions is best-effort */ }
+          }
+
+          // ============================================================
           // Pass-through path: existing dedupe + placeOrder logic
           // ============================================================
           if (!run.result) {
@@ -291,12 +372,13 @@ class AutoRunner {
                 const order = this.paper.placeOrder({
                   symbol:   this._config.symbol,
                   side:     lastSig,
-                  qty:      this._config.qty,
+                  qty:      effectiveQty,
                   type:     'MARKET',
                   strategy: this._config.strategy,
                 });
                 run.result   = 'placed';
                 run.orderId  = order.id;
+                run.firedQty = effectiveQty;
                 this._lastFiredKey = key;
                 this._tradesToday += 1;
                 this.audit('autorun.order.placed', { orderId: order.id, ...run });
