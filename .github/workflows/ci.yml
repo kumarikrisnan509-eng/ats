@@ -189,4 +189,8 @@ jobs:
               -e 'ghp_[A-Za-z0-9]\{30,\}' \
               -e 'github_pat_[A-Za-z0-9_]\{80,\}' \
               .
-          # Master key, audit log, sealed tokens 
+          # Master key, audit log, sealed tokens must never be committed.
+          for path in deploy/backend/master.key deploy/backend/audit.log deploy/backend/tokens; do
+            if [ -e "$path" ]; then echo "!! committed: $path" >&2; exit 1; fi
+          done
+          echo "no leaks detected"
