@@ -514,6 +514,22 @@ async function init() {
     signalCalibration = null;
   }
 
+  // T-280c: NSE macro fetcher. Auto-starts ONLY when env gate set.
+  try {
+    if (db) {
+      nseMacroFetcher = new NseMacroFetcher({ db, log: (m) => console.log('[nse-macro]', m) });
+      if (NseMacroFetcher.isEnabled()) {
+        nseMacroFetcher.start({ intervalMs: 24 * 60 * 60 * 1000 });
+        console.log('[server] NSE macro fetcher armed (daily cron + boot fetch)');
+      } else {
+        console.log('[server] NSE macro fetcher instantiated (idle -- NSE_MACRO_FETCH_ENABLED off)');
+      }
+    }
+  } catch (e) {
+    console.error('!! nseMacroFetcher init failed:', e.message);
+    nseMacroFetcher = null;
+  }
+
     wormAudit = new WormAudit({
     path: process.env.WORM_PATH || '/var/log/ats/audit.worm.jsonl',
     merkleEvery: Number(process.env.WORM_MERKLE_EVERY) || 100,

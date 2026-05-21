@@ -37,9 +37,14 @@
 const TTL_MS = 5 * 60 * 1000;        // 5-min cache TTL
 const HISTORY_MAX = 200;             // keep last 200 classifications
 
-function createRegimeDetector({ broker, audit }) {
+function createRegimeDetector({ broker, audit, getMacroSignals }) {
   if (!broker) throw new Error('createRegimeDetector: broker required');
   const _audit = audit || (() => {});
+  // T-280c: optional macro-signal getter -- returns latest row from
+  // macro_signals (NSE FII/DII, breadth, 52w highs/lows) or null. The
+  // _classify call below passes whatever is present; missing fields are
+  // benign no-ops in the classifier.
+  const _getMacroSignals = (typeof getMacroSignals === 'function') ? getMacroSignals : (() => null);
   let _cache = null;
   const _history = [];
 
@@ -202,6 +207,15 @@ function createRegimeDetector({ broker, audit }) {
         vix:        vix != null ? _round(vix, 2) : null,
         atrPct:     atrPct != null ? _round(atrPct, 2) : null,
       };
+
+      // T-280c: layer on macro signals if a fetcher is wired. Pure read; the
+      // fetcher's caller (server.js boot) is responsible for refresh cron.
+      try {
+        const macro = _getMacroSignals();
+        if (macro && Number.isFinite(macro.fiiNetFlow))    inputs.fiiNetFlow    = macro.fiiNetFlow;
+        if (macro && Number.isFinite(macro.marketBreadth)) inputs.marketBreadth = macro.marketBreadth;
+        if (macro && Number.isFinite(macro.highLowRatio))  inputs.highLowRatio  = macro.highLowRatio;
+      } catch (_) { /* macro getter is best-effort */ }
 
       const cls = _classify(inputs);
       const result = {
