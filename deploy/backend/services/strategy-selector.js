@@ -44,12 +44,13 @@ const REGIME_PLAYBOOK = Object.freeze({
 });
 
 function _scoreCoveredCall(opp) {
-  // Edge = annualised premium yield. Capital at risk = strike - premium (rough).
-  if (!opp || !Number.isFinite(opp.premiumPerLot) || !Number.isFinite(opp.dte)) return 0;
+  // Edge = annualised premium yield. Capital at risk ~ strike * lot (rough).
+  // Note: covered-call opportunity uses premiumPerContract + strike at top level
+  // (not legs.call.strike); this matches services/strategy-covered-call.js.
+  if (!opp || !Number.isFinite(opp.premiumPerContract) || !Number.isFinite(opp.dte)) return 0;
   const dte = Math.max(1, opp.dte);
-  const annualised = (opp.premiumPerLot / dte) * 365;
-  // Normalise by lot * strike so different underlyings are comparable.
-  const denom = (opp.legs?.call?.strike || 1) * (opp.lotSize || 1);
+  const annualised = (opp.premiumPerContract / dte) * 365;
+  const denom = (opp.strike || 1) * (opp.lotSize || 1);
   return annualised / denom;
 }
 
@@ -76,7 +77,12 @@ function _scoreIronCondor(opp) {
 
 function _findOne(template, chain, opts) {
   switch (template) {
-    case 'covered_call':      return cc.findOpportunities({ chain, opts });
+    case 'covered_call':
+      // Covered call requires user holdings (the long stock that backs the
+      // short call). If no holdings supplied, decline rather than throw --
+      // the selector returns empty results for that template.
+      if (!Array.isArray(opts.holdings) || opts.holdings.length === 0) return null;
+      return cc.findOpportunities({ holdings: opts.holdings, chain, opts });
     case 'bull_call_spread':  return vs.findBullCallSpread({ chain, opts });
     case 'bear_put_spread':   return vs.findBearPutSpread({ chain, opts });
     case 'iron_condor':       return ic.findIronCondor({ chain, opts });
@@ -185,6 +191,16 @@ const SMOKE = () => {
   // Missing regime
   const noRegime = selectStrategies({ regime: null, chain: enriched, opts: {} });
   check('null regime -> empty ranked', noRegime.ranked.length === 0);
+
+  // Bull regime WITH holdings -> covered_call should appear in ranking
+  const bullWithHoldings = selectStrategies({
+    regime: 'bull', chain: enriched,
+    opts: { asOf: today, holdings: [{ symbol: 'NIFTY', qty: 750, avgPrice: 24000, ltp: 24500 }] },
+  });
+  check('bull+holdings: covered_call present',
+    bullWithHoldings.ranked.some(r => r.template === 'covered_call'));
+  check('bull+holdings: still ranked desc',
+    bullWithHoldings.ranked.every((r, i, a) => i === 0 || a[i-1].score >= r.score));
 
   // rankOpportunities pure helper
   const sorted = rankOpportunities([{ score: 1 }, { score: 3 }, { score: 2 }]);
