@@ -6,9 +6,13 @@
   "scripts": {
     "dev": "node scripts/dev-server.js",
     "transform": "node deploy/build/transform.js",
-    "transform:watch": "node deploy/build/transform.js --watch"
+    "transform:watch": "node deploy/build/transform.js --watch",
+    "test:local": "node scripts/test-local.js"
   },
   "engines": {
     "node": ">=20"
   },
- 
+  "devDependencies": {
+    "esbuild": "0.21.5"
+  }
+}

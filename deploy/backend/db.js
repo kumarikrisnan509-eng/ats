@@ -285,6 +285,11 @@ function makeRepo(conn) {
 
   return {
     _conn: conn,
+    // T-298b: expose raw prepare() so services that build their own statements
+    // (option-chain-fetcher, options-scanner, future services) don't have to
+    // reach into _conn. Pre-T-298b every fresh DB crashed with
+    // `db.prepare is not a function` on optionChainFetcher init.
+    prepare: (sql) => conn.prepare(sql),
     exec:  (sql) => conn.exec(sql),
     transaction: (fn) => conn.transaction(fn)(),
     pragma: (s) => conn.pragma(s),
