@@ -46,7 +46,7 @@ const { createRegimeDetector } = require('./services/regime-detector');
 const _notifyModule = require('./notify');
 const _tradeEconomics = createTradeEconomics();
 // T-214 (CODE-AUDIT F.5 M1.4 piece 1): strategies registry extracted.
-const { STRATEGIES, mountStrategiesRoutes } = require('./routes/strategies');
+const { STRATEGIES, mountStrategiesRoutes, isStrategyEligibleInRegime } = require('./routes/strategies');
 // T-223 (CODE-AUDIT F.5 M1.4 piece 6a): /api/orders/dry-run extracted.
 const { mountOrdersRoutes } = require('./routes/orders');
 // T-226 (CODE-AUDIT F.5 M1.4 piece 7a): broker tick fan-out + upstream-state broadcaster.
@@ -241,6 +241,12 @@ async function init() {
     tradeEconomics: _tradeEconomics,
     notify:         _notifyModule,
     userId:         1,   // operator account; multi-user comes in Phase 2 (T-272+)
+    // T-282: regime-aware strategy gate. autorun consults the regime detector
+    // (5-min cached) + strategy regime map on every signal evaluation. If the
+    // current strategy is not eligible in the current regime, the trade is
+    // skipped with 'skipped_wrong_regime'. Permissive on detector failure.
+    getRegime: async () => regimeDetector ? regimeDetector.cachedDetect() : null,
+    isStrategyEligibleInRegime,
   });
   autorun.load();
   autorun.start();   // re-arms timer if config is enabled

@@ -62,7 +62,8 @@ class AutoRunner {
    * @param {string} [opts.storePath]
    */
   constructor({ broker, paper, computeSignal, audit, storePath,
-                getRiskConfig, tradeEconomics, notify, userId }) {
+                getRiskConfig, tradeEconomics, notify, userId,
+                getRegime, isStrategyEligibleInRegime }) {
     if (!broker)        throw new Error('broker required');
     if (!paper)         throw new Error('paper required');
     if (!computeSignal) throw new Error('computeSignal required');
@@ -78,6 +79,11 @@ class AutoRunner {
     this.tradeEconomics = tradeEconomics || null;
     this.notify         = notify || null;
     this.userId         = Number.isInteger(userId) ? userId : 1;
+    // T-282: regime-aware strategy gate. Optional -- if either dep is missing,
+    // the gate is a no-op and autorun behaves as pre-T-282 (regime ignored).
+    this.getRegime      = (typeof getRegime === 'function') ? getRegime : null;
+    this.isStrategyEligibleInRegime = (typeof isStrategyEligibleInRegime === 'function')
+      ? isStrategyEligibleInRegime : null;
     this._config        = null;
     this._history       = [];
     this._timer         = null;
@@ -225,7 +231,35 @@ class AutoRunner {
             }
           }
 
-          // T-266: daily trade cap (only if T-267 didn't already skip)
+          // T-282: regime-aware strategy eligibility. If the current regime
+          // and the strategy registry both have an opinion, and the opinion is
+          // "this strategy is not eligible right now", short-circuit. Best-effort
+          // -- a missing regime or detector failure is permissive (lets the trade
+          // through, audited as 'regime_unknown'). The whole gate is wrapped in
+          // a try/catch so a transient broker outage in the regime fetch never
+          // crashes the autorun tick.
+          if (!run.result && this.getRegime && this.isStrategyEligibleInRegime) {
+            try {
+              const reg = await Promise.resolve(this.getRegime());
+              if (reg && reg.regime) {
+                run.regime = { label: reg.regime, confidence: reg.confidence };
+                const eligible = this.isStrategyEligibleInRegime(this._config.strategy, reg.regime);
+                if (!eligible) {
+                  run.result = 'skipped_wrong_regime';
+                  run.regime.reason = `strategy '${this._config.strategy}' not eligible in '${reg.regime}' regime`;
+                }
+              } else {
+                run.regime = { label: 'unknown' };
+              }
+            } catch (e) {
+              // Permissive on failure: log but let the trade proceed via the
+              // remaining gates. The other risk caps (daily cap, economics,
+              // window) still protect us.
+              run.regimeError = e.message;
+            }
+          }
+
+          // T-266: daily trade cap (only if T-267 / T-282 didn't already skip)
           if (!run.result && cfg) {
             // Rollover counter on calendar day change (IST)
             const today = _todayIST();
