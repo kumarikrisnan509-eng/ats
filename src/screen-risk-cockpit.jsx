@@ -55,6 +55,7 @@ const SECTOR_COLOURS = {
 
 window.RiskCockpitScreen = function RiskCockpitScreen() {
   const [data, setData] = React.useState(null);
+  const [optionGreeks, setOptionGreeks] = React.useState(null);   // T-294b: net book Greeks
   const [regime, setRegime] = React.useState(null);     // T-280: market regime banner
   const [stress, setStress] = React.useState(null);     // T-275: scenario stress preview
   const [shockPct, setShockPct] = React.useState(-3);
@@ -67,6 +68,7 @@ window.RiskCockpitScreen = function RiskCockpitScreen() {
       const r = await window.fetchApi('/api/me/portfolio/aggregates');
       if (r && r.ok) {
         setData(r.aggregates);
+        setOptionGreeks(r.optionGreeks || null);   // T-294b
         setError(null);
         setLastUpdated(new Date());
       } else {
@@ -315,6 +317,56 @@ window.RiskCockpitScreen = function RiskCockpitScreen() {
               </span>
             </div>
           </div>
+        </section>
+      )}
+
+      {/* T-294b: Option Greeks rollup -- only render when present + matched > 0 */}
+      {optionGreeks && Number.isFinite(optionGreeks.netDelta) && optionGreeks.matched > 0 && (
+        <section style={{ ..._panelStyle, marginTop: 20 }}>
+          <div style={_panelHeader}>
+            Option Greeks (book-level)
+            <span style={{ marginLeft: 12, fontSize: 11, fontWeight: 400, color: 'var(--text-3)' }}>
+              {optionGreeks.matched} matched / {optionGreeks.unmatched ? optionGreeks.unmatched.length : 0} unmatched
+            </span>
+          </div>
+          <div style={{ padding: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.4 }}>Net Delta</div>
+              <div style={{ fontSize: 20, fontWeight: 600, fontFamily: 'monospace', color: _pnlColor(optionGreeks.netDelta) }}>
+                {Number(optionGreeks.netDelta).toFixed(2)}
+              </div>
+              {Number.isFinite(optionGreeks.notionalDelta) && (
+                <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>
+                  Notional: {_inr(optionGreeks.notionalDelta)}
+                </div>
+              )}
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.4 }}>Net Gamma</div>
+              <div style={{ fontSize: 20, fontWeight: 600, fontFamily: 'monospace' }}>
+                {Number(optionGreeks.netGamma).toFixed(4)}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.4 }}>Net Vega</div>
+              <div style={{ fontSize: 20, fontWeight: 600, fontFamily: 'monospace' }}>
+                {Number(optionGreeks.netVega).toFixed(2)}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>per 1pt IV</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.4 }}>Net Theta</div>
+              <div style={{ fontSize: 20, fontWeight: 600, fontFamily: 'monospace', color: _pnlColor(optionGreeks.netTheta) }}>
+                {Number(optionGreeks.netTheta).toFixed(2)}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>per day</div>
+            </div>
+          </div>
+          {optionGreeks.unmatched && optionGreeks.unmatched.length > 0 && (
+            <div style={{ padding: '6px 14px 12px', fontSize: 11, color: 'var(--text-3)' }}>
+              Unmatched (no quote in option_quotes): {optionGreeks.unmatched.slice(0, 5).join(', ')}{optionGreeks.unmatched.length > 5 ? '...' : ''}
+            </div>
+          )}
         </section>
       )}
 

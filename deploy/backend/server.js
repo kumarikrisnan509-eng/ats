@@ -4298,7 +4298,10 @@ app.use((req, res, next) => {
   next();
 });
 mountOptionChainRoutes(app, {
-  db: { prepare: (sql) => (db ? db.prepare(sql) : (() => { throw new Error('db_not_initialized'); })) },
+  // Getter pattern: db is assigned inside init(); mountX runs at module load.
+  // Lazy lookup avoids the undefined-at-mount-time problem the other routes
+  // dodge via their own getX patterns (e.g. getAuth, getRiskConfig).
+  getDb: () => db,
   fetcher: { refresh: async (args) => optionChainFetcher ? optionChainFetcher.refresh(args) : { ok: false, reason: 'fetcher_not_initialized' } },
   opsKey: process.env.ATS_OPS_KEY || '',
 });
