@@ -123,12 +123,150 @@ export type SlippageResponse =
   | ApiErr;
 
 // -----------------------------------------------------------------------------
-// Reserved slots for the other recently-shipped screens. Fill in when each is
-// migrated to `// @ts-check`. Keeping them undefined here surfaces a clear
-// "type unknown" diagnostic instead of false safety.
-//
-// /api/me/walk-forward         -> WalkForwardResponse
-// /api/me/macro-signals        -> MacroSignalsResponse
-// /api/me/options-ops          -> OptionsOpsResponse
-// /api/me/calibration          -> CalibrationResponse
-// /api/me/sip                  -> SipResponse
+// POST /api/me/walk-forward     (T-301a + Phase B-2)
+// Source: server.js handler @ ~4390 + services/walk-forward.js result shape.
+// Inner ranked/summary/recommendation shapes are deliberately broad -- the
+// UI renders them via JSX children so structural typing buys little; we only
+// pin the field NAMES the screen accesses so typos surface.
+
+export interface WalkForwardResponse_Ok {
+  ok: true;
+  symbol: string;
+  ranked?: unknown[];
+  summary?: Record<string, unknown>;
+  recommendation?: { action?: string; params?: Record<string, unknown>; [k: string]: unknown };
+  reason?: never;
+}
+export type WalkForwardResponse = WalkForwardResponse_Ok | ApiErr;
+
+/** GET /api/strategies -- list of strategy descriptors the walk-forward UI prefetches. */
+export interface StrategyParam {
+  name: string;
+  type: 'int' | 'float' | string;
+  default: number;
+  min?: number;
+  max?: number;
+}
+export interface StrategyDescriptor {
+  id: string;
+  name?: string;
+  params?: StrategyParam[];
+}
+export type StrategiesResponse =
+  | (ApiOk<unknown> & { strategies: StrategyDescriptor[] })
+  | ApiErr;
+
+// -----------------------------------------------------------------------------
+// GET /api/me/macro-signals     (T-280c + Phase B-2)
+// Source: server.js handler + services/nse-macro-fetcher.js cachedLatest().
+
+export interface MacroSignalsLatest {
+  fetchedAt?: string;
+  fiiNetFlow?: number | null;
+  marketBreadth?: number | null;
+  highLowRatio?: number | null;
+  errorsJson?: string | null;
+  [k: string]: unknown;
+}
+
+export type MacroSignalsResponse =
+  | (ApiOk<unknown> & {
+      fetcherEnabled: boolean;
+      fetcherInstantiated: boolean;
+      latest: MacroSignalsLatest | null;
+    })
+  | ApiErr;
+
+// -----------------------------------------------------------------------------
+// GET /api/options/opportunities?limit=N   (T-298a + Phase B-2)
+// Source: server.js handler @ ~4354 (raw SQL projection).
+
+export interface OptionOpportunityRow {
+  id: number;
+  scannedAt: string;
+  underlying: string;
+  regime: string;
+  regimeConfidence: number | null;
+  template: string;
+  score: number;
+  rawScore: number;
+  weight: number;
+  /** JSON-encoded opportunity payload; UI parses lazily. */
+  opportunityJson: string | null;
+  reviewed: number;                       // SQLite 0/1
+  reviewedAt: string | null;
+  reviewedNote: string | null;
+}
+
+export type OptionOpportunitiesResponse =
+  | (ApiOk<unknown> & { count: number; opportunities: OptionOpportunityRow[] })
+  | ApiErr;
+
+/** GET /api/options/scanner/status -- gate-status flags surfaced to the ops screen. */
+export type OptionScannerStatusResponse =
+  | (ApiOk<unknown> & {
+      fetcherEnabled: boolean;
+      scannerEnabled: boolean;
+      fetcherInstantiated: boolean;
+      scannerInstantiated: boolean;
+      note?: string;
+    })
+  | ApiErr;
+
+// -----------------------------------------------------------------------------
+// GET /api/me/calibration?windowDays=N + GET /api/me/recommend-retire
+// (T-302a/T-303a + Phase B-2). Inner calibration object is large and varies;
+// the screen reads it through generic Object.entries iteration so we leave it
+// as Record<string, unknown>.
+
+export type CalibrationResponse =
+  | (ApiOk<unknown> & { windowDays: number; calibration: Record<string, unknown> })
+  | ApiErr;
+
+export interface RecommendRetireBuckets {
+  retire?: Array<{ signal: string; [k: string]: unknown }>;
+  keep?: Array<{ signal: string; [k: string]: unknown }>;
+  [k: string]: unknown;
+}
+export type RecommendRetireResponse = (ApiOk<unknown> & RecommendRetireBuckets) | ApiErr;
+
+// -----------------------------------------------------------------------------
+// GET /api/sip/plan + GET /api/sip/history    (T-276 + Phase B-2)
+// Sources: server.js handlers + services/sip-runner.js {plan, stats, history}.
+
+export interface SipPlanRow {
+  symbol: string;
+  qty?: number;
+  amount?: number;
+  allocationPct?: number;
+  status?: string;
+  reason?: string;
+  [k: string]: unknown;
+}
+export interface SipPlan {
+  fireDate?: string;
+  rows: SipPlanRow[];
+  [k: string]: unknown;
+}
+export interface SipStats {
+  lastTickAt?: string | null;
+  timerArmed?: boolean;
+  [k: string]: unknown;
+}
+
+export type SipPlanResponse =
+  | (ApiOk<unknown> & { plan: SipPlan; stats: SipStats })
+  | ApiErr;
+
+export interface SipHistoryRow {
+  fireDate: string;
+  symbol: string;
+  qty?: number;
+  amount?: number;
+  status?: string;
+  reason?: string;
+  [k: string]: unknown;
+}
+export type SipHistoryResponse =
+  | (ApiOk<unknown> & { history: SipHistoryRow[] })
+  | ApiErr;

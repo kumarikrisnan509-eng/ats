@@ -1,8 +1,11 @@
 /* eslint-disable */
-/* T-301a -- Walk-forward parameter optimization screen.
- * Operator picks strategy + symbol, posts a paramGrid, sees recommendation.
- */
+// @ts-check
+/* T-301a  -- Walk-forward parameter optimization screen. */
+/* T-312b -- Phase B-2: typed against /api/me/walk-forward + /api/strategies. */
 
+/** @typedef {import('../types/api-shapes').WalkForwardResponse} WalkForwardResponse */
+/** @typedef {import('../types/api-shapes').StrategiesResponse}  StrategiesResponse */
+/** @typedef {import('../types/api-shapes').StrategyDescriptor} StrategyDescriptor */
 
 (function () {
   // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inr, _fmtTime, etc.)
@@ -23,7 +26,7 @@ window.WalkForwardScreen = function WalkForwardScreen() {
   const [paramGridJson, setParamGridJson] = React.useState('{}');
 
   React.useEffect(() => {
-    fetch('/api/strategies').then(r => r.json()).then(r => {
+    fetch('/api/strategies').then(r => r.json()).then(/** @param {StrategiesResponse} r */ (r) => {
       if (r && r.ok && Array.isArray(r.strategies)) setStrategies(r.strategies);
     }).catch(() => {});
   }, []);
@@ -54,6 +57,7 @@ window.WalkForwardScreen = function WalkForwardScreen() {
     try { grid = JSON.parse(paramGridJson); }
     catch (e) { setErr('paramGrid is not valid JSON: ' + e.message); setRunning(false); return; }
     try {
+      /** @type {WalkForwardResponse} */
       const r = await fetch('/api/me/walk-forward', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrfToken || '' },

@@ -16,13 +16,21 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "jsx": "preserve",
-    "lib": ["ES2020", "DOM"],
+    "lib": [
+      "ES2020",
+      "DOM"
+    ],
     "types": []
   },
   "include": [
-    "types/**/*.d.ts",
     "src/screen-attribution.jsx",
-    "src/screen-slippage.jsx"
+    "src/screen-calibration.jsx",
+    "src/screen-macro-signals.jsx",
+    "src/screen-options-opportunities.jsx",
+    "src/screen-sip.jsx",
+    "src/screen-slippage.jsx",
+    "src/screen-walk-forward.jsx",
+    "types/**/*.d.ts"
   ],
   "exclude": [
     "node_modules",

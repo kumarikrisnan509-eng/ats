@@ -1,8 +1,12 @@
 /* eslint-disable */
+// @ts-check
 /* T-310 -- SIP plan + history screen.
  * Reads GET /api/sip/plan + /api/sip/history. Read-only -- no mutations.
  */
 
+
+/** @typedef {import('../types/api-shapes').SipPlanResponse}    SipPlanResponse */
+/** @typedef {import('../types/api-shapes').SipHistoryResponse} SipHistoryResponse */
 
 (function () {
   // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inr, _fmtTime, etc.)
@@ -30,8 +34,8 @@ window.SipScreen = function SipScreen() {
   const load = React.useCallback(async () => {
     try {
       const [p, h] = await Promise.all([
-        fetch('/api/sip/plan').then(r => r.json()),
-        fetch(`/api/sip/history?days=${days}`).then(r => r.json()),
+        /** @type {Promise<SipPlanResponse>} */ (fetch('/api/sip/plan').then(r => r.json())),
+        /** @type {Promise<SipHistoryResponse>} */ (fetch(`/api/sip/history?days=${days}`).then(r => r.json())),
       ]);
       if (p && p.ok) { setPlan(p.plan); setStats(p.stats); } else setErr(p && p.reason);
       if (h && h.ok) setHistory(h.history || []);

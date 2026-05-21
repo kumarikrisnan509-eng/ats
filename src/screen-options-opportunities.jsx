@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* T-298c -- Options opportunities (SHADOW MODE) screen.
  *
  * Read-only surface for the option_opportunities table populated by the
@@ -18,6 +19,9 @@
  * /:id/review POST.
  */
 
+
+/** @typedef {import('../types/api-shapes').OptionScannerStatusResponse} OptionScannerStatusResponse */
+/** @typedef {import('../types/api-shapes').OptionOpportunitiesResponse} OptionOpportunitiesResponse */
 
 (function () {
   // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inr, _fmtTime, etc.)
@@ -56,8 +60,8 @@ window.OptionsOpportunitiesScreen = function OptionsOpportunitiesScreen() {
   const load = React.useCallback(async () => {
     try {
       const [s, o] = await Promise.all([
-        fetch('/api/options/scanner/status').then(r => r.json()),
-        fetch('/api/options/opportunities?limit=50').then(r => r.json()),
+        /** @type {Promise<OptionScannerStatusResponse>} */ (fetch('/api/options/scanner/status').then(r => r.json())),
+        /** @type {Promise<OptionOpportunitiesResponse>} */ (fetch('/api/options/opportunities?limit=50').then(r => r.json())),
       ]);
       if (s && s.ok) setStatus(s);
       if (o && o.ok) setOpps(o.opportunities || []);

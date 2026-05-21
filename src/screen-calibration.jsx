@@ -1,10 +1,14 @@
 /* eslint-disable */
+// @ts-check
 /* T-302a/T-303a -- Signal calibration + auto-retire recommendation screen.
  * Read-only. Surfaces /api/me/calibration + /api/me/recommend-retire.
  * Recommendations are advisory -- engine still respects operator's
  * activeStrategies list in risk-config.
  */
 
+
+/** @typedef {import('../types/api-shapes').CalibrationResponse}     CalibrationResponse */
+/** @typedef {import('../types/api-shapes').RecommendRetireResponse} RecommendRetireResponse */
 
 (function () {
   // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inr, _fmtTime, etc.)

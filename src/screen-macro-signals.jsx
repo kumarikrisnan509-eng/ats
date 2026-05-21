@@ -1,9 +1,12 @@
 /* eslint-disable */
+// @ts-check
 /* T-280c -- Macro signals (NSE FII/DII, breadth, 52w highs/lows) screen.
  * Read-only. Reads latest row from macro_signals via /api/me/macro-signals.
  * Feeds into the regime classifier's confidence/regime (T-280b).
  */
 
+
+/** @typedef {import('../types/api-shapes').MacroSignalsResponse} MacroSignalsResponse */
 
 (function () {
   // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inr, _fmtTime, etc.)
@@ -29,6 +32,7 @@ window.MacroSignalsScreen = function MacroSignalsScreen() {
 
   const load = React.useCallback(async () => {
     try {
+      /** @type {MacroSignalsResponse} */
       const r = await fetch('/api/me/macro-signals').then(r => r.json());
       if (r && r.ok) setData(r);
       else setErr(r && r.reason);
