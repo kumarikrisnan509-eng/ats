@@ -36,6 +36,8 @@ const { mountRiskConfigRoutes } = require('./routes/risk-config');
 const { createRiskConfigService } = require('./services/risk-config');
 // T-264: tax-aware trade economics service (per-trade STT/GST/SEBI/brokerage math).
 const { createTradeEconomics } = require('./services/trade-economics');
+// T-276: daily SIP runner -- cron + idempotent order placer for DCA mix.
+const { createSipRunner } = require('./services/sip-runner');
 // T-268: full notify namespace (AutoRunner needs notify.notifyOrderPlaced etc).
 const _notifyModule = require('./notify');
 const _tradeEconomics = createTradeEconomics();
@@ -149,7 +151,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, db, auth, rebalance, replay, emailAlerts, whatsAppAlerts, riskConfigService;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, db, auth, rebalance, replay, emailAlerts, whatsAppAlerts, riskConfigService, sipRunner;
 
 async function init() {
   broker = createBroker(process.env);
@@ -297,6 +299,29 @@ async function init() {
   } catch (e) {
     console.error('!! riskConfigService init failed:', e.message);
     riskConfigService = null;
+  }
+
+  // T-276: SIP runner. Daily cron at 09:30 IST + idempotent order placement.
+  // Depends on db (sip_fires table), riskConfigService (read dcaAllocation +
+  // capital), paper (place orders), broker (getLastTicks for spot price).
+  // Skipped silently if any dep missing -- the rest of the engine keeps running.
+  try {
+    if (db && riskConfigService && paper) {
+      sipRunner = createSipRunner({
+        db, riskConfigService, paper, audit, notify: _notifyModule,
+        getLastTick: (sym) => {
+          if (typeof broker.getLastTicks !== 'function') return null;
+          const arr = broker.getLastTicks();
+          const hit = arr.find(t => t.symbol === sym);
+          return hit ? hit.ltp : null;
+        },
+      });
+      sipRunner.start(1);   // operator account; multi-user comes with T-272+
+      console.log('[server] SIP runner armed (09:30 IST daily + boot catch-up)');
+    }
+  } catch (e) {
+    console.error('!! sipRunner init failed:', e.message);
+    sipRunner = null;
   }
 
     wormAudit = new WormAudit({
@@ -4099,6 +4124,26 @@ mountAuthRoutes(app, { getAuth: () => auth, getEmailAlerts: () => emailAlerts })
 // because riskConfigService is assigned inside init() (after openDb)
 // but mountX is called at module top-level; capturing now = undefined.
 mountRiskConfigRoutes(app, { getRiskConfig: () => riskConfigService, getAuth: () => auth });
+
+// T-276: SIP runner endpoints. Auth-gated; user_id pinned to 1 (operator) for now.
+app.get('/api/sip/plan', (req, res) => {
+  if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
+  if (!sipRunner) return res.status(503).json({ ok:false, reason:'sip_runner_not_initialized' });
+  res.json({ ok:true, plan: sipRunner.plan(1), stats: sipRunner.stats() });
+});
+app.post('/api/sip/fire', (req, res) => {
+  if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
+  if (!sipRunner) return res.status(503).json({ ok:false, reason:'sip_runner_not_initialized' });
+  const dryRun = req.body && req.body.dryRun !== false; // default to dry-run for safety
+  const result = sipRunner.runOnce(1, { dryRun });
+  res.json({ ok:true, dryRun, result });
+});
+app.get('/api/sip/history', (req, res) => {
+  if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
+  if (!sipRunner) return res.status(503).json({ ok:false, reason:'sip_runner_not_initialized' });
+  const days = Math.max(1, Math.min(365, parseInt(req.query.days, 10) || 30));
+  res.json({ ok:true, history: sipRunner.history(1, days) });
+});
 
 app.get('/api/security/my-ip', (req, res) => {
   const xrip = req.headers['x-real-ip'];

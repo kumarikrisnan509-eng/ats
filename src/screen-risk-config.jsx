@@ -271,9 +271,16 @@ window.RiskConfigScreen = function RiskConfigScreen() {
       {/* RcSection 2: DCA mix */}
       <RcSection
         title="DCA mix (monthly SIP allocation)"
-        sub="Each value is a fraction of capital deployed monthly to that ETF. Total must be <= 100% of capital. The remainder is held as cash buffer."
-        status="partial"
+        sub="Each value is a fraction of capital deployed monthly to that ETF. Total must be <= 100% of capital. The remainder is held as cash buffer. SIPs fire automatically on the configured day-of-month."
+        status="wired"
       >
+        <Field label="SIP day of month" hint="1 - 28. Default 5 (after typical salary credit). SIPs fire on this calendar day; idempotent across reboots.">
+          <input type="number" min="1" max="28" step="1"
+            value={config.sipDayOfMonth || 5}
+            onChange={e => update({ sipDayOfMonth: Math.trunc(Number(e.target.value)) || 5 })}
+            style={_inputStyle}
+          />
+        </Field>
         {DCA_SYMBOLS.map(sym => (
           <Field key={sym} label={sym} hint={`${_inr((config.capital || 0) * (config.dcaAllocation[sym] || 0))} / month at current capital`}>
             <PctInput

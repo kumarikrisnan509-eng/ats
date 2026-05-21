@@ -37,6 +37,8 @@ const DEFAULTS = Object.freeze({
   activeStrategies: Object.freeze(['supertrend', 'rsi_mean_revert', 'vwap']),
   votingThreshold: 2,
   tradingMode: 'paper',
+  // T-276: SIP firing day-of-month (1..28). 5 = post-salary default.
+  sipDayOfMonth: 5,
   // ---- T-265..T-267 risk gates ----
   maxDailyTrades: 5,         // T-266: pause new entries after N closed trades today
   goldenStartHHMM: '09:20',  // T-267: don't fire before this (avoids opening chaos)
@@ -88,6 +90,9 @@ function _validate(partial, currentMerged) {
     throw new Error(`tradingMode must be one of: ${TRADING_MODES.join(', ')}`);
   }
   // ---- T-265..T-267 validation ----
+  if (!Number.isInteger(m.sipDayOfMonth) || m.sipDayOfMonth < 1 || m.sipDayOfMonth > 28) {
+    throw new Error('sipDayOfMonth must be an integer between 1 and 28');
+  }
   if (!Number.isInteger(m.maxDailyTrades) || m.maxDailyTrades < 1 || m.maxDailyTrades > 100) {
     throw new Error('maxDailyTrades must be an integer between 1 and 100');
   }
@@ -141,6 +146,7 @@ function _rowToConfig(row) {
     goldenEndHHMM:   row.golden_end_hhmm   || DEFAULTS.goldenEndHHMM,
     tslActivatePct:  Number.isFinite(row.tsl_activate_pct) ? row.tsl_activate_pct : DEFAULTS.tslActivatePct,
     tslGapPct:       Number.isFinite(row.tsl_gap_pct)      ? row.tsl_gap_pct      : DEFAULTS.tslGapPct,
+    sipDayOfMonth:   Number.isInteger(row.sip_day_of_month) ? row.sip_day_of_month : DEFAULTS.sipDayOfMonth,
     updatedAt: row.updated_at,
   };
 }
@@ -161,6 +167,7 @@ function _defaultsForUser() {
     goldenEndHHMM: DEFAULTS.goldenEndHHMM,
     tslActivatePct: DEFAULTS.tslActivatePct,
     tslGapPct: DEFAULTS.tslGapPct,
+    sipDayOfMonth: DEFAULTS.sipDayOfMonth,
     updatedAt: null,
   };
 }
@@ -178,6 +185,7 @@ function createRiskConfigService(db) {
     ['golden_end_hhmm',     "TEXT NOT NULL DEFAULT '15:10'"],
     ['tsl_activate_pct',    'REAL NOT NULL DEFAULT 0.005'],
     ['tsl_gap_pct',         'REAL NOT NULL DEFAULT 0.003'],
+    ['sip_day_of_month',    'INTEGER NOT NULL DEFAULT 5'],
   ];
   for (const [col, ddl] of MIGRATION_COLS) {
     try {
@@ -197,11 +205,13 @@ function createRiskConfigService(db) {
       user_id, capital, max_position_pct, max_daily_loss_pct, max_open_positions,
       dca_allocation_json, active_strategies_json, voting_threshold, trading_mode,
       max_daily_trades, golden_start_hhmm, golden_end_hhmm, tsl_activate_pct, tsl_gap_pct,
+      sip_day_of_month,
       updated_at
     ) VALUES (
       @user_id, @capital, @max_position_pct, @max_daily_loss_pct, @max_open_positions,
       @dca_allocation_json, @active_strategies_json, @voting_threshold, @trading_mode,
       @max_daily_trades, @golden_start_hhmm, @golden_end_hhmm, @tsl_activate_pct, @tsl_gap_pct,
+      @sip_day_of_month,
       datetime('now')
     )
     ON CONFLICT(user_id) DO UPDATE SET
@@ -218,6 +228,7 @@ function createRiskConfigService(db) {
       golden_end_hhmm        = @golden_end_hhmm,
       tsl_activate_pct       = @tsl_activate_pct,
       tsl_gap_pct            = @tsl_gap_pct,
+      sip_day_of_month       = @sip_day_of_month,
       updated_at             = datetime('now')
   `);
 
@@ -267,6 +278,7 @@ function createRiskConfigService(db) {
       goldenEndHHMM:   partial.goldenEndHHMM   != null ? String(partial.goldenEndHHMM)   : current.goldenEndHHMM,
       tslActivatePct:  partial.tslActivatePct  != null ? Number(partial.tslActivatePct)  : current.tslActivatePct,
       tslGapPct:       partial.tslGapPct       != null ? Number(partial.tslGapPct)       : current.tslGapPct,
+      sipDayOfMonth:   partial.sipDayOfMonth   != null ? Math.trunc(Number(partial.sipDayOfMonth)) : current.sipDayOfMonth,
     };
     _validate(partial, merged);
 
@@ -285,6 +297,7 @@ function createRiskConfigService(db) {
       golden_end_hhmm: merged.goldenEndHHMM,
       tsl_activate_pct: merged.tslActivatePct,
       tsl_gap_pct: merged.tslGapPct,
+      sip_day_of_month: merged.sipDayOfMonth,
     });
     _invalidate(userId);
     return get(userId);

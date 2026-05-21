@@ -259,6 +259,10 @@ CREATE TABLE IF NOT EXISTS user_risk_config (
   active_strategies_json TEXT  NOT NULL DEFAULT '["supertrend","rsi_mean_revert","vwap"]',
   voting_threshold     INTEGER NOT NULL DEFAULT 2,
   trading_mode         TEXT    NOT NULL DEFAULT 'paper' CHECK (trading_mode IN ('paper','micro_live','full_live')),
+  -- T-276: which day-of-month to fire monthly SIPs on. Defaults to 5 (after
+  -- typical month-end salary credit cycle in India). Rolls forward if that
+  -- date falls on a weekend / holiday -- cron only checks "fired this month".
+  sip_day_of_month     INTEGER NOT NULL DEFAULT 5,
   -- T-265..T-267 risk gates (added in clean Phase 1 implementation)
   max_daily_trades     INTEGER NOT NULL DEFAULT 5,
   golden_start_hhmm    TEXT    NOT NULL DEFAULT '09:20',
@@ -267,3 +271,28 @@ CREATE TABLE IF NOT EXISTS user_risk_config (
   tsl_gap_pct          REAL    NOT NULL DEFAULT 0.003,
   updated_at           TEXT    NOT NULL DEFAULT (datetime('now'))
 );
+
+
+-- ---------- T-276: SIP firing idempotency + audit ----------
+-- The sip-runner daily cron writes one row per (user, symbol, month) fire
+-- attempt. UNIQUE constraint guarantees we never double-fire a SIP even if
+-- the cron is invoked multiple times (boot catch-up + scheduled tick).
+-- Skipped attempts (non-market day, qty<1, no price, etc.) are also logged
+-- with status='skipped' so the operator can audit why a SIP didn't fire.
+CREATE TABLE IF NOT EXISTS sip_fires (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  symbol          TEXT    NOT NULL,
+  fired_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+  fired_date      TEXT    NOT NULL,  -- YYYY-MM-DD IST
+  fire_month      TEXT    NOT NULL,  -- YYYY-MM (the month this fire counts toward)
+  order_id        TEXT,
+  amount_inr      REAL    NOT NULL,
+  allocation_pct  REAL    NOT NULL,
+  status          TEXT    NOT NULL CHECK (status IN ('placed','failed','skipped')),
+  reason          TEXT
+);
+-- Hard idempotency: at most one PLACED row per (user, symbol, month).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sip_fires_unique_placed
+  ON sip_fires(user_id, symbol, fire_month) WHERE status='placed';
+CREATE INDEX IF NOT EXISTS idx_sip_fires_user_date ON sip_fires(user_id, fired_date DESC);
