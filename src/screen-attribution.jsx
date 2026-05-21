@@ -1,6 +1,11 @@
 /* eslint-disable */
+// @ts-check
 /* T-311 -- Daily attribution screen. Reads GET /api/me/attribution. */
+/* T-312a -- Phase B-1: typed against /api/me/attribution contract.       */
+/* See types/api-shapes.d.ts for the source of truth.                     */
 
+/** @typedef {import('../types/api-shapes').AttributionResponse} AttributionResponse */
+/** @typedef {import('../types/api-shapes').AttributionRow}      AttributionRow */
 
 (function () {
   // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inr, _fmtTime, etc.)
@@ -25,6 +30,7 @@ window.AttributionScreen = function AttributionScreen() {
 
   const load = React.useCallback(async () => {
     try {
+      /** @type {AttributionResponse} */
       const r = await fetch(`/api/me/attribution?n=${days}`).then(r => r.json());
       if (r && r.ok) { setData(r.recent || []); setStats(r.stats || null); }
       else setErr(r && r.reason);
@@ -41,6 +47,7 @@ window.AttributionScreen = function AttributionScreen() {
   if (loading) return <div style={{padding:24, color:'var(--text-2)'}}>Loading attribution...</div>;
   if (err) return <div style={{padding:24, color:'var(--down)'}}>Error: {String(err)}</div>;
 
+  /** @type {AttributionRow[]} */
   const rows = Array.isArray(data) ? data : [];
   const totalPnl = rows.reduce((s, r) => s + (Number(r.totalPnl) || 0), 0);
 

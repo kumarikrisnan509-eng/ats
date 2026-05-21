@@ -1,0 +1,36 @@
+{
+  "//": "Phase B-1: gradual JSDoc typecheck.",
+  "//1": "checkJs ON for files that opt in via `// @ts-check` at the top.",
+  "//2": "noEmit -- this is a lint pass, not a build. The browser still loads the .js files esbuild emits.",
+  "//3": "allowJs + jsx: preserve lets tsc parse our React-via-window-globals .jsx without React/JSX runtime imports.",
+  "//4": "include is narrow on purpose -- expand as more files adopt @ts-check.",
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "jsx": "preserve",
+    "lib": ["ES2020", "DOM"],
+    "types": []
+  },
+  "include": [
+    "types/**/*.d.ts",
+    "src/screen-attribution.jsx",
+    "src/screen-slippage.jsx"
+  ],
+  "exclude": [
+    "node_modules",
+    "deploy/backend/node_modules",
+    "test-e2e",
+    "test-frontend",
+    "out",
+    ".local-dev",
+    ".ci-tmp"
+  ]
+}

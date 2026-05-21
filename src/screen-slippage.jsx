@@ -1,6 +1,11 @@
 /* eslint-disable */
-/* T-312 -- Slippage tracker screen. Reads GET /api/me/slippage. */
+// @ts-check
+/* T-312  -- Slippage tracker screen. Reads GET /api/me/slippage. */
+/* T-312a -- Phase B-1: typed against /api/me/slippage contract.   */
+/* See types/api-shapes.d.ts for the source of truth.              */
 
+/** @typedef {import('../types/api-shapes').SlippageResponse} SlippageResponse */
+/** @typedef {import('../types/api-shapes').SlippagePayload}  SlippagePayload */
 
 (function () {
   // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inr, _fmtTime, etc.)
@@ -15,6 +20,7 @@ window.SlippageScreen = function SlippageScreen() {
 
   const load = React.useCallback(async () => {
     try {
+      /** @type {SlippageResponse} */
       const r = await fetch('/api/me/slippage').then(r => r.json());
       if (r && r.ok) setData(r.slippage);
       else setErr(r && r.reason);
@@ -32,9 +38,11 @@ window.SlippageScreen = function SlippageScreen() {
   if (err) return <div style={{padding:24, color:'var(--down)'}}>Error: {String(err)}</div>;
   if (!data) return <div style={{padding:24, color:'var(--text-2)'}}>No data yet.</div>;
 
-  const byStrategy = data.byStrategy || {};
-  const bySymbol = data.bySymbol || {};
-  const overall = data.overall || {};
+  /** @type {SlippagePayload} */
+  const d = data;
+  const byStrategy = d.byStrategy || {};
+  const bySymbol   = d.bySymbol   || {};
+  const overall    = d.overall    || { trades: 0, avgSlippageBps: 0, totalSlippageINR: 0 };
 
   return (
     <div style={{padding:'16px 24px', maxWidth:1200}}>

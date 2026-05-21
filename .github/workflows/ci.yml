@@ -124,6 +124,24 @@ jobs:
           print('no duplicate top-level const identifiers across .jsx files')
           PY
 
+      - name: JSDoc type check (Phase B-1 -- tsc --noEmit --checkJs on opted-in files)
+        run: |
+          set -e
+          # T-312a: gradual JSDoc typecheck. Catches the attribution/slippage
+          # class of shape-mismatch bug (UI reads r.regime as string when
+          # backend ships {label, confidence}) at edit time. Files opt in by
+          # adding `// @ts-check` and an @type annotation on the fetch result;
+          # see types/api-shapes.d.ts for the canonical shape definitions.
+          # Currently checks 2 files; expand tsconfig.json::include as more
+          # screens migrate.
+          mkdir -p .ci-tmp-tsc && cd .ci-tmp-tsc
+          echo '{"name":"ci-tmp-tsc","version":"0.0.0","private":true}' > package.json
+          npm install --silent --no-save --no-package-lock typescript@5.4.5 >/dev/null
+          cd ..
+          ./.ci-tmp-tsc/node_modules/.bin/tsc --noEmit -p tsconfig.json
+          rm -rf .ci-tmp-tsc
+          echo "JSDoc typecheck OK"
+
       - name: Backend unit tests (node:test)
         working-directory: deploy/backend
         env:
