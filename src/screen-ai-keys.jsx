@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* Tier 86: Dedicated AI providers (BYOK) page.
    Mirrors the Brokers page pattern -- config has its own home, analysis lives on Insights.
    Per-user sealed keys for Claude / OpenAI / Gemini with Save / Test / Remove.

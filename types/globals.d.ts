@@ -25,3 +25,53 @@ declare const _inr: any;
 declare const _fmtTime: any;
 declare const _fmtDate: any;
 declare const _pnlColor: any;
+
+// Phase B-3: cross-file globals exported via the window-namespace pattern.
+// Every .jsx ships as its own <script>; primitives, formatters, icons, and
+// custom hooks defined in one file are read as bare names in others. tsc
+// needs these declared to type-check the screens.
+
+// React hooks (when destructured as globals via `const { useState } = React`).
+declare const useState: any;
+declare const useMemo: any;
+declare const useEffect: any;
+declare const useCallback: any;
+declare const useRef: any;
+declare const useContext: any;
+declare const useReducer: any;
+
+// Primitives (src/primitives.jsx + r8/r9/r10/r11-primitives.jsx + r8-additions.jsx).
+declare const Card: any;
+declare const Stat: any;
+declare const Pill: any;
+declare const Chip: any;
+declare const Toggle: any;
+declare const Segmented: any;
+declare const Progress: any;
+
+// Charts + tickers.
+declare const Sparkline: any;
+declare const LiveSparkline: any;
+declare const LiveCell: any;
+declare const StaleIndicator: any;
+declare const AreaChart: any;
+declare const BarRow: any;
+declare const Candles: any;
+declare const Heatmap: any;
+declare const Donut: any;
+declare const CountUp: any;
+
+// Icon factory.
+declare const I: any;
+
+// Formatters (src/primitives.jsx / r8-primitives.jsx).
+declare const inr: any;
+declare const inrCompact: any;
+declare const pct: any;
+declare const clsPN: any;
+
+// Live data + connection hooks (src/live-ticks.jsx).
+declare const useLivePnL: any;
+declare const useLiveTick: any;
+declare const useConnectionState: any;
+declare const seriesRandom: any;

@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* Tier 61: Anonymous landing page.
    Shown to unauthenticated visitors. Replaces the prior behavior where they
    saw the dashboard with mock KPIs. Renders a clean marketing splash with

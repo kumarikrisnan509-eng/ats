@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* Margin calculator — SPAN + Exposure margin breakdown, aggregated + per-leg */
 
 const MarginScreen = () => {

@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* Tier 56: Onboarding wizard. 4 steps:
      1. Welcome
      2. Email verification status (skip if already verified)

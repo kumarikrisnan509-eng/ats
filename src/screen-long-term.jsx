@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* T-249 + T-252 (polish) + T-253 (DCA wired to /api/sip):
  *
  * Long-Term basket screen — the API-buyable replacement for the retired MF

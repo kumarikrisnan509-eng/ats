@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* Dashboard screen */
 
 // T100 (v9): NaN guards. .toFixed() / division / parsing on undefined or null

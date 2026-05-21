@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* Strategies screen — mode is the primary grouping dimension */
 
 

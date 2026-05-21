@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* Trading screen */
 
 // T99-T97: chart card pulls live LTP/change from window.useLiveTick. Was

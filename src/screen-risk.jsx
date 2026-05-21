@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* Risk screen */
 
 // Tier 17: live risk-cap usage from /api/system/info + /api/paper + /api/summary

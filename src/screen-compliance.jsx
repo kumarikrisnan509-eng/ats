@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* Compliance screen — Tier 22: live SEBI-algo-framework readiness from /api/system/info + /api/audit.
    Replaces the prior hardcoded checklist + 7 fake algo orders. */
 

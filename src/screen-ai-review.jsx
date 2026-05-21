@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* Monthly AI performance review — auto-generated report every 1st of month.
    Claude Opus 4.6 drafts narrative; Gemini validates; GPT-5 generates recommendations. */
 

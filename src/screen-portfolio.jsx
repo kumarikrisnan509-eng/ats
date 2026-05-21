@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-check
 /* Portfolio screen — long-term holdings + profit sweep waterfall.
    2026-05-13: equity `holdings` loads from /api/portfolio/holdings (per-user).
    2026-05-17 T-66: MF + ETF loaded from /api/me/portfolio/mf|etf (per-user).
