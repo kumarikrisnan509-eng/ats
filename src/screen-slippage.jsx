@@ -42,21 +42,18 @@ window.SlippageScreen = function SlippageScreen() {
 
       {/* Overall */}
       <section style={{background:'var(--panel, #1a1f2e)', border:'1px solid var(--border, #2a3142)', borderRadius:8, marginBottom:20, padding:14, display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:12}}>
+        {/* backend shape: overall = {trades, avgSlippageBps, totalSlippageINR} */}
         <div>
-          <div style={{fontSize:11, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:0.4}}>Mean slippage</div>
-          <div style={{fontSize:22, fontWeight:600, color:_bpsColor(overall.meanBps), fontFamily:'monospace'}}>{_bps(overall.meanBps)}</div>
+          <div style={{fontSize:11, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:0.4}}>Avg slippage</div>
+          <div style={{fontSize:22, fontWeight:600, color:_bpsColor(overall.avgSlippageBps), fontFamily:'monospace'}}>{_bps(overall.avgSlippageBps)}</div>
         </div>
         <div>
-          <div style={{fontSize:11, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:0.4}}>Median</div>
-          <div style={{fontSize:22, fontWeight:600, fontFamily:'monospace'}}>{_bps(overall.medianBps)}</div>
+          <div style={{fontSize:11, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:0.4}}>Total slippage cost</div>
+          <div style={{fontSize:22, fontWeight:600, fontFamily:'monospace'}}>{Number.isFinite(overall.totalSlippageINR) ? `\u20B9${overall.totalSlippageINR.toFixed(0)}` : '-'}</div>
         </div>
         <div>
-          <div style={{fontSize:11, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:0.4}}>P95 (tail)</div>
-          <div style={{fontSize:22, fontWeight:600, color:_bpsColor(overall.p95Bps), fontFamily:'monospace'}}>{_bps(overall.p95Bps)}</div>
-        </div>
-        <div>
-          <div style={{fontSize:11, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:0.4}}>Fills tracked</div>
-          <div style={{fontSize:22, fontWeight:600, fontFamily:'monospace'}}>{overall.fills || 0}</div>
+          <div style={{fontSize:11, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:0.4}}>Trades tracked</div>
+          <div style={{fontSize:22, fontWeight:600, fontFamily:'monospace'}}>{overall.trades || 0}</div>
         </div>
       </section>
 
@@ -70,20 +67,18 @@ window.SlippageScreen = function SlippageScreen() {
             <thead>
               <tr style={{borderBottom:'1px solid var(--border, #2a3142)', textAlign:'left', color:'var(--text-2)'}}>
                 <th style={{padding:'6px 4px'}}>Strategy</th>
-                <th style={{padding:'6px 4px', textAlign:'right'}}>Fills</th>
-                <th style={{padding:'6px 4px', textAlign:'right'}}>Mean</th>
-                <th style={{padding:'6px 4px', textAlign:'right'}}>Median</th>
-                <th style={{padding:'6px 4px', textAlign:'right'}}>P95</th>
+                <th style={{padding:'6px 4px', textAlign:'right'}}>Trades</th>
+                <th style={{padding:'6px 4px', textAlign:'right'}}>Avg slippage</th>
+                <th style={{padding:'6px 4px', textAlign:'right'}}>Total cost</th>
               </tr>
             </thead>
             <tbody>
-              {Object.entries(byStrategy).sort((a,b) => (b[1].meanBps||0) - (a[1].meanBps||0)).map(([k, v]) => (
+              {Object.entries(byStrategy).sort((a,b) => (b[1].avgSlippageBps||0) - (a[1].avgSlippageBps||0)).map(([k, v]) => (
                 <tr key={k} style={{borderBottom:'1px solid var(--border, #2a3142)'}}>
                   <td style={{padding:'6px 4px', fontWeight:600}}>{k}</td>
-                  <td style={{padding:'6px 4px', textAlign:'right'}}>{v.fills || 0}</td>
-                  <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace', color:_bpsColor(v.meanBps)}}>{_bps(v.meanBps)}</td>
-                  <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace'}}>{_bps(v.medianBps)}</td>
-                  <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace', color:_bpsColor(v.p95Bps)}}>{_bps(v.p95Bps)}</td>
+                  <td style={{padding:'6px 4px', textAlign:'right'}}>{v.trades || 0}</td>
+                  <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace', color:_bpsColor(v.avgSlippageBps)}}>{_bps(v.avgSlippageBps)}</td>
+                  <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace'}}>{Number.isFinite(v.totalSlippageINR) ? `\u20B9${v.totalSlippageINR.toFixed(0)}` : '-'}</td>
                 </tr>
               ))}
             </tbody>
@@ -106,11 +101,11 @@ window.SlippageScreen = function SlippageScreen() {
               </tr>
             </thead>
             <tbody>
-              {Object.entries(bySymbol).sort((a,b) => (b[1].meanBps||0) - (a[1].meanBps||0)).slice(0, 20).map(([s, v]) => (
+              {Object.entries(bySymbol).sort((a,b) => (b[1].avgSlippageBps||0) - (a[1].avgSlippageBps||0)).slice(0, 20).map(([s, v]) => (
                 <tr key={s} style={{borderBottom:'1px solid var(--border, #2a3142)'}}>
                   <td style={{padding:'6px 4px', fontWeight:600}}>{s}</td>
-                  <td style={{padding:'6px 4px', textAlign:'right'}}>{v.fills || 0}</td>
-                  <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace', color:_bpsColor(v.meanBps)}}>{_bps(v.meanBps)}</td>
+                  <td style={{padding:'6px 4px', textAlign:'right'}}>{v.trades || 0}</td>
+                  <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace', color:_bpsColor(v.avgSlippageBps)}}>{_bps(v.avgSlippageBps)}</td>
                 </tr>
               ))}
             </tbody>

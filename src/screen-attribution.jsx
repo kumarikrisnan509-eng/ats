@@ -48,7 +48,11 @@ window.AttributionScreen = function AttributionScreen() {
   const byStrat = {};
   for (const r of rows) {
     if (r && r.byStrategy) {
-      for (const [k, v] of Object.entries(r.byStrategy)) byStrat[k] = (byStrat[k] || 0) + (Number(v) || 0);
+      // backend shape: byStrategy[tag] = { count, pnl }
+      for (const [k, v] of Object.entries(r.byStrategy)) {
+        const pnl = v && typeof v === 'object' ? Number(v.pnl) : Number(v);
+        byStrat[k] = (byStrat[k] || 0) + (Number.isFinite(pnl) ? pnl : 0);
+      }
     }
   }
   const stratRows = Object.entries(byStrat).sort((a, b) => b[1] - a[1]);
@@ -114,15 +118,22 @@ window.AttributionScreen = function AttributionScreen() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, i) => (
+              {rows.map((r, i) => {
+                // backend shape: r.regime = {label, confidence}; r.tradeCount; r.autorun.gateSkips = {code: count}
+                const regimeLabel = (r.regime && r.regime.label) || '-';
+                const tradeCount  = Number(r.tradeCount) || 0;
+                const skipCount   = r.autorun && r.autorun.gateSkips
+                  ? Object.values(r.autorun.gateSkips).reduce((s, v) => s + (Number(v) || 0), 0) : 0;
+                return (
                 <tr key={i} style={{borderBottom:'1px solid var(--border, #2a3142)'}}>
                   <td style={{padding:'6px 4px'}}>{_fmtDate(r.date)}</td>
-                  <td style={{padding:'6px 4px', fontSize:11}}>{r.regime || '-'}</td>
+                  <td style={{padding:'6px 4px', fontSize:11}}>{regimeLabel}</td>
                   <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace', color:_pnlColor(r.totalPnl)}}>{_inr(r.totalPnl)}</td>
-                  <td style={{padding:'6px 4px', textAlign:'right'}}>{r.trades || 0}</td>
-                  <td style={{padding:'6px 4px', textAlign:'right', color:'var(--text-3)'}}>{r.skipped || 0}</td>
+                  <td style={{padding:'6px 4px', textAlign:'right'}}>{tradeCount}</td>
+                  <td style={{padding:'6px 4px', textAlign:'right', color:'var(--text-3)'}}>{skipCount}</td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         )}
