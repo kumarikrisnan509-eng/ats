@@ -259,5 +259,11 @@ CREATE TABLE IF NOT EXISTS user_risk_config (
   active_strategies_json TEXT  NOT NULL DEFAULT '["supertrend","rsi_mean_revert","vwap"]',
   voting_threshold     INTEGER NOT NULL DEFAULT 2,
   trading_mode         TEXT    NOT NULL DEFAULT 'paper' CHECK (trading_mode IN ('paper','micro_live','full_live')),
+  -- T-265..T-267 risk gates (added in clean Phase 1 implementation)
+  max_daily_trades     INTEGER NOT NULL DEFAULT 5,
+  golden_start_hhmm    TEXT    NOT NULL DEFAULT '09:20',
+  golden_end_hhmm      TEXT    NOT NULL DEFAULT '15:10',
+  tsl_activate_pct     REAL    NOT NULL DEFAULT 0.005,
+  tsl_gap_pct          REAL    NOT NULL DEFAULT 0.003,
   updated_at           TEXT    NOT NULL DEFAULT (datetime('now'))
 );

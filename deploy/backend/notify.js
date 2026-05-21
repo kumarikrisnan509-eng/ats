@@ -91,4 +91,106 @@ async function notify(level, title, details = {}) {
   return postTelegram(text);
 }
 
-module.exports = { notify, postTelegram, ENABLED };
+
+
+// ============================================================================
+// T-268 -- Trade-event formatters (added Phase 1 build).
+// Reusable templates that compose pretty Telegram messages for the operator's
+// trading activity. All take a `details` object and call notify() under the
+// hood, so they share the console-log + Telegram pipeline.
+// ============================================================================
+
+/**
+ * Order placed. Caller passes the just-placed order object.
+ */
+async function notifyOrderPlaced(order) {
+  return notify('info', `Order placed: ${order.side} ${order.qty} ${order.symbol}`, {
+    fields: {
+      'Type':       order.type || 'MARKET',
+      'Strategy':   order.strategy || '(none)',
+      'Price':      order.price != null ? `₹${order.price}` : 'market',
+      'Stop loss':  order.stopLoss != null ? `₹${order.stopLoss}` : '-',
+      'Target':     order.targetPrice != null ? `₹${order.targetPrice}` : '-',
+      'Order ID':   order.id ? order.id.slice(0, 8) : '-',
+    },
+  });
+}
+
+/**
+ * Order filled. Pass {order, fillPrice, pnl?} -- pnl is realised PnL for closing fills.
+ */
+async function notifyOrderFilled({ order, fillPrice, pnl }) {
+  const fields = {
+    'Symbol':     order.symbol,
+    'Side':       order.side,
+    'Qty':        String(order.qty),
+    'Fill price': `₹${fillPrice}`,
+    'Strategy':   order.strategy || '(none)',
+  };
+  if (Number.isFinite(pnl)) {
+    fields['Realized PnL'] = pnl >= 0 ? `+₹${pnl}` : `-₹${Math.abs(pnl)}`;
+  }
+  const level = Number.isFinite(pnl) ? (pnl >= 0 ? 'success' : 'warn') : 'info';
+  return notify(level, `Order filled: ${order.side} ${order.qty} ${order.symbol} @ ₹${fillPrice}`, { fields });
+}
+
+/**
+ * Stop-loss / trailing-SL triggered.
+ */
+async function notifyStopLossHit({ symbol, side, qty, triggerPrice, fillPrice, pnl, isTrailing }) {
+  const kind = isTrailing ? 'Trailing SL hit' : 'Stop-loss hit';
+  return notify('warn', `${kind}: ${symbol}`, {
+    body: `${side} ${qty} @ trigger ₹${triggerPrice}, filled ₹${fillPrice}`,
+    fields: {
+      'Realized PnL': pnl >= 0 ? `+₹${pnl}` : `-₹${Math.abs(pnl)}`,
+      'Symbol':       symbol,
+    },
+  });
+}
+
+/**
+ * Daily loss budget threshold crossed (50%, 75%, 90%, 100%).
+ */
+async function notifyDailyLossThreshold({ percentUsed, budgetINR, realisedLossINR }) {
+  const lvl = percentUsed >= 90 ? 'error' : 'warn';
+  return notify(lvl, `Daily loss budget ${percentUsed}% used`, {
+    body: `Realised: ₹${realisedLossINR} of ₹${budgetINR} cap.`,
+    fields: { 'Budget': `₹${budgetINR}`, 'Used': `₹${realisedLossINR}`, '% used': `${percentUsed}%` },
+  });
+}
+
+/**
+ * Daily trade count cap hit -- engine pauses new entries.
+ */
+async function notifyTradeCapHit({ tradesToday, capacity }) {
+  return notify('warn', `Daily trade cap hit: ${tradesToday}/${capacity}`, {
+    body: `Engine pausing new entries for today. Existing positions still managed.`,
+  });
+}
+
+/**
+ * Outside golden trading window -- new signals suppressed.
+ * Logged but normally NOT sent to Telegram (would spam every tick outside window).
+ */
+function logOutsideWindow({ now, windowStart, windowEnd }) {
+  // console only -- no Telegram. Reason: this fires on every tick outside the
+  // window, which would be 16+ hours of spam.
+  // Callers may opt to surface this via UI banner instead.
+  console.log(`[notify] outside golden window now=${now} window=${windowStart}..${windowEnd}`);
+}
+
+/**
+ * Trade rejected by tax-aware economics gate.
+ */
+async function notifyTradeRejectedUneconomic({ symbol, strategy, projectedNetPnl, minNetPnlINR }) {
+  return notify('info', `Trade rejected: economics`, {
+    body: `${strategy} on ${symbol} -- projected net PnL after charges ₹${projectedNetPnl} below threshold ₹${minNetPnlINR}.`,
+  });
+}
+
+
+module.exports = { notify, postTelegram, ENABLED,
+  notifyOrderPlaced, notifyOrderFilled, notifyStopLossHit,
+  notifyDailyLossThreshold, notifyTradeCapHit, logOutsideWindow,
+  notifyTradeRejectedUneconomic
+};

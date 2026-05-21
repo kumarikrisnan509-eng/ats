@@ -221,6 +221,54 @@ window.RiskConfigScreen = function RiskConfigScreen() {
         </Field>
       </RcSection>
 
+      {/* RcSection 1B: Risk gates (T-265..T-267) -- added in Phase 1 build.
+          These gates fire inside the autorun engine BEFORE order placement.
+          Defaults are the research-validated values from the hybrid engine. */}
+      <RcSection
+        title="Risk gates"
+        sub="Time windows + daily caps + trailing-stop behavior. Engine reads these on every signal evaluation and short-circuits if any gate fails."
+      >
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <Field label="Golden window start" hint="HH:MM (IST, 24h). Default 09:20 -- avoids opening volatility.">
+            <input type="text" pattern="[0-2][0-9]:[0-5][0-9]" placeholder="09:20"
+              value={config.goldenStartHHMM || '09:20'}
+              onChange={e => update({ goldenStartHHMM: e.target.value })}
+              style={_inputStyle}
+            />
+          </Field>
+          <Field label="Golden window end" hint="HH:MM (IST, 24h). Default 15:10 -- before 15:30 auto-square-off.">
+            <input type="text" pattern="[0-2][0-9]:[0-5][0-9]" placeholder="15:10"
+              value={config.goldenEndHHMM || '15:10'}
+              onChange={e => update({ goldenEndHHMM: e.target.value })}
+              style={_inputStyle}
+            />
+          </Field>
+        </div>
+        <Field label="Max daily trades" hint="1 - 100. Default 5. Research shows edge drops after 2-3 trades; cap prevents overtrading.">
+          <input type="number" min="1" max="100" step="1"
+            value={config.maxDailyTrades || 5}
+            onChange={e => update({ maxDailyTrades: Math.trunc(Number(e.target.value)) || 5 })}
+            style={_inputStyle}
+          />
+        </Field>
+        <Field label="TSL activation (% profit)" hint="Trailing SL only starts after price moves this much in your favor. Default 0.5%.">
+          <PctInput
+            value={config.tslActivatePct || 0.005}
+            onChange={v => update({ tslActivatePct: v })}
+            max={50}
+            step={0.01}
+          />
+        </Field>
+        <Field label="TSL gap (% behind LTP)" hint="Once active, SL follows price at this gap. Must be <= activation. Default 0.3%.">
+          <PctInput
+            value={config.tslGapPct || 0.003}
+            onChange={v => update({ tslGapPct: v })}
+            max={50}
+            step={0.01}
+          />
+        </Field>
+      </RcSection>
+
       {/* RcSection 2: DCA mix */}
       <RcSection
         title="DCA mix (monthly SIP allocation)"

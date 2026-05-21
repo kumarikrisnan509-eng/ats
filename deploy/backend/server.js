@@ -34,6 +34,11 @@ const { mountAuthRoutes } = require('./routes/auth');
 // T-262: /api/me/risk-config GET/PUT (replaces SETUP-TRADING.cmd CLI).
 const { mountRiskConfigRoutes } = require('./routes/risk-config');
 const { createRiskConfigService } = require('./services/risk-config');
+// T-264: tax-aware trade economics service (per-trade STT/GST/SEBI/brokerage math).
+const { createTradeEconomics } = require('./services/trade-economics');
+// T-268: full notify namespace (AutoRunner needs notify.notifyOrderPlaced etc).
+const _notifyModule = require('./notify');
+const _tradeEconomics = createTradeEconomics();
 // T-214 (CODE-AUDIT F.5 M1.4 piece 1): strategies registry extracted.
 const { STRATEGIES, mountStrategiesRoutes } = require('./routes/strategies');
 // T-223 (CODE-AUDIT F.5 M1.4 piece 6a): /api/orders/dry-run extracted.
@@ -223,6 +228,13 @@ async function init() {
   autorun = new AutoRunner({
     broker, paper, computeSignal, audit,
     storePath: process.env.AUTORUN_PATH || '/var/lib/ats/tokens/_autorun.json',
+    // T-263..T-267: risk-aware engine wiring. Engine reads operator's user_risk_config
+    // via cachedGet (60s TTL) and runs all gates (golden window, daily cap, economics,
+    // Telegram receipts) before placing paper orders.
+    getRiskConfig:  (userId) => riskConfigService ? riskConfigService.cachedGet(userId) : null,
+    tradeEconomics: _tradeEconomics,
+    notify:         _notifyModule,
+    userId:         1,   // operator account; multi-user comes in Phase 2 (T-272+)
   });
   autorun.load();
   autorun.start();   // re-arms timer if config is enabled

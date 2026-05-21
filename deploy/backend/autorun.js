@@ -30,6 +30,28 @@ const MIN_INTERVAL_MS = 60 * 1000;       // never go below 1 minute
 const DEFAULT_INTERVAL_MIN = 5;
 const DEFAULT_LOOKBACK_DAYS = 60;
 
+// ---- T-267 helpers ----
+function _todayIST() {
+  // Returns YYYY-MM-DD in IST (UTC+5:30). Used to detect calendar rollover for
+  // the daily trade counter -- without IST awareness the rollover happens at
+  // 5:30am UTC which is during India market hours.
+  const now = new Date();
+  const ist = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+  return ist.toISOString().slice(0, 10);
+}
+
+function _nowIST_HHMM() {
+  const now = new Date();
+  const ist = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+  // toISOString shows UTC, but we've shifted -- so the HH:MM portion is IST.
+  return ist.toISOString().slice(11, 16);
+}
+
+function _hhmmToMinutes(s) {
+  const [h, m] = String(s).split(':').map(Number);
+  return h * 60 + m;
+}
+
 class AutoRunner {
   /**
    * @param {object} opts
@@ -39,7 +61,8 @@ class AutoRunner {
    * @param {(event, data) => void} [opts.audit]
    * @param {string} [opts.storePath]
    */
-  constructor({ broker, paper, computeSignal, audit, storePath }) {
+  constructor({ broker, paper, computeSignal, audit, storePath,
+                getRiskConfig, tradeEconomics, notify, userId }) {
     if (!broker)        throw new Error('broker required');
     if (!paper)         throw new Error('paper required');
     if (!computeSignal) throw new Error('computeSignal required');
@@ -48,11 +71,21 @@ class AutoRunner {
     this.computeSignal  = computeSignal;
     this.audit          = audit || (() => {});
     this.storePath      = storePath || DEFAULT_STORE;
+    // ---- T-263..T-267 risk-aware engine wiring ----
+    // getRiskConfig: () => RiskConfig (per-user, cached). Optional -- if absent,
+    // all gates are no-ops and engine behaves like pre-T-263.
+    this.getRiskConfig  = (typeof getRiskConfig === 'function') ? getRiskConfig : null;
+    this.tradeEconomics = tradeEconomics || null;
+    this.notify         = notify || null;
+    this.userId         = Number.isInteger(userId) ? userId : 1;
     this._config        = null;
     this._history       = [];
     this._timer         = null;
     this._inflight      = false;
     this._lastFiredKey  = null;   // dedupe: "SYMBOL|STRATEGY|BARDATE|SIDE"
+    // ---- T-266: daily trade counter (resets on calendar-day rollover) ----
+    this._tradesToday   = 0;
+    this._tradeCountDay = _todayIST();
   }
 
   load() {
@@ -169,28 +202,112 @@ class AutoRunner {
         if (!lastSig) {
           run.result = 'no_signal';
         } else {
-          // Dedupe by (symbol, strategy, barDate, side)
-          const key = `${this._config.symbol}|${this._config.strategy}|${lastBar.date}|${lastSig}`;
-          if (key === this._lastFiredKey) {
-            run.result = 'deduped';
-            run.dedupeKey = key;
-          } else {
-            // Fire paper order
+          // ============================================================
+          // T-263..T-267 risk-aware gates -- evaluated in order. Each one
+          // either lets the signal proceed or short-circuits with a
+          // 'skipped_<reason>' result that's logged + optionally Telegrammed.
+          // ============================================================
+          const cfg = this.getRiskConfig ? this.getRiskConfig(this.userId) : null;
+
+          // T-267: golden time window
+          if (cfg) {
+            const nowHHMM = _nowIST_HHMM();
+            const nowMin  = _hhmmToMinutes(nowHHMM);
+            const startMin = _hhmmToMinutes(cfg.goldenStartHHMM);
+            const endMin   = _hhmmToMinutes(cfg.goldenEndHHMM);
+            if (nowMin < startMin || nowMin > endMin) {
+              run.result = 'skipped_outside_window';
+              run.window = `${cfg.goldenStartHHMM}..${cfg.goldenEndHHMM}`;
+              run.now = nowHHMM;
+              if (this.notify && this.notify.logOutsideWindow) {
+                this.notify.logOutsideWindow({ now: nowHHMM, windowStart: cfg.goldenStartHHMM, windowEnd: cfg.goldenEndHHMM });
+              }
+            }
+          }
+
+          // T-266: daily trade cap (only if T-267 didn't already skip)
+          if (!run.result && cfg) {
+            // Rollover counter on calendar day change (IST)
+            const today = _todayIST();
+            if (today !== this._tradeCountDay) {
+              this._tradesToday = 0;
+              this._tradeCountDay = today;
+            }
+            if (this._tradesToday >= cfg.maxDailyTrades) {
+              run.result = 'skipped_daily_cap';
+              run.tradesToday = this._tradesToday;
+              run.cap = cfg.maxDailyTrades;
+              if (this.notify && this.notify.notifyTradeCapHit) {
+                this.notify.notifyTradeCapHit({ tradesToday: this._tradesToday, capacity: cfg.maxDailyTrades })
+                  .catch(() => {});
+              }
+            }
+          }
+
+          // T-264: tax-aware economics check (only if cfg + tradeEconomics available
+          // AND we have a sane price-target estimate from lastBar.close + lastSig)
+          if (!run.result && cfg && this.tradeEconomics && lastBar && Number.isFinite(lastBar.close)) {
+            // Conservative target: assume 1% gross move in signal direction.
+            const gross = lastBar.close * 0.01;
+            const buyPrice  = lastBar.close;
+            const sellPrice = lastSig === 'BUY' ? buyPrice + gross : buyPrice - gross;
             try {
-              const order = this.paper.placeOrder({
-                symbol:   this._config.symbol,
-                side:     lastSig,
-                qty:      this._config.qty,
-                type:     'MARKET',
-                strategy: this._config.strategy,
+              const proj = this.tradeEconomics.projectRoundTrip({
+                instrumentType: 'EQUITY_INTRADAY',
+                buyPrice: Math.min(buyPrice, sellPrice),
+                sellPrice: Math.max(buyPrice, sellPrice),
+                qty: this._config.qty,
               });
-              run.result   = 'placed';
-              run.orderId  = order.id;
-              this._lastFiredKey = key;
-              this.audit('autorun.order.placed', { orderId: order.id, ...run });
+              run.economics = { netPnl: proj.netPnl, totalCharges: proj.totalCharges, breakeven: proj.breakeven };
+              if (proj.netPnl < 50) {
+                run.result = 'skipped_uneconomic';
+                if (this.notify && this.notify.notifyTradeRejectedUneconomic) {
+                  this.notify.notifyTradeRejectedUneconomic({
+                    symbol: this._config.symbol,
+                    strategy: this._config.strategy,
+                    projectedNetPnl: proj.netPnl,
+                    minNetPnlINR: 50,
+                  }).catch(() => {});
+                }
+              }
             } catch (e) {
-              run.result = 'error';
-              run.error  = `placeOrder failed: ${e.message}`;
+              // economics check failed -- log but don't block the signal
+              run.economicsError = e.message;
+            }
+          }
+
+          // ============================================================
+          // Pass-through path: existing dedupe + placeOrder logic
+          // ============================================================
+          if (!run.result) {
+            // Dedupe by (symbol, strategy, barDate, side)
+            const key = `${this._config.symbol}|${this._config.strategy}|${lastBar.date}|${lastSig}`;
+            if (key === this._lastFiredKey) {
+              run.result = 'deduped';
+              run.dedupeKey = key;
+            } else {
+              // Fire paper order
+              try {
+                const order = this.paper.placeOrder({
+                  symbol:   this._config.symbol,
+                  side:     lastSig,
+                  qty:      this._config.qty,
+                  type:     'MARKET',
+                  strategy: this._config.strategy,
+                });
+                run.result   = 'placed';
+                run.orderId  = order.id;
+                this._lastFiredKey = key;
+                this._tradesToday += 1;
+                this.audit('autorun.order.placed', { orderId: order.id, ...run });
+                // T-268: Telegram trade receipt
+                if (this.notify && this.notify.notifyOrderPlaced) {
+                  this.notify.notifyOrderPlaced(order).catch(() => {});
+                }
+              } catch (e) {
+                run.result = 'error';
+                run.error  = `placeOrder failed: ${e.message}`;
+              }
             }
           }
         }
