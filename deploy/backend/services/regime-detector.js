@@ -96,45 +96,91 @@ function createRegimeDetector({ broker, audit }) {
     return null;
   }
 
-  function _classify({ niftyClose, sma50, sma200, vix, atrPct }) {
+  function _classify(inputs) {
+    // v1 inputs (always present): niftyClose, sma50, sma200, vix, atrPct
+    // T-280b optional inputs: fiiNetFlow (INR crore, net), marketBreadth
+    // (advancers/decliners ratio, 0..inf), highLowRatio (52w highs / 52w lows
+    // ratio, lower = more new lows). Missing inputs are no-ops.
+    const { niftyClose, sma50, sma200, vix, atrPct,
+            fiiNetFlow, marketBreadth, highLowRatio } = inputs || {};
     const reasoning = [];
     const trendUp     = (sma50 != null && sma200 != null && niftyClose > sma50 && sma50 > sma200);
     const trendDown   = (sma50 != null && sma200 != null && niftyClose < sma50 && sma50 < sma200);
     const trendStrong = (sma50 != null && sma200 != null && Math.abs(sma50 - sma200) / sma200 > 0.02);
 
-    // Crisis tier
-    if ((vix != null && vix > 30) || (atrPct != null && atrPct > 3.5)) {
-      reasoning.push(`crisis trigger: VIX=${vix} or ATR%=${atrPct?.toFixed(2)}`);
-      return { regime: 'crisis', confidence: 0.95, trendUp, trendStrong, reasoning };
+    // ---- T-280b: pre-compute corroboration from richer signals ----
+    // Score: positive = corroborates bullish, negative = bearish. Each
+    // signal contributes if present; absent signals add 0.
+    let richScore = 0;
+    const richDetail = [];
+    if (Number.isFinite(fiiNetFlow)) {
+      if (fiiNetFlow > 500)       { richScore += 1; richDetail.push(`FII net +${fiiNetFlow}cr (buying)`); }
+      else if (fiiNetFlow < -500) { richScore -= 1; richDetail.push(`FII net ${fiiNetFlow}cr (selling)`); }
+    }
+    if (Number.isFinite(marketBreadth)) {
+      if (marketBreadth > 1.5)       { richScore += 1; richDetail.push(`breadth ${marketBreadth.toFixed(2)} (advancers dominate)`); }
+      else if (marketBreadth < 0.67) { richScore -= 1; richDetail.push(`breadth ${marketBreadth.toFixed(2)} (decliners dominate)`); }
+    }
+    if (Number.isFinite(highLowRatio)) {
+      if (highLowRatio > 2.0)       { richScore += 1; richDetail.push(`52w highs:lows ${highLowRatio.toFixed(1)} (broad new highs)`); }
+      else if (highLowRatio < 0.5)  { richScore -= 1; richDetail.push(`52w highs:lows ${highLowRatio.toFixed(1)} (broad new lows)`); }
+    }
+    const richConfBoost = Math.min(0.10, Math.abs(richScore) * 0.04);  // up to +0.10
+
+    // Crisis tier (rich signals also flag: very negative richScore -> crisis hint)
+    if ((vix != null && vix > 30) || (atrPct != null && atrPct > 3.5) || richScore <= -3) {
+      reasoning.push(`crisis trigger: VIX=${vix} or ATR%=${atrPct?.toFixed(2)} or richScore=${richScore}`);
+      if (richDetail.length) reasoning.push(...richDetail);
+      return { regime: 'crisis', confidence: 0.95, trendUp, trendStrong, reasoning, richScore };
     }
 
     // Volatile tier
     if ((vix != null && vix > 22) || (atrPct != null && atrPct > 2.2)) {
       reasoning.push(`elevated vol: VIX=${vix}, ATR%=${atrPct?.toFixed(2)}`);
-      // Direction within volatile still matters
+      if (richDetail.length) reasoning.push(...richDetail);
       let dir = '';
-      if (trendUp)        { dir = ' (trending up)'; reasoning.push('but SMA50>SMA200 -> still up'); }
+      if (trendUp)        { dir = ' (trending up)';   reasoning.push('but SMA50>SMA200 -> still up'); }
       else if (trendDown) { dir = ' (trending down)'; reasoning.push('and SMA50<SMA200 -> down'); }
-      return { regime: 'volatile', confidence: 0.80, trendUp, trendStrong, reasoning, subregime: dir.trim() || null };
+      return { regime: 'volatile', confidence: 0.80, trendUp, trendStrong, reasoning, subregime: dir.trim() || null, richScore };
     }
 
-    // Calm bull
+    // Calm bull (rich signals raise confidence)
     if (trendUp && (vix == null || vix < 18)) {
       reasoning.push('NIFTY > SMA50 > SMA200, VIX calm -> bull');
-      const confidence = trendStrong ? 0.85 : 0.65;
-      return { regime: 'bull', confidence, trendUp: true, trendStrong, reasoning };
+      if (richDetail.length) reasoning.push(...richDetail);
+      let confidence = trendStrong ? 0.85 : 0.65;
+      if (richScore > 0) confidence = Math.min(0.95, confidence + richConfBoost);
+      return { regime: 'bull', confidence, trendUp: true, trendStrong, reasoning, richScore };
     }
 
-    // Bear with elevated VIX
+    // Bear with elevated VIX (rich signals raise confidence)
     if (trendDown && (vix == null || vix > 16)) {
       reasoning.push('NIFTY < SMA50 < SMA200, VIX risk-off -> bear');
-      const confidence = trendStrong ? 0.85 : 0.65;
-      return { regime: 'bear', confidence, trendDown: true, trendStrong, reasoning };
+      if (richDetail.length) reasoning.push(...richDetail);
+      let confidence = trendStrong ? 0.85 : 0.65;
+      if (richScore < 0) confidence = Math.min(0.95, confidence + richConfBoost);
+      return { regime: 'bear', confidence, trendDown: true, trendStrong, reasoning, richScore };
+    }
+
+    // T-280b: NEUTRAL upgrade -- strong richScore of >= 2 with mild trend
+    // bias can flip neutral to bull/bear. This is the main *behaviour*
+    // change of T-280b: previously a flat market with bullish FII + breadth
+    // stayed neutral; now it tips to bull (with appropriate confidence).
+    if (richScore >= 2 && niftyClose > (sma50 || niftyClose)) {
+      reasoning.push(`neutral candidate flipped to bull on rich corroboration (score=${richScore})`);
+      if (richDetail.length) reasoning.push(...richDetail);
+      return { regime: 'bull', confidence: 0.55 + richConfBoost, trendUp, trendStrong, reasoning, richScore, subregime: 'rich_corroborated' };
+    }
+    if (richScore <= -2 && niftyClose < (sma50 || niftyClose)) {
+      reasoning.push(`neutral candidate flipped to bear on rich corroboration (score=${richScore})`);
+      if (richDetail.length) reasoning.push(...richDetail);
+      return { regime: 'bear', confidence: 0.55 + richConfBoost, trendDown, trendStrong, reasoning, richScore, subregime: 'rich_corroborated' };
     }
 
     // Default: neutral / range-bound
     reasoning.push('no strong trend or vol signal -> neutral / range-bound');
-    return { regime: 'neutral', confidence: 0.55, trendUp, trendStrong, reasoning };
+    if (richDetail.length) reasoning.push(...richDetail);
+    return { regime: 'neutral', confidence: 0.55, trendUp, trendStrong, reasoning, richScore };
   }
 
   async function detect() {
