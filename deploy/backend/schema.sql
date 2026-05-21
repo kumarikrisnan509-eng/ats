@@ -269,6 +269,8 @@ CREATE TABLE IF NOT EXISTS user_risk_config (
   golden_end_hhmm      TEXT    NOT NULL DEFAULT '15:10',
   tsl_activate_pct     REAL    NOT NULL DEFAULT 0.005,
   tsl_gap_pct          REAL    NOT NULL DEFAULT 0.003,
+  max_leverage         REAL    NOT NULL DEFAULT 2.0,
+  max_sector_weight    REAL    NOT NULL DEFAULT 0.30,
   updated_at           TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 

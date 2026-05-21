@@ -42,7 +42,7 @@ class PaperTrading {
    * @param {(event, data) => void} [opts.audit]
    * @param {() => Map<string,number>} [opts.lastTicks]  function returning current last-tick map for mark-to-market
    */
-  constructor({ storePath, startingCash, audit, lastTicks } = {}) {
+  constructor({ storePath, startingCash, audit, lastTicks, getTslConfig } = {}) {
     this.storePath     = storePath     || DEFAULT_STORE;
     this.startingCash  = startingCash  || DEFAULT_CASH;
     this.audit         = audit         || (() => {});
@@ -52,6 +52,10 @@ class PaperTrading {
     this._trades       = [];  // closed trades
     this._cash         = this.startingCash;
     this._persistDebounce = null;
+    // T-269: TSL config getter. Returns {tslActivatePct, tslGapPct}; safe defaults
+    // if the getter is absent or returns null. Read PER-TICK so config edits
+    // propagate within ~60s (the risk-config cachedGet TTL).
+    this.getTslConfig = (typeof getTslConfig === 'function') ? getTslConfig : (() => null);
   }
 
   load() {
@@ -183,6 +187,16 @@ class PaperTrading {
       bracketRole: 'stop',
       parentId: entry.id,
       childIds: [],
+      // T-269: TSL bookkeeping
+      entrySide: entry.side,                       // 'BUY' or 'SELL' of the bracket entry
+      entryFilledPrice: entry.filledPrice,         // captured at spawn (entry already filled)
+      tslState: {
+        active: false,
+        peakLtp: entry.filledPrice,
+        originalTrigger: entry.stopLoss,
+        lastUpdatedAt: null,
+        updates: 0,
+      },
     };
     this._orders.push(tgtChild, stopChild);
     entry.childIds = [tgtChild.id, stopChild.id];
@@ -206,6 +220,92 @@ class PaperTrading {
     }
   }
 
+  // T-269: trailing-stop-loss update for active bracket stop children.
+  // Called from onTick before the fill-check pass. Pure: only mutates the
+  // stop child's triggerPrice + tslState. Never fills or cancels.
+  _updateTslForTick(tick) {
+    const cfg = this.getTslConfig() || {};
+    const tslActivatePct = Number.isFinite(cfg.tslActivatePct) ? cfg.tslActivatePct : 0.005;
+    const tslGapPct      = Number.isFinite(cfg.tslGapPct)      ? cfg.tslGapPct      : 0.003;
+    if (tslActivatePct <= 0 || tslGapPct <= 0) return;   // disabled
+
+    for (const o of this._orders) {
+      if (o.bracketRole !== 'stop') continue;
+      if (o.status !== 'PENDING') continue;
+      if (o.symbol !== tick.symbol) continue;
+      if (!o.tslState || !Number.isFinite(o.entryFilledPrice)) continue;
+
+      const ltp = tick.ltp;
+      const st = o.tslState;
+
+      if (o.entrySide === 'BUY') {
+        // Long bracket: stop is a SELL SL-M with triggerPrice BELOW entry.
+        // Activate once price has risen tslActivatePct above entry, then trail
+        // the trigger up so it sits tslGapPct below the running peak.
+        if (!st.active) {
+          if (ltp >= o.entryFilledPrice * (1 + tslActivatePct)) {
+            st.active = true;
+            st.peakLtp = ltp;
+            const newTrigger = Math.max(o.triggerPrice, ltp * (1 - tslGapPct));
+            if (newTrigger > o.triggerPrice) {
+              o.triggerPrice = newTrigger;
+              st.lastUpdatedAt = new Date().toISOString();
+              st.updates++;
+              this.audit('paper.tsl.activated', {
+                stopId: o.id, parent: o.parentId, side: o.entrySide,
+                entryPrice: o.entryFilledPrice, ltp, newTrigger,
+              });
+            }
+          }
+        } else if (ltp > st.peakLtp) {
+          st.peakLtp = ltp;
+          const newTrigger = ltp * (1 - tslGapPct);
+          if (newTrigger > o.triggerPrice) {
+            const oldTrigger = o.triggerPrice;
+            o.triggerPrice = newTrigger;
+            st.lastUpdatedAt = new Date().toISOString();
+            st.updates++;
+            this.audit('paper.tsl.trailed', {
+              stopId: o.id, ltp, oldTrigger, newTrigger, peak: st.peakLtp,
+            });
+          }
+        }
+      } else if (o.entrySide === 'SELL') {
+        // Short bracket: stop is a BUY SL-M with triggerPrice ABOVE entry.
+        // Activate once price has fallen tslActivatePct below entry, then trail
+        // the trigger down so it sits tslGapPct above the running trough.
+        if (!st.active) {
+          if (ltp <= o.entryFilledPrice * (1 - tslActivatePct)) {
+            st.active = true;
+            st.peakLtp = ltp;   // peak is the lowest seen for shorts
+            const newTrigger = Math.min(o.triggerPrice, ltp * (1 + tslGapPct));
+            if (newTrigger < o.triggerPrice) {
+              o.triggerPrice = newTrigger;
+              st.lastUpdatedAt = new Date().toISOString();
+              st.updates++;
+              this.audit('paper.tsl.activated', {
+                stopId: o.id, parent: o.parentId, side: o.entrySide,
+                entryPrice: o.entryFilledPrice, ltp, newTrigger,
+              });
+            }
+          }
+        } else if (ltp < st.peakLtp) {
+          st.peakLtp = ltp;
+          const newTrigger = ltp * (1 + tslGapPct);
+          if (newTrigger < o.triggerPrice) {
+            const oldTrigger = o.triggerPrice;
+            o.triggerPrice = newTrigger;
+            st.lastUpdatedAt = new Date().toISOString();
+            st.updates++;
+            this.audit('paper.tsl.trailed', {
+              stopId: o.id, ltp, oldTrigger, newTrigger, trough: st.peakLtp,
+            });
+          }
+        }
+      }
+    }
+  }
+
   cancelOrder(id) {
     const o = this._orders.find(x => x.id === id);
     if (!o) return { cancelled: false, reason: 'not_found' };
@@ -221,6 +321,10 @@ class PaperTrading {
    *  Tier 23: added SL + SL-M handling and a small slippage model on aggressive fills. */
   onTick(tick) {
     if (!tick || typeof tick.symbol !== 'string' || typeof tick.ltp !== 'number') return;
+    // T-269: trail any active bracket stop children BEFORE checking fills.
+    // Trailing only widens favourably -- it never makes the trigger easier
+    // to hit, so we can do this even on the same tick that ends up filling.
+    this._updateTslForTick(tick);
     let changed = false;
     for (const o of this._orders) {
       if (o.status !== 'PENDING' || o.symbol !== tick.symbol) continue;

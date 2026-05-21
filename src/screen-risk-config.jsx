@@ -219,6 +219,17 @@ window.RiskConfigScreen = function RiskConfigScreen() {
             style={_inputStyle}
           />
         </Field>
+        {/* T-263b: portfolio-level caps consumed by services/pre-trade.js */}
+        <Field label="Max leverage (gross / cash)" hint="1.0 – 10.0. Default 2.0× -- order rejected if it would push leverage above this.">
+          <input type="number" min="1.0" max="10.0" step="0.1"
+            value={config.maxLeverage}
+            onChange={e => update({ maxLeverage: Number(e.target.value) || 1.0 })}
+            style={_inputStyle}
+          />
+        </Field>
+        <Field label="Max sector weight (%)" hint="0 – 100. Default 30%. Order rejected if it would push any single sector above this share of long MV.">
+          <PctInput value={config.maxSectorWeight} onChange={v => update({ maxSectorWeight: v })} max={100}/>
+        </Field>
       </RcSection>
 
       {/* RcSection 1B: Risk gates (T-265..T-267) -- added in Phase 1 build.

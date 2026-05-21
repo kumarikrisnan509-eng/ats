@@ -45,6 +45,9 @@ const DEFAULTS = Object.freeze({
   goldenEndHHMM:   '15:10',  // T-267: force-close before 15:30 auto-square-off
   tslActivatePct:  0.005,    // T-265: only start trailing after 0.5% profit
   tslGapPct:       0.003,    // T-265: SL trails 0.3% behind LTP once active
+  // T-263b: portfolio-level caps consumed by services/pre-trade.js
+  maxLeverage:     2.0,      // gross / cash ratio ceiling
+  maxSectorWeight: 0.30,     // per-sector concentration ceiling
 });
 
 const TRADING_MODES = Object.freeze(['paper', 'micro_live', 'full_live']);
@@ -110,6 +113,13 @@ function _validate(partial, currentMerged) {
   if (m.tslGapPct > m.tslActivatePct) {
     throw new Error('tslGapPct must be <= tslActivatePct (otherwise TSL trails behind entry)');
   }
+  // T-263b validation
+  if (!Number.isFinite(m.maxLeverage) || m.maxLeverage < 1.0 || m.maxLeverage > 10.0) {
+    throw new Error('maxLeverage must be between 1.0 and 10.0');
+  }
+  if (!Number.isFinite(m.maxSectorWeight) || m.maxSectorWeight <= 0 || m.maxSectorWeight > 1.0) {
+    throw new Error('maxSectorWeight must be in (0, 1]');
+  }
   return true;
 }
 
@@ -147,6 +157,9 @@ function _rowToConfig(row) {
     tslActivatePct:  Number.isFinite(row.tsl_activate_pct) ? row.tsl_activate_pct : DEFAULTS.tslActivatePct,
     tslGapPct:       Number.isFinite(row.tsl_gap_pct)      ? row.tsl_gap_pct      : DEFAULTS.tslGapPct,
     sipDayOfMonth:   Number.isInteger(row.sip_day_of_month) ? row.sip_day_of_month : DEFAULTS.sipDayOfMonth,
+    // T-263b
+    maxLeverage:     Number.isFinite(row.max_leverage)        ? row.max_leverage        : DEFAULTS.maxLeverage,
+    maxSectorWeight: Number.isFinite(row.max_sector_weight)   ? row.max_sector_weight   : DEFAULTS.maxSectorWeight,
     updatedAt: row.updated_at,
   };
 }
@@ -168,6 +181,8 @@ function _defaultsForUser() {
     tslActivatePct: DEFAULTS.tslActivatePct,
     tslGapPct: DEFAULTS.tslGapPct,
     sipDayOfMonth: DEFAULTS.sipDayOfMonth,
+    maxLeverage: DEFAULTS.maxLeverage,
+    maxSectorWeight: DEFAULTS.maxSectorWeight,
     updatedAt: null,
   };
 }
@@ -186,6 +201,8 @@ function createRiskConfigService(db) {
     ['tsl_activate_pct',    'REAL NOT NULL DEFAULT 0.005'],
     ['tsl_gap_pct',         'REAL NOT NULL DEFAULT 0.003'],
     ['sip_day_of_month',    'INTEGER NOT NULL DEFAULT 5'],
+    ['max_leverage',        'REAL NOT NULL DEFAULT 2.0'],
+    ['max_sector_weight',   'REAL NOT NULL DEFAULT 0.30'],
   ];
   for (const [col, ddl] of MIGRATION_COLS) {
     try {
@@ -205,13 +222,13 @@ function createRiskConfigService(db) {
       user_id, capital, max_position_pct, max_daily_loss_pct, max_open_positions,
       dca_allocation_json, active_strategies_json, voting_threshold, trading_mode,
       max_daily_trades, golden_start_hhmm, golden_end_hhmm, tsl_activate_pct, tsl_gap_pct,
-      sip_day_of_month,
+      sip_day_of_month, max_leverage, max_sector_weight,
       updated_at
     ) VALUES (
       @user_id, @capital, @max_position_pct, @max_daily_loss_pct, @max_open_positions,
       @dca_allocation_json, @active_strategies_json, @voting_threshold, @trading_mode,
       @max_daily_trades, @golden_start_hhmm, @golden_end_hhmm, @tsl_activate_pct, @tsl_gap_pct,
-      @sip_day_of_month,
+      @sip_day_of_month, @max_leverage, @max_sector_weight,
       datetime('now')
     )
     ON CONFLICT(user_id) DO UPDATE SET
@@ -229,6 +246,8 @@ function createRiskConfigService(db) {
       tsl_activate_pct       = @tsl_activate_pct,
       tsl_gap_pct            = @tsl_gap_pct,
       sip_day_of_month       = @sip_day_of_month,
+      max_leverage           = @max_leverage,
+      max_sector_weight      = @max_sector_weight,
       updated_at             = datetime('now')
   `);
 
@@ -279,6 +298,9 @@ function createRiskConfigService(db) {
       tslActivatePct:  partial.tslActivatePct  != null ? Number(partial.tslActivatePct)  : current.tslActivatePct,
       tslGapPct:       partial.tslGapPct       != null ? Number(partial.tslGapPct)       : current.tslGapPct,
       sipDayOfMonth:   partial.sipDayOfMonth   != null ? Math.trunc(Number(partial.sipDayOfMonth)) : current.sipDayOfMonth,
+      // T-263b
+      maxLeverage:     partial.maxLeverage     != null ? Number(partial.maxLeverage)     : current.maxLeverage,
+      maxSectorWeight: partial.maxSectorWeight != null ? Number(partial.maxSectorWeight) : current.maxSectorWeight,
     };
     _validate(partial, merged);
 
@@ -298,6 +320,8 @@ function createRiskConfigService(db) {
       tsl_activate_pct: merged.tslActivatePct,
       tsl_gap_pct: merged.tslGapPct,
       sip_day_of_month: merged.sipDayOfMonth,
+      max_leverage:      merged.maxLeverage,
+      max_sector_weight: merged.maxSectorWeight,
     });
     _invalidate(userId);
     return get(userId);

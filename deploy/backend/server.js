@@ -232,6 +232,14 @@ async function init() {
       const arr = broker.getLastTicks();
       return new Map(arr.map(t => [t.symbol, t.ltp]));
     },
+    // T-269: TSL config getter. Reads operator's tslActivatePct + tslGapPct
+    // from risk-config (60s cached). Null/missing = paper uses safe defaults.
+    getTslConfig: () => {
+      if (!riskConfigService) return null;
+      const cfg = riskConfigService.cachedGet(1);
+      if (!cfg) return null;
+      return { tslActivatePct: cfg.tslActivatePct, tslGapPct: cfg.tslGapPct };
+    },
   });
   paper.load();
 
