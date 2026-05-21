@@ -1,6 +1,10 @@
 /* eslint-disable */
 /* T-311 -- Daily attribution screen. Reads GET /api/me/attribution. */
 
+
+(function () {
+  // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inr, _fmtTime, etc.)
+  // do not collide with same-named consts in other screen-*.js files.
 const _inr = (n) => {
   if (!Number.isFinite(n)) return '-';
   const a = Math.abs(n), sign = n < 0 ? '-' : '';
@@ -126,3 +130,5 @@ window.AttributionScreen = function AttributionScreen() {
     </div>
   );
 };
+
+})();

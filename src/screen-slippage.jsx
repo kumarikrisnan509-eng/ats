@@ -1,6 +1,10 @@
 /* eslint-disable */
 /* T-312 -- Slippage tracker screen. Reads GET /api/me/slippage. */
 
+
+(function () {
+  // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inr, _fmtTime, etc.)
+  // do not collide with same-named consts in other screen-*.js files.
 const _bps = (n) => Number.isFinite(n) ? `${n.toFixed(1)} bps` : '-';
 const _bpsColor = (n) => !Number.isFinite(n) ? 'var(--text-2)' : (n > 10 ? '#b91c1c' : (n > 5 ? '#f59e0b' : '#15803d'));
 
@@ -116,3 +120,5 @@ window.SlippageScreen = function SlippageScreen() {
     </div>
   );
 };
+
+})();

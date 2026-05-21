@@ -3,6 +3,10 @@
  * Operator picks strategy + symbol, posts a paramGrid, sees recommendation.
  */
 
+
+(function () {
+  // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inr, _fmtTime, etc.)
+  // do not collide with same-named consts in other screen-*.js files.
 const _fmt = (n, p = 2) => Number.isFinite(n) ? n.toFixed(p) : '-';
 const _badge = (action) => ({ update: '#15803d', no_change: '#94a3b8' })[action] || '#94a3b8';
 
@@ -180,3 +184,5 @@ window.WalkForwardScreen = function WalkForwardScreen() {
     </div>
   );
 };
+
+})();

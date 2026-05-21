@@ -18,6 +18,10 @@
  * /:id/review POST.
  */
 
+
+(function () {
+  // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inr, _fmtTime, etc.)
+  // do not collide with same-named consts in other screen-*.js files.
 const _fmtTime = (s) => {
   if (!s) return '-';
   try { return new Date(s).toLocaleString('en-IN', { hour12: false }); } catch { return s; }
@@ -225,3 +229,5 @@ window.OptionsOpportunitiesScreen = function OptionsOpportunitiesScreen() {
     </div>
   );
 };
+
+})();

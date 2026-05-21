@@ -5,6 +5,10 @@
  * activeStrategies list in risk-config.
  */
 
+
+(function () {
+  // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inr, _fmtTime, etc.)
+  // do not collide with same-named consts in other screen-*.js files.
 const _pct = (n) => n == null ? '-' : `${(n * 100).toFixed(1)}%`;
 const _inr = (n) => {
   if (!Number.isFinite(n)) return '-';
@@ -121,3 +125,5 @@ window.CalibrationScreen = function CalibrationScreen() {
     </div>
   );
 };
+
+})();
