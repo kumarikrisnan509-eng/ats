@@ -28,7 +28,7 @@ function mountOptionChainRoutes(app, deps) {
       let expiry = req.query.expiry ? String(req.query.expiry) : null;
       if (!expiry) {
         // Pick the soonest expiry present in the table for this underlying.
-        const row = getDb().prepare(`
+        const row = getDb()._conn.prepare(`
           SELECT expiry FROM option_quotes
           WHERE underlying = ?
           ORDER BY expiry ASC
@@ -38,7 +38,7 @@ function mountOptionChainRoutes(app, deps) {
         expiry = row.expiry;
       }
 
-      const rows = getDb().prepare(`
+      const rows = getDb()._conn.prepare(`
         SELECT underlying, expiry, strike, type, tradingsymbol, instrument_token,
                lot_size AS lotSize, ltp, iv, iv_source AS ivSource,
                delta, gamma, vega, theta, theoretical_price AS theoreticalPrice,
@@ -78,7 +78,7 @@ function mountOptionChainRoutes(app, deps) {
   app.get('/api/option-chain/:underlying/expiries', (req, res) => {
     try {
       const underlying = String(req.params.underlying || '').toUpperCase();
-      const rows = getDb().prepare(`
+      const rows = getDb()._conn.prepare(`
         SELECT DISTINCT expiry,
                COUNT(*) AS count,
                MAX(snapshot_at) AS latest

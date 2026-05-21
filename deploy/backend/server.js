@@ -4312,7 +4312,7 @@ app.get('/api/options/opportunities', (req, res) => {
   if (!db) return res.status(503).json({ ok: false, reason: 'db_not_initialized' });
   const limit = Math.max(1, Math.min(200, parseInt(req.query.limit, 10) || 50));
   try {
-    const rows = db.prepare(`
+    const rows = db._conn.prepare(`
       SELECT id, scanned_at AS scannedAt, underlying, regime, regime_confidence AS regimeConfidence,
              template, score, raw_score AS rawScore, weight, opportunity_json AS opportunityJson,
              reviewed, reviewed_at AS reviewedAt, reviewed_note AS reviewedNote
@@ -4331,7 +4331,7 @@ app.post('/api/options/opportunities/:id/review', (req, res) => {
   const id = parseInt(req.params.id, 10);
   const note = (req.body && req.body.note) ? String(req.body.note).slice(0, 500) : null;
   try {
-    const r = db.prepare(`UPDATE option_opportunities SET reviewed = 1, reviewed_at = datetime('now'), reviewed_note = ? WHERE id = ?`).run(note, id);
+    const r = db._conn.prepare(`UPDATE option_opportunities SET reviewed = 1, reviewed_at = datetime('now'), reviewed_note = ? WHERE id = ?`).run(note, id);
     res.json({ ok: r.changes === 1, changes: r.changes });
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
@@ -4388,7 +4388,7 @@ app.get('/api/me/portfolio/aggregates', (req, res) => {
         if (optPositions.length > 0) {
           const symbols = optPositions.map(p => p.tradingsymbol);
           const placeholders = symbols.map(() => '?').join(',');
-          const quotes = db.prepare(
+          const quotes = db._conn.prepare(
             `SELECT tradingsymbol, lot_size, delta, gamma, vega, theta, ltp, spot FROM option_quotes WHERE tradingsymbol IN (${placeholders})`
           ).all(...symbols);
           if (quotes.length > 0) {
