@@ -296,3 +296,65 @@ CREATE TABLE IF NOT EXISTS sip_fires (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sip_fires_unique_placed
   ON sip_fires(user_id, symbol, fire_month) WHERE status='placed';
 CREATE INDEX IF NOT EXISTS idx_sip_fires_user_date ON sip_fires(user_id, fired_date DESC);
+
+-- ---------- T-290b: Option chain quote snapshots ----------
+-- Populated by the option-chain-fetcher cron (gated by OPTION_CHAIN_FETCH_ENABLED).
+-- This is GLOBAL market data, not per-user -- option chains are public.
+-- One row per (underlying, expiry, strike, type, snapshot_at).
+-- The fetcher upserts on (underlying, expiry, strike, type) keeping only
+-- the latest snapshot. Historical snapshots can be enabled later by
+-- removing the unique constraint and writing N rows per refresh.
+CREATE TABLE IF NOT EXISTS option_quotes (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  underlying      TEXT    NOT NULL,           -- 'NIFTY', 'BANKNIFTY', etc.
+  expiry          TEXT    NOT NULL,           -- 'YYYY-MM-DD'
+  strike          REAL    NOT NULL,
+  type            TEXT    NOT NULL CHECK (type IN ('call','put')),
+  tradingsymbol   TEXT    NOT NULL,
+  instrument_token INTEGER,
+  lot_size        INTEGER NOT NULL,
+  ltp             REAL,                       -- last traded price (may be NULL pre-market)
+  iv              REAL,                       -- implied volatility (decimal, e.g. 0.18)
+  iv_source       TEXT,                       -- 'kite' | 'inverted' | 'assumed'
+  delta           REAL,
+  gamma           REAL,
+  vega            REAL,
+  theta           REAL,
+  theoretical_price REAL,                     -- BS model price using IV used
+  oi              INTEGER,
+  volume          INTEGER,
+  spot            REAL,                       -- underlying spot at snapshot time
+  snapshot_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_option_quotes_unique
+  ON option_quotes(underlying, expiry, strike, type);
+CREATE INDEX IF NOT EXISTS idx_option_quotes_underlying_expiry
+  ON option_quotes(underlying, expiry);
+
+-- ---------- T-298a: Options autorun shadow-mode opportunity log ----------
+-- Populated by services/options-scanner.js when OPTIONS_AUTORUN_ENABLED=true.
+-- SHADOW ONLY: this table is a write-only log of ranked opportunities
+-- proposed by selectStrategies. No order is ever placed off these rows.
+-- The operator reviews them in the UI; manual promotion to a paper order
+-- (or eventually a live order) is a separate, gated, explicit action.
+CREATE TABLE IF NOT EXISTS option_opportunities (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id         INTEGER REFERENCES users(id) ON DELETE CASCADE,   -- nullable for global scans
+  scanned_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+  underlying      TEXT    NOT NULL,
+  regime          TEXT    NOT NULL,                                 -- 'bull','bear','neutral',...
+  regime_confidence REAL,
+  template        TEXT    NOT NULL,                                 -- 'iron_condor','bull_call_spread',...
+  score           REAL,
+  raw_score       REAL,
+  weight          REAL,
+  opportunity_json TEXT   NOT NULL,                                 -- full opp object as JSON
+  reviewed        INTEGER NOT NULL DEFAULT 0,                       -- 0/1 -- operator dismissal/ack
+  reviewed_at     TEXT,
+  reviewed_note   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_option_opportunities_user_time
+  ON option_opportunities(user_id, scanned_at DESC);
+CREATE INDEX IF NOT EXISTS idx_option_opportunities_underlying
+  ON option_opportunities(underlying, scanned_at DESC);
+

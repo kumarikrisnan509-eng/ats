@@ -300,4 +300,85 @@ function createPortfolioAggregates({ getPositions, getCash, getTicks, getTrades 
   return { compute, bySymbol, stress, _sectorOf };
 }
 
-module.exports = { createPortfolioAggregates, SECTOR_MAP };
+// ---- T-294: Option Greeks rollup (pure helper, no factory needed) ----
+
+/**
+ * Roll per-position Greeks up to book-level netDelta/netGamma/netVega/netTheta.
+ *
+ * @param {Array<{tradingsymbol:string, qty:number, lotSize?:number}>} positions
+ *        Net open option positions. qty is in CONTRACTS (positive for long,
+ *        negative for short). lotSize defaults from the quote if absent.
+ * @param {Array<{tradingsymbol:string, lot_size:number, delta:number, gamma:number, vega:number, theta:number, ltp:number, spot:number}>} quotes
+ *        Latest snapshot rows from the option_quotes table.
+ * @returns {{
+ *   netDelta:number, netGamma:number, netVega:number, netTheta:number,
+ *   notionalDelta:number, perPosition:Array,
+ *   matched:number, unmatched:Array<string>, asOf:string
+ * }}
+ *
+ * netDelta:       sum of (qty * lotSize * delta)
+ * notionalDelta:  netDelta * spot       (rupee impact of a 1pt index move)
+ * Unmatched positions are returned by tradingsymbol so the caller can warn.
+ */
+function rollupOptionGreeks(positions, quotes) {
+  const empty = {
+    netDelta: 0, netGamma: 0, netVega: 0, netTheta: 0,
+    notionalDelta: 0, perPosition: [], matched: 0, unmatched: [],
+    asOf: new Date().toISOString(),
+  };
+  if (!Array.isArray(positions) || positions.length === 0) return empty;
+  if (!Array.isArray(quotes) || quotes.length === 0) {
+    return { ...empty, unmatched: positions.map(p => p && p.tradingsymbol).filter(Boolean) };
+  }
+
+  const quoteBySymbol = new Map();
+  for (const q of quotes) {
+    if (q && q.tradingsymbol) quoteBySymbol.set(q.tradingsymbol, q);
+  }
+
+  let netDelta = 0, netGamma = 0, netVega = 0, netTheta = 0;
+  let spotForNotional = null;
+  const perPosition = [];
+  const unmatched = [];
+
+  for (const p of positions) {
+    if (!p || !p.tradingsymbol || !Number.isFinite(p.qty)) continue;
+    const q = quoteBySymbol.get(p.tradingsymbol);
+    if (!q) { unmatched.push(p.tradingsymbol); continue; }
+    const lot = Number.isFinite(p.lotSize) && p.lotSize > 0 ? p.lotSize
+              : (Number.isFinite(q.lot_size) && q.lot_size > 0 ? q.lot_size : 1);
+    const sign = p.qty;   // qty is in contracts; sign carries long/short
+    const dDelta = sign * lot * (Number.isFinite(q.delta) ? q.delta : 0);
+    const dGamma = sign * lot * (Number.isFinite(q.gamma) ? q.gamma : 0);
+    const dVega  = sign * lot * (Number.isFinite(q.vega)  ? q.vega  : 0);
+    const dTheta = sign * lot * (Number.isFinite(q.theta) ? q.theta : 0);
+    netDelta += dDelta;
+    netGamma += dGamma;
+    netVega  += dVega;
+    netTheta += dTheta;
+    if (spotForNotional == null && Number.isFinite(q.spot) && q.spot > 0) spotForNotional = q.spot;
+    perPosition.push({
+      tradingsymbol: p.tradingsymbol,
+      qty: p.qty, lotSize: lot,
+      delta: q.delta, gamma: q.gamma, vega: q.vega, theta: q.theta,
+      contributionDelta: _round(dDelta, 4),
+      contributionGamma: _round(dGamma, 6),
+      contributionVega:  _round(dVega, 4),
+      contributionTheta: _round(dTheta, 4),
+    });
+  }
+
+  return {
+    netDelta:  _round(netDelta, 4),
+    netGamma:  _round(netGamma, 6),
+    netVega:   _round(netVega, 4),
+    netTheta:  _round(netTheta, 4),
+    notionalDelta: spotForNotional != null ? _round(netDelta * spotForNotional, 2) : null,
+    perPosition,
+    matched: perPosition.length,
+    unmatched,
+    asOf: new Date().toISOString(),
+  };
+}
+
+module.exports = { createPortfolioAggregates, rollupOptionGreeks, SECTOR_MAP };
