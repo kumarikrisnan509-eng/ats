@@ -1,157 +1,190 @@
-# Session Handoff — 2026-05-21
+# Session Handoff — 2026-05-21 (refreshed at session close)
 
 **Operator**: Rajasekar Selvam
-**Session duration**: ~8 hours (started with T-261 P0 auth incident, ended with Phase 2 kickoff)
-**Result**: 13 commits, ~3,500 net LoC, every risk gate in the operator's UI is engine-enforced.
+**Session duration**: ~9 hours
+**Result**: 17 commits, ~5,000 net LoC. Phases 0–3 (kickoff) all live on prod.
 
 ---
 
 ## TL;DR
 
-The Risk Management page on https://ats.rajasekarselvam.com → Settings → Risk management
-has **5/5 sections green ("Live")**. Every field the operator changes now alters
-real engine behaviour. The Risk Cockpit screen (Phase 2 kickoff) is also live.
+- Risk Management page (https://ats.rajasekarselvam.com → Settings → Risk management) has **5/5 sections green ("Live")**.
+- Autorun engine now runs **8 sequential gates** on every signal evaluation.
+- Phase 3 regime detector → strategy selector → autorun gate loop is **closed**.
+- SIP runner fires DCA orders idempotently every market day at 09:30 IST.
+- Trading mode radio is enforced server-side (Paper mode blocks live order placement at /api/orders/place).
+- Risk Cockpit screen shows: regime banner, KPIs, positions, sector breakdown, strategy attribution, scenario stress slider.
 
-Stop here. Paper-trade for a few days. Validate the gates fire in real market
-hours. Then come back for Phase 2.5 / Phase 3.
+**Stop. Paper-trade for 3–5 trading days.** Come back fresh.
 
 ---
 
-## Shipped this session (in order)
+## Full commit list (in order)
 
-### Incident response + foundation
-1. **T-261** `d48a151` — P0 fix: bearer-token middleware was rejecting `/api/auth/*` for everyone, locking the operator out. Carved out `PUBLIC_AUTH_PATHS` skip-list.
-2. **T-261a** `124bde8` — Hotfix: Edit tool truncated `server.js` mid-statement on T-261 push. Restored via raw GitHub fetch + python re-apply.
-
-### Phase 0 last mile
-3. **T-262** `296abd13` + `63f044b` — UI Risk Management screen replacing `scripts/SETUP-TRADING.cmd`. New `user_risk_config` table, `/api/me/risk-config` GET/PUT, full screen with 4 sections (Capital/DCA/Voting/Mode).
-4. **Repo public** — Flipped to public via GitHub API (`{"private":false}`). Unblocked Actions billing rejection. Public repos get unlimited Actions minutes on standard runners. Decision was deliberate; PAT in commit history was already rotated.
-
-### Phase 1: Risk math hardening
-5. **T-263..T-268** `7b56f25` — Tax-aware engine + golden window + daily cap + Telegram receipts. New `services/trade-economics.js` with full STT/GST/SEBI/brokerage/stamp-duty math per 2026 schedule. `autorun.js` refactored with 4 sequential gates (golden window → daily cap → economics → dedupe → fire). `notify.js` extended with 6 trade-event formatters. UI added Risk gates section.
-6. **T-263a** `0f6b9cc` — UI polish: stacked Golden window start/end vertically, added honest **Live / Partial / Preview** status badges on every section.
-
-### Phase 1.5: turn the lies into truth
-7. **T-276** `d601ef3` — Built the missing SIP execution pipeline. Until this commit DCA mix was a wish list — nothing in the backend fired SIPs. New `services/sip-runner.js` (264 LoC) with daily 09:30 IST cron + boot catch-up + UNIQUE-INDEX idempotency. New `sip_fires` table + `sip_day_of_month` column on user_risk_config. Three new routes: `GET /api/sip/plan`, `POST /api/sip/fire`, `GET /api/sip/history`. **DCA mix promoted: Cosmetic → Live.**
-8. **T-277** `84e129f` — Trading mode guard on `/api/orders/place`. Third gate added after `KILL_SWITCH` + `LIVE_TRADING` env checks: if user's `tradingMode === 'paper'`, live orders are 403'd with `LIVE_ORDERS_DISABLED_BY_MODE`. **Trading mode promoted: Cosmetic → Live.**
-9. **T-278 + T-279** `1979c3c` — Final promotion. T-278 added a voting confirmation gate (autorun runs all active strategies with default params, requires N agreements before firing primary signal). T-279a added maxPositionPct qty cap. T-279b added maxOpenPositions cap. **Capital & caps + Strategy voting promoted: → Live.**
-
-### Phase 2 kickoff
-10. **T-272 + T-274** `<this commit>` — Unified Position View aggregator (`services/portfolio-aggregates.js`) + Risk Cockpit screen (`src/screen-risk-cockpit.jsx`). New route `GET /api/me/portfolio/aggregates`. The cockpit shows live KPIs (total value, cash, MTM, gross/net exposure, leverage), positions table with sector pills, sector concentration bars, realised PnL by strategy, and a concentration alert if top position > 30% of long MV. 30s auto-refresh.
+| # | SHA | Ticket(s) | What |
+|---|---|---|---|
+| 1 | `d48a151` | T-261 | P0: PUBLIC_AUTH_PATHS skip-list — bearer middleware was 401'ing every /api/auth/* call |
+| 2 | `124bde8` | T-261a | Hotfix: Edit tool truncated server.js last 7 lines on push #1 |
+| 3 | `296abd13` | T-262 | UI Risk Management screen (initial) |
+| 4 | `63f044b` | T-262a | Rename `const Section` → `RcSection` (CI duplicate-const guard caught it) |
+| 5 | (API) | — | Repo flipped public via PATCH /repos endpoint — unblocked Actions billing |
+| 6 | `7b56f25` | T-263..T-268 | Phase 1: tax-aware engine + golden window + daily cap + Telegram |
+| 7 | `0f6b9cc` | T-263a | UI polish: stack Golden window inputs vertically + honest Live/Partial/Preview status badges |
+| 8 | `d601ef3` | T-276 | SIP execution pipeline — services/sip-runner.js + sip_fires idempotency table |
+| 9 | `84e129f` | T-277 | Trading mode guard on /api/orders/place — 3rd live-orders gate |
+| 10 | `1979c3c` | T-278 + T-279 | Voting confirmation + maxPositionPct cap + maxOpenPositions cap |
+| 11 | `f09474e` | T-272 + T-274 | Phase 2: portfolio-aggregates service + Risk Cockpit screen |
+| 12 | `9388f93` | T-280 + T-275 + T-281 | Phase 3 kickoff: regime detector + scenario stress + strategy-regime map |
+| 13 | `fd222e5` | T-282 | autorun.js 8th gate: skipped_wrong_regime — closes Phase 3 loop |
+| 14 | (this) | — | Handoff doc refresh |
 
 ---
 
 ## Risk Management page — final state
 
-| Section | Status | What the engine actually does |
+| Section | Status | Engine behavior |
 |---|---|---|
-| Capital & caps | 🟢 **Live** | `maxPositionPct` caps autorun qty (capital × pct / price); `maxOpenPositions` blocks new symbols when cap reached; `maxDailyLossPct` gates daily loss budget. |
-| Risk gates | 🟢 **Live** | Golden window IST start/end, max daily trades, TSL fields all consulted on every signal. |
-| DCA mix | 🟢 **Live** | sip-runner reads `dcaAllocation` × `capital` daily at 09:30 IST, places paper orders, records to `sip_fires` table. |
-| Trading mode | 🟢 **Live** | Paper mode blocks `/api/orders/place` with 403. Live-mode entries still need KILL_SWITCH off + LIVE_TRADING on (three independent gates). |
-| Strategy voting | 🟢 **Live** | Confirmation gate: if `activeStrategies > 1` and `threshold > 1`, primary signal needs N agreements before firing. |
+| Capital & caps | 🟢 Live | maxPositionPct caps qty (capital × pct / price); maxOpenPositions blocks new symbols when cap reached; maxDailyLossPct gates daily loss budget |
+| Risk gates | 🟢 Live | Golden window IST, max daily trades, TSL fields all consulted every signal |
+| DCA mix | 🟢 Live | sip-runner fires daily at 09:30 IST on configured day-of-month, idempotent via UNIQUE INDEX |
+| Trading mode | 🟢 Live | Paper blocks /api/orders/place with 403 LIVE_ORDERS_DISABLED_BY_MODE |
+| Strategy voting | 🟢 Live | Confirmation gate: primary signal needs N agreements before firing |
+
+## Autorun runOnce — 8-gate chain
+
+```
+SIGNAL → T-267 golden window?              → skipped_outside_window
+       → T-282 strategy eligible in regime? → skipped_wrong_regime
+       → T-266 daily trade cap?            → skipped_daily_cap
+       → T-264 net PnL ≥ ₹50?              → skipped_uneconomic
+       → T-278 voting consensus?           → skipped_no_consensus
+       → T-279a position size OK?          → skipped_position_size_too_small
+       → T-279b open positions OK?         → skipped_max_open_positions
+       → Dedupe (same bar/side)?           → deduped
+       → Fire paper order                  → Telegram receipt
+```
+
+## Live order /api/orders/place — 3-gate chain
+
+```
+ORDER → KILL_SWITCH (env)        → 503 KILL_SWITCH_ON
+      → LIVE_TRADING (env)       → 503 LIVE_TRADING_DISABLED
+      → tradingMode === 'paper'  → 403 LIVE_ORDERS_DISABLED_BY_MODE  (T-277)
+      → broker.placeOrder()
+```
 
 ---
 
-## Phase 2 progress
+## Phase progress matrix
 
-| Ticket | Status |
-|---|---|
-| T-272 — Unified Position View aggregator service | ✅ done this session |
-| T-273 — Pre-trade check pipeline refactor | ❌ NOT done (skipped — risky, touches live order path) |
-| T-274 — Risk Cockpit screen | ✅ done this session |
-| T-275 — Scenario stress testing | ❌ NOT done |
-
----
-
-## What to do in the next session
-
-Pick ONE of these starting points. Don't try to do all three.
-
-### Option A: Finish Phase 2 (1–2 days)
-
-**T-273 — Pre-trade check pipeline.** This is the trickiest piece. Today `routes/orders.js` already has three gates (KILL_SWITCH, LIVE_TRADING, tradingMode). T-273 should refactor those into a single `preTradeCheck(payload)` function in a new `services/pre-trade.js` that:
-1. Reads `portfolioAggregates.compute()` to know current state
-2. Checks: leverage cap, sector cap, correlation-with-existing, max delta exposure
-3. Returns `{ ok: false, reason }` or `{ ok: true }`
-4. Both `/api/orders/place` AND `autorun.js` consult it
-5. Frontend shows real-time "this order would push leverage to 2.3x" preview
-
-**T-275 — Scenario stress tests.** Add a "what if NIFTY drops 3%" simulator to the Risk Cockpit. Compute hypothetical PnL across all positions at the shocked price. Probably 1–2 hours; depends on T-273 not being needed first.
-
-### Option B: Phase 3 — Regime intelligence (2–4 days)
-
-Build the regime detector. New `services/regime-detector.js` reading VIX + Nifty 50/200 day MA + ADX + breadth from the existing data layer. Outputs `{ regime: 'bull'|'bear'|'neutral'|'volatile'|'crisis', confidence, subregime }`. Run every 5 min. Each strategy in the registry gets a `regimePreference: ['bull', 'neutral']` array; the strategy selector turns strategies on/off based on regime match.
-
-This is the next big "intelligence" layer per the vision doc. Real ROI: stops the operator from running mean-reversion strategies in trending bull markets.
-
-### Option C: Phase 4 — Options strategies (3–5 days)
-
-Add Iron Condor + Bull Call Spread + Covered Call. New `services/option-chain.js` ingesting NIFTY/BANKNIFTY weeklies. Greek computation (Black-Scholes for delta; vega/theta proxies). New strategies in the registry. Updates `portfolio-aggregates.js` to actually compute net delta/vega/theta. This is the big effort jump because options change the math everywhere.
+| Phase | Status | Tickets |
+|---|---|---|
+| 0 Foundation | ✅ done | (pre-existing) |
+| 1 Risk math hardening | ✅ done | T-263..T-268 |
+| 1.5 honesty pass + missing pipelines | ✅ done | T-263a, T-276, T-277, T-278, T-279 |
+| 2 Unified Position View | ✅ partial | T-272 ✅, T-274 ✅, T-275 ✅, T-273 ❌ deferred |
+| 3 Regime intelligence | ✅ partial | T-280 ✅, T-281 ✅, T-282 ✅, T-283 ❌ deferred |
+| 4 Options strategies | ❌ not started | T-290..T-294 |
+| 5 Learning loop | ❌ not started | T-300..T-303 |
 
 ---
 
-## Working agreements / gotchas to remember
+## What to pick up next session
 
-1. **NEVER use Edit on files > 300 LoC.** It silently truncates. Use python heredoc string-replace or sed. Files we got bitten by in this session: `server.js` (4862 LoC), `screen-risk-config.jsx` (477 LoC), `shell.jsx` (659 LoC), `app.html` (658 LoC), `app.jsx` (293 LoC just barely under but treat as risky). Whenever you finish a python patch, **verify the tail of the file** before pushing.
+Sorted by ROI / risk:
 
-2. **The CI duplicate-top-level-const guard is real.** Two `.jsx` files defining `const Foo = ...` at column 0 break the browser script-tag environment. We hit this with `Section` collision in T-262. The guard pattern is in `.github/workflows/ci.yml`. Before any new JSX file, grep for any new `^const [A-Z]\w* =` you're introducing and check it doesn't already exist in `src/`.
+### Easiest wins (1–4 hours each)
 
-3. **Atomic pushes via Git Database API.** Local git push is broken in this sandbox; use the GitHub Git Database API directly (`/git/blobs`, `/git/trees`, `/git/commits`, `/git/refs/heads/main`). The pattern is in every push command of this session. Don't try `git push` from bash.
+- **T-283 Daily performance attribution** — new daily cron writes attribution.json, new screen reads it. Shows PnL broken down by strategy / sector / regime / gate-skip-reason. Pure read service.
+- **Surface T-282 in UI** — autorun history widget on Risk Cockpit showing recent runs with their `run.result` (skipped_*) and `run.regime` labels. Helps operator see WHY trades are being skipped. ~1 hour, one new section in screen-risk-cockpit.jsx.
+- **T-300 Slippage tracking** — listen on paper fills, compute slippage vs mid-price-at-signal. New service, no engine refactor. Useful for spotting which strategies overpay.
+- **T-275 stress UI extension** — sector slider + per-symbol shock fields on the cockpit. Backend already supports it; UI just exposes more controls.
 
-4. **Repo is public.** Set on 2026-05-21 to unblock Actions billing. Anyone can read the code and full git history. Old PATs in `.secrets-local/` (gitignored) are fine, but the **rotated-but-historic PAT references** in old commits are world-readable. The PATs have all been rotated; the values in history are dead tokens.
+### Medium effort (half day–1 day)
 
-5. **VM-side manual deploys.** If GitHub Actions has another outage, the manual deploy pattern is documented in earlier session commits (T-261 deploy). PowerShell + ssh + `docker pull` from GHCR (after `docker login ghcr.io`) + `docker compose up -d --force-recreate ats-backend` from `/opt/ats/compose/`.
+- **T-273 Pre-trade pipeline refactor** — consolidate the existing 3 order-place gates into a single `services/pre-trade.js` that ALSO consults portfolioAggregates for leverage/sector/correlation caps. RISKY because it touches the live-money path; deserves a focused session with deliberate testing.
+- **T-301 Walk-forward parameter re-optimisation** — every Saturday night, for each active strategy, re-fit params on rolling 60-day window, test on out-of-sample 14-day, propose updates to operator via UI.
 
-6. **GHCR transient 502s.** Build-and-push job hit a 502 on T-276 — retry via `POST /actions/runs/{id}/rerun-failed-jobs`. Not a code issue.
+### Bigger investments (multi-day)
 
-7. **`KILL_SWITCH = true` in production env.** The operator is intentionally paper-only right now. Leave it that way until Phase 4 ships and they've completed 2FA setup. Three gates protect live orders today.
-
-8. **`ATS_OPS_KEY` was rotated mid-session** (the original leaked into chat during the T-261 incident). The new value is in `/etc/ats/backend.env` on the VM only. Not in git.
+- **Phase 4 options strategies** — option chain ingestion, Greeks (Black-Scholes for delta, vega/theta proxies), Iron Condor + Bull Call Spread + Covered Call + portfolio-aggregates extension to compute net delta. ~5–7 days. Unlocks the income-strategy side of the platform.
+- **Phase 5 learning loop** — signal confidence calibration tracking, auto-retire underperformers based on rolling Sharpe, AI-assisted strategy parameter suggestions via Claude API.
 
 ---
 
-## Useful next-session bootstrapping commands
+## Gotchas the next agent MUST remember
+
+1. **NEVER use Edit on files > 300 LoC.** Silent truncation. Files we got bitten by this session: `server.js` (4912 LoC), `screen-risk-config.jsx` (477), `shell.jsx` (659), `app.html` (658), `app.jsx` (293), `autorun.js` (470). Use python heredoc string-replace or sed. ALWAYS verify file tail after each edit.
+
+2. **The CI duplicate-top-level-const guard is real.** Two .jsx files defining `const Foo = ...` at column 0 collide in the browser. Caught us once this session with `Section` rename to `RcSection`. Pattern in `.github/workflows/ci.yml`.
+
+3. **Atomic pushes via Git Database API.** Local git push doesn't work from the sandbox. Use `/git/blobs`, `/git/trees`, `/git/commits`, `/git/refs/heads/main`. Every push command in this session's commits.
+
+4. **Repo is public.** Anyone can read code and full git history including past commits with rotated PATs. The PATs are dead but visible.
+
+5. **VM-side manual deploys.** GHCR had a transient 502 once (T-276 build); re-run via `POST /actions/runs/{id}/rerun-failed-jobs`. If Actions itself is down, manual: ssh to VM, docker login ghcr.io, docker pull, docker compose up -d --force-recreate.
+
+6. **KILL_SWITCH=true on prod env.** Operator is intentionally paper-only. Three independent gates protect live trading; leave it that way until Phase 4 ships and 2FA is set up.
+
+7. **`ATS_OPS_KEY` was rotated mid-session.** Old value leaked into chat during T-261 incident; new value is in `/etc/ats/backend.env` on the VM only.
+
+8. **`isStrategyEligibleInRegime` permissive defaults.** Unknown strategy IDs return TRUE (eligible). New strategies in the registry don't accidentally get silenced; they DO need a `STRATEGY_REGIME_MAP` entry for the regime gate to filter them. Don't forget to add one when introducing a strategy.
+
+9. **Regime detector v1 uses only NIFTY + VIX + ATR%.** More inputs (FII/DII flows, breadth, Hindenburg Omen) are tracked as T-280b. Confidence scores currently top out at 0.95 (crisis); 0.85 (clean bull/bear with strong trend); 0.55 (neutral).
+
+10. **SIP runner is per-minute interval, IST-time aware.** Doesn't use cron lib. Idempotency via UNIQUE INDEX on (user_id, symbol, fire_month) WHERE status='placed'. Won't double-fire even on cron-restart races.
+
+---
+
+## Useful next-session bootstrapping
 
 ```powershell
-# Pull latest (sandbox repo may be stale at session start)
+# Check current main
 $PAT = (Get-Content "$env:USERPROFILE\Documents\Claude\Projects\ATS\ATS Design\.secrets-local\github-pat.txt" -Raw).Trim()
-# Latest main SHA:
 curl -sS -H "Authorization: token $PAT" https://api.github.com/repos/kumarikrisnan509-eng/ats/commits/main | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['sha'][:12], '-', d['commit']['message'].split(chr(10))[0])"
 
-# Container status (no SSH needed for read-only health):
+# Prod health
 curl -sS https://ats.rajasekarselvam.com/api/health | python3 -m json.tool
 
-# SSH key for VM ops:
+# Read all session commits since this handoff
+curl -sS -H "Authorization: token $PAT" "https://api.github.com/repos/kumarikrisnan509-eng/ats/commits?since=2026-05-21T00:00:00Z&until=2026-05-22T00:00:00Z" | python3 -c "import json,sys; [print(c['sha'][:12], '-', c['commit']['message'].split(chr(10))[0]) for c in json.load(sys.stdin)]"
+
+# SSH for VM ops
 $KEY = "C:\Users\localuserwin11\Downloads\ssh-key-2026-01-15.key"
-# User: ubuntu; host: ats.rajasekarselvam.com
+ssh -i $KEY ubuntu@ats.rajasekarselvam.com "docker logs --tail 30 ats-backend 2>&1"
 ```
+
+---
 
 ## Files added this session (full inventory)
 
-### Backend services (new)
-- `deploy/backend/services/trade-economics.js` (256 LoC) — T-264
-- `deploy/backend/services/sip-runner.js` (264 LoC) — T-276
-- `deploy/backend/services/portfolio-aggregates.js` (~220 LoC) — T-272
+### Backend services (NEW)
+- `deploy/backend/services/trade-economics.js` (256 LoC) — STT/GST/SEBI/brokerage math
+- `deploy/backend/services/sip-runner.js` (264 LoC) — daily DCA cron with idempotency
+- `deploy/backend/services/portfolio-aggregates.js` (303 LoC) — unified position view + stress test
+- `deploy/backend/services/regime-detector.js` (~200 LoC) — bull/bear/neutral/volatile/crisis classifier
 
 ### Backend modified
-- `deploy/backend/server.js` (4862 LoC) — required all 3 new services, instantiated them, mounted 4 new routes, AutoRunner constructor extended with risk deps
-- `deploy/backend/autorun.js` (436 LoC) — refactored runOnce with 7 sequential gates
-- `deploy/backend/notify.js` (196 LoC) — 6 new trade-event formatters
-- `deploy/backend/services/risk-config.js` (309 LoC) — added sipDayOfMonth + 5 risk-gate columns
-- `deploy/backend/schema.sql` (298 LoC) — sip_fires table + 6 new columns on user_risk_config
+- `deploy/backend/server.js` (4912 LoC) — required all 4 new services, instantiated, mounted 7 new routes
+- `deploy/backend/autorun.js` (470 LoC) — 8-gate refactor of runOnce
+- `deploy/backend/notify.js` (196 LoC) — 6 new trade-event Telegram formatters
+- `deploy/backend/services/risk-config.js` (309 LoC) — sipDayOfMonth + 5 risk-gate columns
+- `deploy/backend/schema.sql` (298 LoC) — sip_fires table + 6 new user_risk_config columns
 - `deploy/backend/routes/orders.js` (437 LoC) — Trading mode guard on /place
+- `deploy/backend/routes/strategies.js` (306 LoC) — STRATEGY_REGIME_MAP + isStrategyEligibleInRegime + enriched /api/strategies response
 
-### Frontend (new + modified)
-- `src/screen-risk-config.jsx` (477 LoC) — new screen
-- `src/screen-risk-cockpit.jsx` (~230 LoC) — new screen
+### Frontend (NEW)
+- `src/screen-risk-config.jsx` (477 LoC) — 4-section Risk Management UI
+- `src/screen-risk-cockpit.jsx` (389 LoC) — Unified position view + regime banner + stress slider
+
+### Frontend modified
 - `src/app.jsx` (293 LoC) — riskconfig + riskcockpit routes
 - `src/shell.jsx` (659 LoC) — nav entries
 - `app.html` (658 LoC) — script tags
 
-### Docs (new)
-- `deploy/docs/HYBRID-ENGINE-MIGRATION.md` — Python+Rust engine analysis
-- `deploy/docs/INTELLIGENT-TRADING-PLATFORM-VISION.md` — 6-phase architecture
+### Docs (NEW)
+- `deploy/docs/HYBRID-ENGINE-MIGRATION.md` — Python+Rust engine analysis (recommended what to port and what to skip)
+- `deploy/docs/INTELLIGENT-TRADING-PLATFORM-VISION.md` — 6-phase architecture (Aladdin-shaped for personal use)
 - `deploy/docs/SESSION-HANDOFF-2026-05-21.md` — this file
 
 ### Deleted
@@ -159,26 +192,24 @@ $KEY = "C:\Users\localuserwin11\Downloads\ssh-key-2026-01-15.key"
 
 ---
 
-## A short word on what the operator just got
+## New API endpoints (post-T-261)
 
-The site went from "wish-list configuration that doesn't change behaviour" to
-"every field is consulted by the engine on every signal." That's a real
-working risk-management layer. The aggregator service that landed at end of
-session is the foundation for everything in Phases 3+ — regime detection
-needs to know the current portfolio state, options strategies need to know
-net delta, scenario stress tests need to know exposure. T-272 is the
-keystone.
-
-The operator should paper-trade for 3–5 trading days, watch:
-- Whether the daily-trade-cap (default 5) feels right or needs tuning
-- Whether the golden window (09:20–15:10 IST) skips signals correctly
-- Whether the SIP runner fires on the configured day-of-month (day 5)
-- What the Risk Cockpit looks like with 3–4 real paper positions
-- Whether Telegram receipts arrive when expected (set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in `/etc/ats/backend.env` first)
-
-Then come back for Phase 3 (regime intelligence) with that data in hand.
+| Method | Path | Purpose | Auth |
+|---|---|---|---|
+| GET | `/api/me/risk-config` | Read current user_risk_config row | cookie |
+| PUT | `/api/me/risk-config` | Update config (full or partial) | cookie + CSRF |
+| GET | `/api/sip/plan` | Preview what SIPs would fire today | cookie |
+| POST | `/api/sip/fire` | Manually trigger SIP run (dry-run default) | cookie + CSRF |
+| GET | `/api/sip/history` | Recent sip_fires audit rows | cookie |
+| GET | `/api/me/portfolio/aggregates` | Unified position view JSON | cookie |
+| POST | `/api/me/portfolio/stress` | Hypothetical PnL under shock | cookie + CSRF |
+| GET | `/api/me/regime` | Current market regime classification | cookie |
+| GET | `/api/me/regime/history` | Last N regime classifications | cookie |
 
 ---
 
-*Session ended cleanly. No P0s outstanding. KILL_SWITCH=true on prod, all
-gates wired, container healthy, repo public, CI green.*
+## Honest assessment of what's solid vs what needs more time
+
+**Solid** (battle-tested or trivial to validate):
+- Auth flow (P0 was fixed, signed-in user can do everything)
+- T-262 Risk Management persistence (UI r
