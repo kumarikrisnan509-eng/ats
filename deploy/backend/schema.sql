@@ -243,3 +243,21 @@ CREATE TABLE IF NOT EXISTS news_items (
   tags_json   TEXT                           -- ["RELIANCE","HDFCBANK"]
 );
 CREATE INDEX IF NOT EXISTS idx_news_ts ON news_items(ts DESC);
+
+-- ---------- T-262: per-user risk-management config (replaces SETUP-TRADING.cmd CLI) ----------
+-- Configured from Settings -> Risk Management in the UI. The autorun engine
+-- and DCA cron read from this table via riskConfigService.cachedGet(userId).
+-- Engine wiring tracked in T-263; for now persistence is intent-only and the
+-- engines still respect env-var / hardcoded defaults.
+CREATE TABLE IF NOT EXISTS user_risk_config (
+  user_id              INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  capital              INTEGER NOT NULL DEFAULT 50000,
+  max_position_pct     REAL    NOT NULL DEFAULT 0.05,
+  max_daily_loss_pct   REAL    NOT NULL DEFAULT 0.02,
+  max_open_positions   INTEGER NOT NULL DEFAULT 3,
+  dca_allocation_json  TEXT    NOT NULL DEFAULT '{"NIFTYBEES":0.0292,"JUNIORBEES":0.0098,"GOLDBEES":0.0078,"MOM100":0.0078}',
+  active_strategies_json TEXT  NOT NULL DEFAULT '["supertrend","rsi_mean_revert","vwap"]',
+  voting_threshold     INTEGER NOT NULL DEFAULT 2,
+  trading_mode         TEXT    NOT NULL DEFAULT 'paper' CHECK (trading_mode IN ('paper','micro_live','full_live')),
+  updated_at           TEXT    NOT NULL DEFAULT (datetime('now'))
+);

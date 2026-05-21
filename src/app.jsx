@@ -25,6 +25,7 @@ const TITLES = {
   insights:   ["Wealth",       "AI insights"],
   // T-248: mf -> longterm (ETF baskets; Kite MF API is read-only by SEBI)
   longterm:   ["Long-term",   "Long-term basket"],
+  riskconfig: ["System",       "Risk management"],
   'ai-keys':  ["System",       "AI providers"],
 };
 
@@ -216,6 +217,7 @@ function App() {
     'ai-keys':  window.AiKeysScreen ? <window.AiKeysScreen/> : null,
     // T-248: mf route retired; replaced by longterm ETF basket screen.
     longterm:   window.LongTermScreen ? <window.LongTermScreen/> : null,
+    riskconfig: window.RiskConfigScreen ? <window.RiskConfigScreen/> : null,
   };
 
   const [crumb, title] = TITLES[route] || TITLES.dashboard;

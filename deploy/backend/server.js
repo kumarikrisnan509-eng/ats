@@ -31,6 +31,9 @@ const _signState = _oauthState.signState;
 const _verifyState = _oauthState.verifyState;
 // T-216 (CODE-AUDIT F.5 M1.4 piece 2): /api/auth/* routes extracted.
 const { mountAuthRoutes } = require('./routes/auth');
+// T-262: /api/me/risk-config GET/PUT (replaces SETUP-TRADING.cmd CLI).
+const { mountRiskConfigRoutes } = require('./routes/risk-config');
+const { createRiskConfigService } = require('./services/risk-config');
 // T-214 (CODE-AUDIT F.5 M1.4 piece 1): strategies registry extracted.
 const { STRATEGIES, mountStrategiesRoutes } = require('./routes/strategies');
 // T-223 (CODE-AUDIT F.5 M1.4 piece 6a): /api/orders/dry-run extracted.
@@ -141,7 +144,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, db, auth, rebalance, replay, emailAlerts, whatsAppAlerts;
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, db, auth, rebalance, replay, emailAlerts, whatsAppAlerts, riskConfigService;
 
 async function init() {
   broker = createBroker(process.env);
@@ -272,6 +275,16 @@ async function init() {
   } catch (e) {
     console.error('!! DB init failed:', e.message);
     db = null; auth = null;
+  }
+  // T-262: per-user risk-management config service. Depends on db, so
+  // construct it right after openDb() succeeds. Used by the
+  // /api/me/risk-config routes and (via cachedGet) by the autorun + DCA
+  // engines so the operator's UI changes propagate without restart.
+  try {
+    if (db) riskConfigService = createRiskConfigService(db);
+  } catch (e) {
+    console.error('!! riskConfigService init failed:', e.message);
+    riskConfigService = null;
   }
 
     wormAudit = new WormAudit({
@@ -4070,6 +4083,10 @@ app.get('/api/v1/oauth/zerodha/callback', _zerodhaCallback);   // v1 path (Tier 
 
 // ---------- Tier 50/51: auth endpoints (signup, login, logout, verify, reset) ----------
 mountAuthRoutes(app, { getAuth: () => auth, getEmailAlerts: () => emailAlerts }); // T-216 + T-228 fix: getter pattern (auth is `let` populated in init, was captured undefined)
+// T-262: per-user risk-management config. Same getter pattern as auth
+// because riskConfigService is assigned inside init() (after openDb)
+// but mountX is called at module top-level; capturing now = undefined.
+mountRiskConfigRoutes(app, { getRiskConfig: () => riskConfigService, getAuth: () => auth });
 
 app.get('/api/security/my-ip', (req, res) => {
   const xrip = req.headers['x-real-ip'];

@@ -5,8 +5,9 @@
 **Status:** Phase 1 — paper-only validation (KILL_SWITCH=true)
 
 This plan is **not tied to a specific capital amount**. All numbers are
-expressed as ratios so you can run `scripts/SETUP-TRADING.cmd` with any
-capital and the script computes the derived caps + DCA amounts.
+expressed as ratios. Configure via **Settings → Risk Management** on the
+live site — the screen takes your capital `C` and computes the derived
+caps + DCA amounts (T-262 replaced the previous `SETUP-TRADING.cmd` CLI).
 
 The worked example below uses **C = ₹50,000** to make the numbers concrete.
 
@@ -40,7 +41,7 @@ For C = ₹50K → ₹2,730/mo × 12 = ₹32,760/yr (≈60% of capital).
 
 ## 2. Risk caps (capital-scaled)
 
-Apply via `POST /api/risk/config`. The setup script does this automatically.
+Apply via **Settings → Risk Management** on the live site (PUT `/api/me/risk-config`).
 
 | Cap | Formula | Worked example (C = ₹50K) | Rationale |
 |---|---|---|---|
@@ -129,13 +130,10 @@ At C = ₹50K @ 15% CAGR = ₹7,500/year. At C = ₹5L @ 15% = ₹75,000/year. T
 - Autorun cron: `deploy/backend/autorun.js`
 - DCA SIP engine: `deploy/backend/longterm.js`
 - Kill switch: `KILL_SWITCH` env var in `/etc/ats/backend.env`
-- Setup script: `scripts/SETUP-TRADING.cmd` (parameterized, takes capital as input)
+- Setup UI: **Settings → Risk Management** on the live site (T-262, replaces `scripts/SETUP-TRADING.cmd`)
 
 ---
 
 ## 9. Change log
 
-- 2026-05-20 (T-258): Initial doc — hardcoded ₹50K
-- 2026-05-20 (T-260): **Parameterized** — all numbers as ratios of capital C
-- 2026-05-20 (T-259 → T-260): SETUP-50K-TRADING.cmd → SETUP-TRADING.cmd, prompts for capital
-- 2026-05-20 (T-257): UI streamlined to 12 nav entries to support this workflow
+- 2026-05-20 (T-258): Initial doc — hardcoded ₹
