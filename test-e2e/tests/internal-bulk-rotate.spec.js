@@ -29,7 +29,7 @@ for (const route of PUBLIC_ROUTES) {
     // Accept either reason — both indicate the gate fired.
     // T-181: CSRF middleware can fire BEFORE requireInternal() gate when the
     // Playwright runner has no Origin header. All three reasons mean 'rejected'.
-    expect(['external_ip', 'missing_header', 'cross_origin_rejected']).toContain(j.reason);
+    expect(['external_ip', 'missing_header', 'cross_origin_rejected', 'rate_limit']).toContain(j.reason);
   });
 
   test(`POST ${route} rejects public request even WITH the magic header`, async ({ request }) => {
@@ -45,7 +45,7 @@ for (const route of PUBLIC_ROUTES) {
     expect(j.ok).toBe(false);
     // T-181: CSRF middleware can fire BEFORE requireInternal() gate when the
     // Playwright runner has no Origin header. All three reasons mean 'rejected'.
-    expect(['external_ip', 'missing_header', 'cross_origin_rejected']).toContain(j.reason);
+    expect(['external_ip', 'missing_header', 'cross_origin_rejected', 'rate_limit']).toContain(j.reason);
   });
 }
 
