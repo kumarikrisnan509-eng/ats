@@ -30,20 +30,34 @@
 
 const { test, expect } = require('@playwright/test');
 
-const ENABLED = !!process.env.PLAYWRIGHT_VISUAL_SNAPSHOTS;
+// Phase E v3: default ENABLED. Baseline for the landing route is committed
+// under tests/visual-snapshots.spec.js-snapshots/landing-linux.png and the
+// CI Playwright run will pixel-diff against it on every push. Set
+// PLAYWRIGHT_VISUAL_SNAPSHOTS=0 to opt out temporarily.
+const ENABLED = process.env.PLAYWRIGHT_VISUAL_SNAPSHOTS !== '0';
 
-// (route id, friendly name, additional wait for that screen's data to settle)
+// Phase E v3: ONE public route. Discovered while seeding baselines that
+// the React app redirects anonymous sessions to the landing page
+// regardless of hash, so #auth and #legal produced byte-identical
+// screenshots to #landing. The proper fix for snapshotting auth-gated
+// screens (dashboard, paper, attribution, etc.) is to add a login
+// fixture that signs in a deterministic test user before each snapshot.
+// That requires:
+//   1. Backend support for a deterministic test-user seed (env var or
+//      bootstrap hook that creates a known user with known password).
+//   2. A Playwright fixture (beforeEach) that POSTs /api/auth/login
+//      against the seed credentials and captures the session cookie.
+//   3. Decision on whether snapshots are taken against LOCAL (with
+//      deterministic data seed) or against staging once provisioned.
+// Tracked as a Phase E v4 follow-up. For now this single landing-page
+// snapshot catches marketing-surface CSS regressions, which is real
+// value even if narrow.
 const VISUAL_SCREENS = [
-  ['#dashboard',    'dashboard',    1500],
-  ['#paper',        'paper',        1500],
-  ['#strategies',   'strategies',   1500],
-  ['#attribution',  'attribution',  1500],
-  ['#slippage',     'slippage',     1500],
+  ['',          'landing',     1500],   // app.html root -> landing/marketing
 ];
 
 test.describe('Visual regression snapshots (Phase E)', () => {
-  test.skip(!ENABLED, 'Phase E: set PLAYWRIGHT_VISUAL_SNAPSHOTS=1 to enable. ' +
-    'On first enable, run with --update-snapshots to seed baselines.');
+  test.skip(!ENABLED, 'Phase E: visual regression skipped via PLAYWRIGHT_VISUAL_SNAPSHOTS=0');
 
   test.beforeEach(async ({ page }) => {
     // Freeze any animation that would cause pixel jitter between runs.
