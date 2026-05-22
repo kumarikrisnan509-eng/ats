@@ -159,13 +159,17 @@ jobs:
             echo "no test script defined -- skipping"
           fi
 
-      - name: Frontend unit tests (Vitest -- BLOCKING, T-318)
+      - name: Frontend unit tests (Vitest -- non-blocking, T-318 follow-up)
         working-directory: test-frontend
-        # T-318 (cleanup): flipped from continue-on-error to blocking.
-        # 5 pure-function tests on canonical formatters + Toggle primitive,
-        # all running clean since T-211. Same canary -> gate pattern T-199
-        # used for npm audit. A regression here means a formatter contract
-        # changed without a deliberate test update -- worth blocking.
+        # T-318 attempted to flip blocking; canary revealed that 3 of 5
+        # tests fail in CI's happy-dom env with
+        # "TypeError: window.addEventListener is not a function" because
+        # lib/load-jsx.js evals r11-additions.jsx into a fake-window that
+        # is just {} and the .jsx file calls window.addEventListener at
+        # top level. Only Toggle.test.jsx + inrCompact.test.js pass.
+        # Until lib/load-jsx.js stubs the DOM surface r11-additions touches,
+        # leaving non-blocking. Track in T-319.
+        continue-on-error: true
         run: |
           if [ -f package.json ]; then
             npm install --silent --no-audit --no-fund
