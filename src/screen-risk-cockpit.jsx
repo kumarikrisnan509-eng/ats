@@ -407,7 +407,7 @@ window.RiskCockpitScreen = function RiskCockpitScreen() {
                         {r.ts ? new Date(r.ts).toLocaleTimeString('en-IN', { hour12: false }) : '-'}
                       </td>
                       <td style={{ padding: '4px 6px', color, fontWeight: 600 }}>{r.result || '-'}</td>
-                      <td style={{ padding: '4px 6px' }}>{r.regime || '-'}</td>
+                      <td style={{ padding: '4px 6px' }}>{(r.regime && r.regime.label) || r.regime || '-'}</td>
                       <td style={{ padding: '4px 6px', fontSize: 11, color: 'var(--text-3)' }}>{r.signal || ''}</td>
                       <td style={{ padding: '4px 6px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-3)' }}>{r.durationMs || 0}</td>
                     </tr>
