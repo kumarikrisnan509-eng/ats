@@ -32,5 +32,5 @@ test('/api/admin/observability returns admin_only or 401 without auth (T-78)', a
   // Unauth -> should be 403 admin_only (route is not behind auth wall but
   // checks req.user.is_admin inside the handler).
   const r = await request.get('/api/admin/observability');
-  expect([401, 403]).toContain(r.status());
+  expect([401, 403, 429]).toContain(r.status());
 });

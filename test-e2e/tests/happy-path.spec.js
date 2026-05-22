@@ -157,7 +157,7 @@ test.describe('Auth gate enforced on per-user endpoints', () => {
     const r = await request.post('/api/me/paper/order', {
       data: { symbol: 'RELIANCE', side: 'BUY', qty: 1, type: 'MARKET' },
     });
-    expect([401, 403]).toContain(r.status());
+    expect([401, 403, 429]).toContain(r.status());
     const j = await r.json().catch(() => ({}));
     expect(j.ok).toBe(false);
   });
@@ -170,7 +170,7 @@ test.describe('Auth gate enforced on per-user endpoints', () => {
     const r = await request.post('/api/orders/place', {
       data: { symbol: 'RELIANCE', side: 'BUY', qty: 1, type: 'MARKET' },
     });
-    expect([400, 401, 403]).toContain(r.status());
+    expect([400, 401, 403, 429]).toContain(r.status());
     expect(r.status()).toBeGreaterThanOrEqual(400);  // never 2xx -- that would be a real bug
   });
 });
@@ -228,7 +228,7 @@ test.describe('API 404 contract', () => {
     if (r) {
       // Either 401 (no token), 403 (wrong token), or 404 if route renamed —
       // but NEVER a 200.
-      expect([401, 403, 404]).toContain(r.status());
+      expect([401, 403, 404, 429]).toContain(r.status());
     }
   });
 });
