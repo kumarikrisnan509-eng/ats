@@ -107,7 +107,7 @@ const ROUTE_CONTRACTS = {
   // (the misspelled "opps" is the canonical route key in app.jsx TITLES).
   // Both #options-opportunities and #options-ops fall back to Dashboard.
   '#options-opps': {
-    label: 'Options ops',
+    label: 'Options opportunities',
     required: ['Options opportunities', 'Scanner', 'Fetcher', 'Total opportunities'],
   },
 
@@ -175,7 +175,7 @@ test.describe('structural rendering -- auth-gated', () => {
       // 2. ErrorBoundary did NOT catch.
       if (text.includes('Something broke on this screen')) {
         const m = text.match(/Something broke on this screen[\s\S]{0,400}/);
-        expect.fail(`${route} hit ErrorBoundary. Excerpt:\n${m ? m[0] : '(no detail)'}`);
+        throw new Error(`${route} hit ErrorBoundary. Excerpt:\n${m ? m[0] : '(no detail)'}`);
       }
 
       // 3. No object leak.

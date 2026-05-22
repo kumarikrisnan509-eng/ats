@@ -119,7 +119,7 @@ for (const route of ROUTES) {
       // Surface 60 chars of surrounding context so the failure message is useful
       const i = text.indexOf(nanMatch[0]);
       const ctx = text.slice(Math.max(0, i - 30), Math.min(text.length, i + 30));
-      expect.fail(`${route} rendered leaked NaN. Context: "...${ctx}..."`);
+      throw new Error(`${route} rendered leaked NaN. Context: "...${ctx}..."`);
     }
 
     // 3. literal "undefined" in a value position
@@ -127,7 +127,7 @@ for (const route of ROUTES) {
     if (undefMatch) {
       const i = text.indexOf(undefMatch[0]);
       const ctx = text.slice(Math.max(0, i - 30), Math.min(text.length, i + 30));
-      expect.fail(`${route} rendered leaked undefined. Context: "...${ctx}..."`);
+      throw new Error(`${route} rendered leaked undefined. Context: "...${ctx}..."`);
     }
 
     // 4. T-322d: ErrorBoundary catch. The boundary at src/r8-primitives.js
@@ -145,7 +145,7 @@ for (const route of ROUTES) {
     if (text.includes('Something broke on this screen')) {
       // Surface the inner error message so the failure is debuggable.
       const m = text.match(/Something broke on this screen[\s\S]{0,400}/);
-      expect.fail(`${route} hit the ErrorBoundary. Excerpt:\n${m ? m[0] : '(no detail)'}\n`);
+      throw new Error(`${route} hit the ErrorBoundary. Excerpt:\n${m ? m[0] : '(no detail)'}\n`);
     }
 
     // 5. The screen must actually have rendered some non-empty UI. Catches
