@@ -9,13 +9,13 @@
 /** @typedef {import('../types/api-shapes').MacroSignalsResponse} MacroSignalsResponse */
 
 (function () {
-  // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inr, _fmtTime, etc.)
+  // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inr, _fmtTimeMS, etc.)
   // do not collide with same-named consts in other screen-*.js files.
-const _fmtTime = (s) => {
+const _fmtTimeMS = (s) => {
   if (!s) return '-';
   try { return new Date(s).toLocaleString('en-IN', { hour12: false }); } catch { return s; }
 };
-const _fmt = (n, places = 2) => Number.isFinite(n) ? n.toFixed(places) : '-';
+const _fmtMS = (n, places = 2) => Number.isFinite(n) ? n.toFixed(places) : '-';
 const _flowColor = (n) => !Number.isFinite(n) || n === 0 ? 'var(--text-2)' : (n > 0 ? '#15803d' : '#b91c1c');
 const _breadthColor = (n) => {
   if (!Number.isFinite(n)) return 'var(--text-2)';
@@ -81,7 +81,7 @@ window.MacroSignalsScreen = function MacroSignalsScreen() {
           </span>
         </div>
         <div>
-          <strong>Last fetch:</strong> {_fmtTime(latest && latest.fetchedAt)}
+          <strong>Last fetch:</strong> {_fmtTimeMS(latest && latest.fetchedAt)}
         </div>
         <div style={{flex:1}}/>
         <button
@@ -103,7 +103,7 @@ window.MacroSignalsScreen = function MacroSignalsScreen() {
             <div style={{padding:14, background:'var(--panel, #1a1f2e)', border:'1px solid var(--border, #2a3142)', borderRadius:8}}>
               <div style={{fontSize:11, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:0.4}}>FII / FPI net flow</div>
               <div style={{fontSize:24, fontWeight:600, fontFamily:'monospace', color:_flowColor(latest.fiiNetFlow)}}>
-                {latest.fiiNetFlow != null ? `${latest.fiiNetFlow > 0 ? '+' : ''}${_fmt(latest.fiiNetFlow)} cr` : '-'}
+                {latest.fiiNetFlow != null ? `${latest.fiiNetFlow > 0 ? '+' : ''}${_fmtMS(latest.fiiNetFlow)} cr` : '-'}
               </div>
               <div style={{fontSize:11, color:'var(--text-3)', marginTop:4}}>
                 {latest.fiiNetFlow > 500 ? 'strong buying (+1 to richScore)' :
@@ -114,7 +114,7 @@ window.MacroSignalsScreen = function MacroSignalsScreen() {
             <div style={{padding:14, background:'var(--panel, #1a1f2e)', border:'1px solid var(--border, #2a3142)', borderRadius:8}}>
               <div style={{fontSize:11, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:0.4}}>Market breadth (NIFTY 500)</div>
               <div style={{fontSize:24, fontWeight:600, fontFamily:'monospace', color:_breadthColor(latest.marketBreadth)}}>
-                {_fmt(latest.marketBreadth, 2)}
+                {_fmtMS(latest.marketBreadth, 2)}
               </div>
               <div style={{fontSize:11, color:'var(--text-3)', marginTop:4}}>
                 advancers / decliners ratio. &gt;1.5 bullish, &lt;0.67 bearish.
@@ -124,7 +124,7 @@ window.MacroSignalsScreen = function MacroSignalsScreen() {
             <div style={{padding:14, background:'var(--panel, #1a1f2e)', border:'1px solid var(--border, #2a3142)', borderRadius:8, opacity: latest.highLowRatio == null ? 0.6 : 1}}>
               <div style={{fontSize:11, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:0.4}}>52w highs : lows</div>
               <div style={{fontSize:24, fontWeight:600, fontFamily:'monospace'}}>
-                {_fmt(latest.highLowRatio, 2)}
+                {_fmtMS(latest.highLowRatio, 2)}
               </div>
               <div style={{fontSize:11, color:'var(--text-3)', marginTop:4}}>
                 NSE endpoint retired (Jan 2026); awaiting alternate source.

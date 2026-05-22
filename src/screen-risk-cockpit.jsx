@@ -15,7 +15,7 @@
  * Refreshes every 30s via setInterval. No mutating actions on this screen.
  */
 
-const _inr = (n) => {
+const _inrRC = (n) => {
   if (n == null || !Number.isFinite(n)) return '-';
   const a = Math.abs(n);
   const sign = n < 0 ? '-' : '';
@@ -25,12 +25,12 @@ const _inr = (n) => {
   return `${sign}₹${a.toFixed(0)}`;
 };
 
-const _pct = (n, places = 2) => {
+const _pctRC = (n, places = 2) => {
   if (!Number.isFinite(n)) return '-';
   return `${n.toFixed(places)}%`;
 };
 
-const _pnlColor = (n) => {
+const _pnlColorRC = (n) => {
   if (!Number.isFinite(n) || n === 0) return 'var(--text-2)';
   return n > 0 ? 'var(--up, #15803d)' : 'var(--down, #b91c1c)';
 };
@@ -177,11 +177,11 @@ window.RiskCockpitScreen = function RiskCockpitScreen() {
 
       {/* KPI row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 20 }}>
-        <KPI label="Total value"    value={_inr(data.totalValue)} sub="cash + market value" />
-        <KPI label="Cash"           value={_inr(data.cash)} />
-        <KPI label="MTM P&L"        value={_inr(data.totalMtmPnl)} color={_pnlColor(data.totalMtmPnl)} />
-        <KPI label="Gross exposure" value={_inr(data.grossExposure)} sub="|long| + |short|" />
-        <KPI label="Net exposure"   value={_inr(data.netExposure)} sub="long − short" color={_pnlColor(data.netExposure)} />
+        <KPI label="Total value"    value={_inrRC(data.totalValue)} sub="cash + market value" />
+        <KPI label="Cash"           value={_inrRC(data.cash)} />
+        <KPI label="MTM P&L"        value={_inrRC(data.totalMtmPnl)} color={_pnlColorRC(data.totalMtmPnl)} />
+        <KPI label="Gross exposure" value={_inrRC(data.grossExposure)} sub="|long| + |short|" />
+        <KPI label="Net exposure"   value={_inrRC(data.netExposure)} sub="long − short" color={_pnlColorRC(data.netExposure)} />
         <KPI label="Leverage"       value={data.leverage != null ? `${data.leverage.toFixed(2)}x` : '-'} sub="gross / cash" color={data.leverage > 2 ? 'var(--down, #b91c1c)' : 'var(--text-1)'} />
       </div>
 
@@ -192,7 +192,7 @@ window.RiskCockpitScreen = function RiskCockpitScreen() {
           background: '#fef9c3', border: '1px solid #fde047', borderRadius: 6,
           fontSize: 13, color: '#854d0e',
         }}>
-          <strong>Concentration alert:</strong> {conc.symbol} is {_pct(conc.pct)} of long market value — consider trimming below 30% for diversification.
+          <strong>Concentration alert:</strong> {conc.symbol} is {_pctRC(conc.pct)} of long market value — consider trimming below 30% for diversification.
         </div>
       )}
 
@@ -224,11 +224,11 @@ window.RiskCockpitScreen = function RiskCockpitScreen() {
                     <td style={_tdStyle}><strong>{p.symbol}</strong></td>
                     <td style={_tdStyle}><SectorPill sector={p.sector}/></td>
                     <td style={_tdStyleR}>{p.qty}</td>
-                    <td style={_tdStyleR}>{_inr(p.avgPrice)}</td>
-                    <td style={_tdStyleR}>{p.ltp != null ? _inr(p.ltp) : '—'}</td>
-                    <td style={_tdStyleR}>{_inr(p.marketValue)}</td>
-                    <td style={{ ..._tdStyleR, color: _pnlColor(p.mtmPnl) }}>{_inr(p.mtmPnl)}</td>
-                    <td style={{ ..._tdStyleR, color: _pnlColor(p.mtmPnl) }}>{_pct(p.mtmPnlPct)}</td>
+                    <td style={_tdStyleR}>{_inrRC(p.avgPrice)}</td>
+                    <td style={_tdStyleR}>{p.ltp != null ? _inrRC(p.ltp) : '—'}</td>
+                    <td style={_tdStyleR}>{_inrRC(p.marketValue)}</td>
+                    <td style={{ ..._tdStyleR, color: _pnlColorRC(p.mtmPnl) }}>{_inrRC(p.mtmPnl)}</td>
+                    <td style={{ ..._tdStyleR, color: _pnlColorRC(p.mtmPnl) }}>{_pctRC(p.mtmPnlPct)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -250,7 +250,7 @@ window.RiskCockpitScreen = function RiskCockpitScreen() {
                     <div key={sec} style={{ marginBottom: 8 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 3 }}>
                         <span style={{ color: 'var(--text-2)' }}>{sec}</span>
-                        <span style={{ color: 'var(--text-3)' }}>{_pct(info.weightPct || 0)} · {_inr(info.marketValue)}</span>
+                        <span style={{ color: 'var(--text-3)' }}>{_pctRC(info.weightPct || 0)} · {_inrRC(info.marketValue)}</span>
                       </div>
                       <div style={{ height: 6, background: 'var(--bg-sunk)', borderRadius: 3, overflow: 'hidden' }}>
                         <div style={{
@@ -286,7 +286,7 @@ window.RiskCockpitScreen = function RiskCockpitScreen() {
                       <tr key={tag}>
                         <td style={_tdStyle}><code style={{ fontSize: 11, color: 'var(--text-2)' }}>{tag}</code></td>
                         <td style={_tdStyleR}>{info.count}</td>
-                        <td style={{ ..._tdStyleR, color: _pnlColor(info.realisedPnl) }}>{_inr(info.realisedPnl)}</td>
+                        <td style={{ ..._tdStyleR, color: _pnlColorRC(info.realisedPnl) }}>{_inrRC(info.realisedPnl)}</td>
                       </tr>
                   ))}
                 </tbody>
@@ -313,13 +313,13 @@ window.RiskCockpitScreen = function RiskCockpitScreen() {
             </div>
             <div style={{ display: 'flex', gap: 24, fontSize: 13, flexWrap: 'wrap' }}>
               <span style={{ color: 'var(--text-3)' }}>
-                Portfolio would move <strong style={{ color: _pnlColor(stress.portfolioMovePct) }}>{_pct(stress.portfolioMovePct)}</strong>
+                Portfolio would move <strong style={{ color: _pnlColorRC(stress.portfolioMovePct) }}>{_pctRC(stress.portfolioMovePct)}</strong>
               </span>
               <span style={{ color: 'var(--text-3)' }}>
-                Hypothetical PnL: <strong style={{ color: _pnlColor(stress.totalShockPnl) }}>{_inr(stress.totalShockPnl)}</strong>
+                Hypothetical PnL: <strong style={{ color: _pnlColorRC(stress.totalShockPnl) }}>{_inrRC(stress.totalShockPnl)}</strong>
               </span>
               <span style={{ color: 'var(--text-3)' }}>
-                from baseline {_inr(stress.totalBaselineMV)} to {_inr(stress.totalShockedMV)}
+                from baseline {_inrRC(stress.totalBaselineMV)} to {_inrRC(stress.totalShockedMV)}
               </span>
             </div>
           </div>
@@ -338,12 +338,12 @@ window.RiskCockpitScreen = function RiskCockpitScreen() {
           <div style={{ padding: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
             <div>
               <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.4 }}>Net Delta</div>
-              <div style={{ fontSize: 20, fontWeight: 600, fontFamily: 'monospace', color: _pnlColor(optionGreeks.netDelta) }}>
+              <div style={{ fontSize: 20, fontWeight: 600, fontFamily: 'monospace', color: _pnlColorRC(optionGreeks.netDelta) }}>
                 {Number(optionGreeks.netDelta).toFixed(2)}
               </div>
               {Number.isFinite(optionGreeks.notionalDelta) && (
                 <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>
-                  Notional: {_inr(optionGreeks.notionalDelta)}
+                  Notional: {_inrRC(optionGreeks.notionalDelta)}
                 </div>
               )}
             </div>
@@ -362,7 +362,7 @@ window.RiskCockpitScreen = function RiskCockpitScreen() {
             </div>
             <div>
               <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.4 }}>Net Theta</div>
-              <div style={{ fontSize: 20, fontWeight: 600, fontFamily: 'monospace', color: _pnlColor(optionGreeks.netTheta) }}>
+              <div style={{ fontSize: 20, fontWeight: 600, fontFamily: 'monospace', color: _pnlColorRC(optionGreeks.netTheta) }}>
                 {Number(optionGreeks.netTheta).toFixed(2)}
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>per day</div>

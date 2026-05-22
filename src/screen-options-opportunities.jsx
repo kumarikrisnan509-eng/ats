@@ -24,9 +24,9 @@
 /** @typedef {import('../types/api-shapes').OptionOpportunitiesResponse} OptionOpportunitiesResponse */
 
 (function () {
-  // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inr, _fmtTime, etc.)
+  // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inr, _fmtTimeOpt, etc.)
   // do not collide with same-named consts in other screen-*.js files.
-const _fmtTime = (s) => {
+const _fmtTimeOpt = (s) => {
   if (!s) return '-';
   try { return new Date(s).toLocaleString('en-IN', { hour12: false }); } catch { return s; }
 };
@@ -163,7 +163,7 @@ window.OptionsOpportunitiesScreen = function OptionsOpportunitiesScreen() {
               return (
                 <React.Fragment key={o.id}>
                   <tr style={{borderBottom:'1px solid var(--border, #2a3142)', opacity: o.reviewed ? 0.55 : 1}}>
-                    <td style={{padding:'8px 6px', whiteSpace:'nowrap'}}>{_fmtTime(o.scannedAt)}</td>
+                    <td style={{padding:'8px 6px', whiteSpace:'nowrap'}}>{_fmtTimeOpt(o.scannedAt)}</td>
                     <td style={{padding:'8px 6px'}}>
                       <span style={{
                         display:'inline-block', padding:'2px 8px', borderRadius:4, fontSize:11,
@@ -218,7 +218,7 @@ window.OptionsOpportunitiesScreen = function OptionsOpportunitiesScreen() {
                         {o.reviewed && o.reviewedNote && (
                           <div style={{marginTop:8, color:'var(--text-2)', fontSize:11}}>
                             <strong>Note:</strong> {o.reviewedNote}
-                            <br/><strong>At:</strong> {_fmtTime(o.reviewedAt)}
+                            <br/><strong>At:</strong> {_fmtTimeOpt(o.reviewedAt)}
                           </div>
                         )}
                       </td>

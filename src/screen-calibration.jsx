@@ -11,18 +11,18 @@
 /** @typedef {import('../types/api-shapes').RecommendRetireResponse} RecommendRetireResponse */
 
 (function () {
-  // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inr, _fmtTime, etc.)
+  // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inrCal, _fmtTime, etc.)
   // do not collide with same-named consts in other screen-*.js files.
-const _pct = (n) => n == null ? '-' : `${(n * 100).toFixed(1)}%`;
-const _inr = (n) => {
+const _pctCal = (n) => n == null ? '-' : `${(n * 100).toFixed(1)}%`;
+const _inrCal = (n) => {
   if (!Number.isFinite(n)) return '-';
   const a = Math.abs(n), sign = n < 0 ? '-' : '';
   if (a >= 1e5) return `${sign}₹${(a/1e5).toFixed(2)}L`;
   if (a >= 1e3) return `${sign}₹${(a/1e3).toFixed(1)}K`;
   return `${sign}₹${a.toFixed(0)}`;
 };
-const _pnlColor = (n) => !Number.isFinite(n) || n === 0 ? 'var(--text-2)' : (n > 0 ? '#15803d' : '#b91c1c');
-const _badge = (rec) => ({ retire: '#b91c1c', watch: '#f59e0b', keep: '#15803d' })[rec] || '#94a3b8';
+const _pnlColorCal = (n) => !Number.isFinite(n) || n === 0 ? 'var(--text-2)' : (n > 0 ? '#15803d' : '#b91c1c');
+const _badgeCal = (rec) => ({ retire: '#b91c1c', watch: '#f59e0b', keep: '#15803d' })[rec] || '#94a3b8';
 
 window.CalibrationScreen = function CalibrationScreen() {
   const [calibration, setCalibration] = React.useState([]);
@@ -111,14 +111,14 @@ window.CalibrationScreen = function CalibrationScreen() {
                 <td style={{padding:'6px 4px'}}>
                   <span style={{
                     display:'inline-block', padding:'2px 8px', borderRadius:4, fontSize:11, fontWeight:600,
-                    background: _badge(s.recommendation) + '22', color: _badge(s.recommendation),
+                    background: _badgeCal(s.recommendation) + '22', color: _badgeCal(s.recommendation),
                   }}>{(s.recommendation || 'keep').toUpperCase()}</span>
                 </td>
                 <td style={{padding:'6px 4px', textAlign:'right'}}>{s.trades}</td>
                 <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace', fontSize:12}}>{s.wins}/{s.losses}</td>
-                <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace'}}>{_pct(s.hitRate)}</td>
-                <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace', color:_pnlColor(s.avgPnl)}}>{s.avgPnl != null ? _inr(s.avgPnl) : '-'}</td>
-                <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace', color:_pnlColor(s.totalPnl)}}>{_inr(s.totalPnl)}</td>
+                <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace'}}>{_pctCal(s.hitRate)}</td>
+                <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace', color:_pnlColorCal(s.avgPnl)}}>{s.avgPnl != null ? _inrCal(s.avgPnl) : '-'}</td>
+                <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace', color:_pnlColorCal(s.totalPnl)}}>{_inrCal(s.totalPnl)}</td>
                 <td style={{padding:'6px 4px', textAlign:'right'}}>{s.maxConsecutiveLosses || 0}</td>
                 <td style={{padding:'6px 4px', fontSize:11, color:'var(--text-3)'}}>{s.reason || ''}</td>
               </tr>

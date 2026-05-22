@@ -104,7 +104,7 @@ jobs:
         run: |
           set -e
           # Browser script-tags share a script-level lexical environment.
-          # If two .jsx files both declare `const X = ...` at column 0, the second
+          # If two .jsx files both declare `const X = ...` (or `const _x = ...`) at column 0, the second
           # throws SyntaxError on page load and silently breaks that screen's
           # window.* export (see fcefb3b: the Field/SettingsScreen blank-page bug).
           python3 - <<'PY'
@@ -113,7 +113,7 @@ jobs:
           for fn in sorted(os.listdir('src')):
               if not fn.endswith('.jsx'): continue
               with open('src/' + fn) as f: src = f.read()
-              for m in re.finditer(r'^const ([A-Z][A-Za-z0-9_]*) =', src, flags=re.MULTILINE):
+              for m in re.finditer(r'^const ([_A-Za-z][A-Za-z0-9_]*) =', src, flags=re.MULTILINE):
                   locs[m.group(1)].append(fn)
           dupes = {k:v for k,v in locs.items() if len(v) > 1}
           if dupes:

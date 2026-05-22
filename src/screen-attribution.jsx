@@ -8,9 +8,9 @@
 /** @typedef {import('../types/api-shapes').AttributionRow}      AttributionRow */
 
 (function () {
-  // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inr, _fmtTime, etc.)
+  // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inrAttr, _fmtTime, etc.)
   // do not collide with same-named consts in other screen-*.js files.
-const _inr = (n) => {
+const _inrAttr = (n) => {
   if (!Number.isFinite(n)) return '-';
   const a = Math.abs(n), sign = n < 0 ? '-' : '';
   if (a >= 1e7) return `${sign}₹${(a/1e7).toFixed(2)}cr`;
@@ -18,8 +18,8 @@ const _inr = (n) => {
   if (a >= 1e3) return `${sign}₹${(a/1e3).toFixed(1)}K`;
   return `${sign}₹${a.toFixed(0)}`;
 };
-const _pnlColor = (n) => !Number.isFinite(n) || n === 0 ? 'var(--text-2)' : (n > 0 ? '#15803d' : '#b91c1c');
-const _fmtDate = (s) => { try { return new Date(s).toLocaleDateString('en-IN'); } catch { return s; } };
+const _pnlColorAttr = (n) => !Number.isFinite(n) || n === 0 ? 'var(--text-2)' : (n > 0 ? '#15803d' : '#b91c1c');
+const _fmtDateAttr = (s) => { try { return new Date(s).toLocaleDateString('en-IN'); } catch { return s; } };
 
 window.AttributionScreen = function AttributionScreen() {
   const [data, setData] = React.useState(null);
@@ -71,7 +71,7 @@ window.AttributionScreen = function AttributionScreen() {
       <div style={{display:'flex', gap:24, alignItems:'baseline', marginBottom:14, fontSize:13}}>
         <div>
           <span style={{color:'var(--text-2)'}}>Total PnL (window): </span>
-          <strong style={{color:_pnlColor(totalPnl), fontFamily:'monospace', fontSize:18}}>{_inr(totalPnl)}</strong>
+          <strong style={{color:_pnlColorAttr(totalPnl), fontFamily:'monospace', fontSize:18}}>{_inrAttr(totalPnl)}</strong>
         </div>
         <div style={{flex:1}}/>
         <select value={days} onChange={e => setDays(Number(e.target.value))} style={{padding:'2px 6px', fontSize:12, background:'var(--panel-2)', color:'var(--text-1)', border:'1px solid var(--border)', borderRadius:4}}>
@@ -99,7 +99,7 @@ window.AttributionScreen = function AttributionScreen() {
               {stratRows.map(([s, p]) => (
                 <tr key={s} style={{borderBottom:'1px solid var(--border, #2a3142)'}}>
                   <td style={{padding:'6px 4px', fontWeight:600}}>{s}</td>
-                  <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace', color:_pnlColor(p)}}>{_inr(p)}</td>
+                  <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace', color:_pnlColorAttr(p)}}>{_inrAttr(p)}</td>
                   <td style={{padding:'6px 4px', textAlign:'right', color:'var(--text-3)'}}>{totalPnl !== 0 ? `${(p / totalPnl * 100).toFixed(1)}%` : '-'}</td>
                 </tr>
               ))}
@@ -133,9 +133,9 @@ window.AttributionScreen = function AttributionScreen() {
                   ? Object.values(r.autorun.gateSkips).reduce((s, v) => s + (Number(v) || 0), 0) : 0;
                 return (
                 <tr key={i} style={{borderBottom:'1px solid var(--border, #2a3142)'}}>
-                  <td style={{padding:'6px 4px'}}>{_fmtDate(r.date)}</td>
+                  <td style={{padding:'6px 4px'}}>{_fmtDateAttr(r.date)}</td>
                   <td style={{padding:'6px 4px', fontSize:11}}>{regimeLabel}</td>
-                  <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace', color:_pnlColor(r.totalPnl)}}>{_inr(r.totalPnl)}</td>
+                  <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace', color:_pnlColorAttr(r.totalPnl)}}>{_inrAttr(r.totalPnl)}</td>
                   <td style={{padding:'6px 4px', textAlign:'right'}}>{tradeCount}</td>
                   <td style={{padding:'6px 4px', textAlign:'right', color:'var(--text-3)'}}>{skipCount}</td>
                 </tr>

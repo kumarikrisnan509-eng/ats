@@ -47,7 +47,7 @@ const FALLBACK_STRATEGIES = [
   { id: 'trix', name: 'TRIX' },
 ];
 
-const _inr = (n) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
+const _inrCfg = (n) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 
 window.RiskConfigScreen = function RiskConfigScreen() {
   const [config, setConfig] = React.useState(null);     // working copy (edited locally)
@@ -184,9 +184,9 @@ window.RiskConfigScreen = function RiskConfigScreen() {
         background: 'var(--bg-soft)', border: '1px solid var(--border)', borderRadius: 6,
         display: 'flex', gap: 24, flexWrap: 'wrap',
       }}>
-        <span><b>Capital:</b> {_inr(config.capital)}</span>
-        <span><b>Max position:</b> {_inr(maxPositionINR)} ({((config.maxPositionPct || 0) * 100).toFixed(2)}%)</span>
-        <span><b>Daily loss cap:</b> {_inr(maxDailyLossINR)} ({((config.maxDailyLossPct || 0) * 100).toFixed(2)}%)</span>
+        <span><b>Capital:</b> {_inrCfg(config.capital)}</span>
+        <span><b>Max position:</b> {_inrCfg(maxPositionINR)} ({((config.maxPositionPct || 0) * 100).toFixed(2)}%)</span>
+        <span><b>Daily loss cap:</b> {_inrCfg(maxDailyLossINR)} ({((config.maxDailyLossPct || 0) * 100).toFixed(2)}%)</span>
         <span><b>Mode:</b> {config.tradingMode}</span>
       </div>
 
@@ -294,7 +294,7 @@ window.RiskConfigScreen = function RiskConfigScreen() {
           />
         </Field>
         {DCA_SYMBOLS.map(sym => (
-          <Field key={sym} label={sym} hint={`${_inr((config.capital || 0) * (config.dcaAllocation[sym] || 0))} / month at current capital`}>
+          <Field key={sym} label={sym} hint={`${_inrCfg((config.capital || 0) * (config.dcaAllocation[sym] || 0))} / month at current capital`}>
             <PctInput
               value={config.dcaAllocation[sym] || 0}
               onChange={v => updateDca(sym, v)}

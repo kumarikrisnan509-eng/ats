@@ -9,9 +9,9 @@
 /** @typedef {import('../types/api-shapes').SipHistoryResponse} SipHistoryResponse */
 
 (function () {
-  // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inr, _fmtTime, etc.)
+  // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inrSip, _fmtTime, etc.)
   // do not collide with same-named consts in other screen-*.js files.
-const _inr = (n) => {
+const _inrSip = (n) => {
   if (!Number.isFinite(n)) return '-';
   const a = Math.abs(n), sign = n < 0 ? '-' : '';
   if (a >= 1e7) return `${sign}₹${(a/1e7).toFixed(2)}cr`;
@@ -19,7 +19,7 @@ const _inr = (n) => {
   if (a >= 1e3) return `${sign}₹${(a/1e3).toFixed(1)}K`;
   return `${sign}₹${a.toFixed(0)}`;
 };
-const _fmtDate = (s) => { try { return new Date(s).toLocaleString('en-IN', { hour12: false }); } catch { return s || '-'; } };
+const _fmtDateSip = (s) => { try { return new Date(s).toLocaleString('en-IN', { hour12: false }); } catch { return s || '-'; } };
 
 const _statusColor = (s) => ({ placed: '#15803d', failed: '#b91c1c', skipped: '#94a3b8' })[s] || '#94a3b8';
 
@@ -63,7 +63,7 @@ window.SipScreen = function SipScreen() {
       <section style={{background:'var(--panel, #1a1f2e)', border:'1px solid var(--border, #2a3142)', borderRadius:8, marginBottom:20, padding:14}}>
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:10}}>
           <h3 style={{margin:0, fontSize:14}}>Today's plan</h3>
-          <span style={{color:'var(--text-2)', fontSize:12}}>{plan && plan.fireDate ? _fmtDate(plan.fireDate) : 'n/a'}</span>
+          <span style={{color:'var(--text-2)', fontSize:12}}>{plan && plan.fireDate ? _fmtDateSip(plan.fireDate) : 'n/a'}</span>
         </div>
         {planRows.length === 0 ? (
           <div style={{color:'var(--text-2)', fontSize:13}}>No SIPs configured (set up via Risk management page).</div>
@@ -84,7 +84,7 @@ window.SipScreen = function SipScreen() {
                 <tr key={i} style={{borderBottom:'1px solid var(--border, #2a3142)'}}>
                   <td style={{padding:'6px 4px', fontWeight:600}}>{r.symbol}</td>
                   <td style={{padding:'6px 4px', textAlign:'right'}}>{Number(r.allocationPct || 0).toFixed(1)}%</td>
-                  <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace'}}>{_inr(r.amount)}</td>
+                  <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace'}}>{_inrSip(r.amount)}</td>
                   <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace'}}>{Number.isFinite(r.qty) ? r.qty : '-'}</td>
                   <td style={{padding:'6px 4px', color:_statusColor(r.status)}}>{r.status || '-'}</td>
                   <td style={{padding:'6px 4px', color:'var(--text-3)', fontSize:11}}>{r.reason || ''}</td>
@@ -92,14 +92,14 @@ window.SipScreen = function SipScreen() {
               ))}
               <tr>
                 <td colSpan={2} style={{padding:'6px 4px', fontWeight:600, color:'var(--text-2)'}}>Total</td>
-                <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace', fontWeight:600}}>{_inr(planTotal)}</td>
+                <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace', fontWeight:600}}>{_inrSip(planTotal)}</td>
               </tr>
             </tbody>
           </table>
         )}
         {stats && (
           <div style={{marginTop:12, fontSize:11, color:'var(--text-3)'}}>
-            Runner armed: {stats.timerArmed ? 'yes' : 'no'} · last tick {_fmtDate(stats.lastTickAt)}
+            Runner armed: {stats.timerArmed ? 'yes' : 'no'} · last tick {_fmtDateSip(stats.lastTickAt)}
           </div>
         )}
       </section>
@@ -133,9 +133,9 @@ window.SipScreen = function SipScreen() {
             <tbody>
               {history.map(h => (
                 <tr key={h.id} style={{borderBottom:'1px solid var(--border, #2a3142)'}}>
-                  <td style={{padding:'6px 4px', whiteSpace:'nowrap'}}>{_fmtDate(h.fired_at)}</td>
+                  <td style={{padding:'6px 4px', whiteSpace:'nowrap'}}>{_fmtDateSip(h.fired_at)}</td>
                   <td style={{padding:'6px 4px', fontWeight:600}}>{h.symbol}</td>
-                  <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace'}}>{_inr(h.amount_inr)}</td>
+                  <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace'}}>{_inrSip(h.amount_inr)}</td>
                   <td style={{padding:'6px 4px', textAlign:'right'}}>{Number(h.allocation_pct).toFixed(1)}%</td>
                   <td style={{padding:'6px 4px', color:_statusColor(h.status), fontWeight:600}}>{h.status}</td>
                   <td style={{padding:'6px 4px', fontFamily:'monospace', fontSize:11, color:'var(--text-3)'}}>{h.order_id || '-'}</td>

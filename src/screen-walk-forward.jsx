@@ -10,8 +10,8 @@
 (function () {
   // T-274c HOTFIX: IIFE wrapper so per-file helpers (_inr, _fmtTime, etc.)
   // do not collide with same-named consts in other screen-*.js files.
-const _fmt = (n, p = 2) => Number.isFinite(n) ? n.toFixed(p) : '-';
-const _badge = (action) => ({ update: '#15803d', no_change: '#94a3b8' })[action] || '#94a3b8';
+const _fmtWF = (n, p = 2) => Number.isFinite(n) ? n.toFixed(p) : '-';
+const _badgeWF = (action) => ({ update: '#15803d', no_change: '#94a3b8' })[action] || '#94a3b8';
 
 window.WalkForwardScreen = function WalkForwardScreen() {
   const [strategies, setStrategies] = React.useState([]);
@@ -132,7 +132,7 @@ window.WalkForwardScreen = function WalkForwardScreen() {
           <section style={{padding:14, background:'var(--panel, #1a1f2e)', border:'1px solid var(--border, #2a3142)', borderRadius:8, marginBottom:14}}>
             <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:8}}>
               <h3 style={{margin:0, fontSize:14}}>Recommendation</h3>
-              <span style={{padding:'2px 10px', borderRadius:4, fontSize:12, fontWeight:700, background:_badge(result.recommendation.action)+'22', color:_badge(result.recommendation.action)}}>
+              <span style={{padding:'2px 10px', borderRadius:4, fontSize:12, fontWeight:700, background:_badgeWF(result.recommendation.action)+'22', color:_badgeWF(result.recommendation.action)}}>
                 {result.recommendation.action.toUpperCase()}
               </span>
             </div>
@@ -153,9 +153,9 @@ window.WalkForwardScreen = function WalkForwardScreen() {
             <section style={{padding:14, background:'var(--panel, #1a1f2e)', border:'1px solid var(--border, #2a3142)', borderRadius:8, marginBottom:14, display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:10}}>
               <div><div style={{fontSize:11, color:'var(--text-3)'}}>Windows tested</div><div style={{fontSize:20, fontWeight:600}}>{result.summary.windowCount}</div></div>
               <div><div style={{fontSize:11, color:'var(--text-3)'}}>Combos tested</div><div style={{fontSize:20, fontWeight:600}}>{result.combosTested}</div></div>
-              <div><div style={{fontSize:11, color:'var(--text-3)'}}>Avg IS score</div><div style={{fontSize:20, fontWeight:600, fontFamily:'monospace'}}>{_fmt(result.summary.avgIsScore)}</div></div>
-              <div><div style={{fontSize:11, color:'var(--text-3)'}}>Avg OOS score</div><div style={{fontSize:20, fontWeight:600, fontFamily:'monospace'}}>{_fmt(result.summary.avgOosScore)}</div></div>
-              <div><div style={{fontSize:11, color:'var(--text-3)'}}>Dominance</div><div style={{fontSize:20, fontWeight:600, fontFamily:'monospace'}}>{_fmt((result.summary.dominanceFrac || 0) * 100, 0)}%</div></div>
+              <div><div style={{fontSize:11, color:'var(--text-3)'}}>Avg IS score</div><div style={{fontSize:20, fontWeight:600, fontFamily:'monospace'}}>{_fmtWF(result.summary.avgIsScore)}</div></div>
+              <div><div style={{fontSize:11, color:'var(--text-3)'}}>Avg OOS score</div><div style={{fontSize:20, fontWeight:600, fontFamily:'monospace'}}>{_fmtWF(result.summary.avgOosScore)}</div></div>
+              <div><div style={{fontSize:11, color:'var(--text-3)'}}>Dominance</div><div style={{fontSize:20, fontWeight:600, fontFamily:'monospace'}}>{_fmtWF((result.summary.dominanceFrac || 0) * 100, 0)}%</div></div>
               <div><div style={{fontSize:11, color:'var(--text-3)'}}>Overfit?</div><div style={{fontSize:20, fontWeight:600, color: result.summary.overfit ? '#f59e0b' : '#15803d'}}>{result.summary.overfit ? 'YES' : 'no'}</div></div>
             </section>
           )}
@@ -176,8 +176,8 @@ window.WalkForwardScreen = function WalkForwardScreen() {
                   <tr key={i} style={{borderBottom:'1px solid var(--border, #2a3142)'}}>
                     <td style={{padding:'4px 6px', fontFamily:'monospace'}}>[{w.startIdx}..{w.endIdx}]</td>
                     <td style={{padding:'4px 6px', fontFamily:'monospace', fontSize:11}}>{JSON.stringify(w.isParams)}</td>
-                    <td style={{padding:'4px 6px', textAlign:'right', fontFamily:'monospace'}}>{_fmt(w.isScore)}</td>
-                    <td style={{padding:'4px 6px', textAlign:'right', fontFamily:'monospace', color: w.oosScore > 0 ? '#15803d' : '#b91c1c'}}>{_fmt(w.oosScore)}</td>
+                    <td style={{padding:'4px 6px', textAlign:'right', fontFamily:'monospace'}}>{_fmtWF(w.isScore)}</td>
+                    <td style={{padding:'4px 6px', textAlign:'right', fontFamily:'monospace', color: w.oosScore > 0 ? '#15803d' : '#b91c1c'}}>{_fmtWF(w.oosScore)}</td>
                   </tr>
                 ))}
               </tbody>
