@@ -106,6 +106,22 @@ const Candles = ({ data, height = 260 }) => {
     ro.observe(ref.current);
     return () => ro.disconnect();
   }, []);
+
+  // T-326: empty-data guard. When `data` is [] (no candle history loaded
+  // yet -- the trading screen ships a placeholder Candles before broker
+  // fetch returns), Math.min(...[])/Math.max(...[]) return +-Infinity,
+  // rng = -Infinity || 1 evaluates to -Infinity (truthy), and the
+  // y-tick labels compute as NaN -> rendered as 6 "NaN" strings on the
+  // #trading route. visual-rendering caught this on T-325. Render a
+  // clear empty state instead of a tick-axis full of NaN.
+  if (!Array.isArray(data) || data.length === 0) {
+    return (
+      <div ref={ref} style={{ width: '100%', height, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-3)', fontSize: 12 }}>
+        No candle data yet.
+      </div>
+    );
+  }
+
   const pad = { t: 12, r: 12, b: 22, l: 52 };
   const W = w, H = height;
   const highs = data.map(d => d.h), lows = data.map(d => d.l);
