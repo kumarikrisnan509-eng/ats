@@ -36,6 +36,17 @@
   --violet:        oklch(58% 0.16 295);
   --violet-soft:   oklch(94% 0.05 295);
 
+  /* Short aliases / legacy names referenced by screens. Keep these so any
+     var(--text-1, ...) / var(--danger, ...) etc. resolves predictably for
+     BOTH themes -- without these the dark-hex inline fallback fires in
+     light theme (root cause of T-328/T-329 dark-panel issues). */
+  --text-1:        var(--text);
+  --danger:        var(--down);
+  --success:       var(--up);
+  --acc:           var(--accent);
+  --vio:           var(--violet);
+  --font:          var(--ui);
+
   /* Shadows */
   --shadow-xs: 0 1px 0 rgba(16,24,40,0.04);
   --shadow-sm: 0 1px 2px rgba(16,24,40,0.06), 0 1px 3px rgba(16,24,40,0.04);
@@ -87,6 +98,14 @@ html[data-theme="dark"] {
   --info-soft:     oklch(26% 0.08 245);
   --violet:        oklch(76% 0.14 295);
   --violet-soft:   oklch(28% 0.08 295);
+
+  /* Aliases also re-declared so they re-resolve via the dark-theme tokens. */
+  --text-1:        var(--text);
+  --danger:        var(--down);
+  --success:       var(--up);
+  --acc:           var(--accent);
+  --vio:           var(--violet);
+  --font:          var(--ui);
 
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.4), 0 1px 3px rgba(0,0,0,0.25);
   --shadow-md: 0 4px 10px -3px rgba(0,0,0,0.5), 0 2px 4px -2px rgba(0,0,0,0.3);
