@@ -1562,8 +1562,15 @@ app.use('/api', (req, res, next) => {
   if (req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE' || req.method === 'PATCH') {
     return authMiddleware(req, res, next);
   }
+  // T-322b/T-323: /api/audit can be read by either the ops bearer (CI / CLI
+  // tools) OR a logged-in user session (so the operator can see their own
+  // audit trail in the UI without needing to paste a bearer token into the
+  // browser). The data is the operator's own activity log; gating it
+  // strictly behind the bearer locked the audit-trail page to "401: Could
+  // not load live data" for normal in-app use.
   if (req.path === '/audit' || req.path.startsWith('/audit?')) {
-    return authMiddleware(req, res, next);
+    if (req.user && req.user.id) return next();   // session-authenticated
+    return authMiddleware(req, res, next);         // else require ops bearer
   }
   next();
 });
