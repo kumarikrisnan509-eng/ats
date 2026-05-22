@@ -73,7 +73,7 @@ window.MacroSignalsScreen = function MacroSignalsScreen() {
         </span>
       </h2>
 
-      <div style={{padding:'10px 14px', marginBottom:16, borderRadius:8, background:'var(--panel-2, #11151f)', border:'1px solid var(--border)', display:'flex', gap:18, alignItems:'center', fontSize:12, color:'var(--text-2)'}}>
+      <div style={{padding:'10px 14px', marginBottom:16, borderRadius:8, background:'var(--surface-2)', border:'1px solid var(--border)', display:'flex', gap:18, alignItems:'center', fontSize:12, color:'var(--text-2)'}}>
         <div>
           <strong>Fetcher:</strong>{' '}
           <span style={{color: enabled ? '#15803d' : '#94a3b8'}}>
@@ -141,7 +141,7 @@ window.MacroSignalsScreen = function MacroSignalsScreen() {
             </div>
           )}
 
-          <div style={{marginTop:18, padding:'10px 14px', background:'var(--panel-2, #11151f)', border:'1px solid var(--border)', borderRadius:6, fontSize:11, color:'var(--text-3)', lineHeight:1.6}}>
+          <div style={{marginTop:18, padding:'10px 14px', background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:6, fontSize:11, color:'var(--text-3)', lineHeight:1.6}}>
             <strong>How this is used:</strong> Each non-null signal contributes ±1 to a
             "richScore". The regime detector (T-280b) uses richScore to boost confidence
             of the existing classification (NIFTY+VIX+ATR%-based) or flip a flat-neutral

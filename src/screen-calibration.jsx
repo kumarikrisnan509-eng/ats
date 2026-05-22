@@ -61,7 +61,7 @@ window.CalibrationScreen = function CalibrationScreen() {
     <div style={{padding:'16px 24px', maxWidth:1200}}>
       <h2 style={{margin:'4px 0 12px', fontSize:20}}>Strategy calibration <span style={{fontSize:13, color:'var(--text-3)', fontWeight:400}}>(advisory only)</span></h2>
 
-      <div style={{padding:'10px 12px', background:'var(--panel-2, #11151f)', border:'1px solid var(--border)', borderRadius:6, marginBottom:14, fontSize:12, color:'var(--text-2)', lineHeight:1.5}}>
+      <div style={{padding:'10px 12px', background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:6, marginBottom:14, fontSize:12, color:'var(--text-2)', lineHeight:1.5}}>
         Recommendations below are <strong>NEVER enforced automatically</strong>. The engine
         still respects your <code>activeStrategies</code> list in the Risk management page.
         To act on a "retire" recommendation, manually remove the strategy from your active
@@ -76,7 +76,7 @@ window.CalibrationScreen = function CalibrationScreen() {
             <span><strong style={{color:'#15803d'}}>{recommendation.summary.keep}</strong> keep</span>
           </div>
         )}
-        <select value={days} onChange={e => setDays(Number(e.target.value))} style={{padding:'2px 6px', fontSize:12, background:'var(--panel-2)', color:'var(--text-1)', border:'1px solid var(--border)', borderRadius:4}}>
+        <select value={days} onChange={e => setDays(Number(e.target.value))} style={{padding:'2px 6px', fontSize:12, background:'var(--surface-2)', color:'var(--text-1)', border:'1px solid var(--border)', borderRadius:4}}>
           <option value={7}>7 days</option>
           <option value={30}>30 days</option>
           <option value={90}>90 days</option>

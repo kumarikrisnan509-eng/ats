@@ -196,7 +196,7 @@ window.OptionsOpportunitiesScreen = function OptionsOpportunitiesScreen() {
                   </tr>
                   {isOpen && (
                     <tr>
-                      <td colSpan={7} style={{padding:'12px 16px', background:'var(--panel-2, #11151f)', fontFamily:'monospace', fontSize:11, whiteSpace:'pre-wrap'}}>
+                      <td colSpan={7} style={{padding:'12px 16px', background:'var(--surface-2)', fontFamily:'monospace', fontSize:11, whiteSpace:'pre-wrap'}}>
                         {opp ? JSON.stringify(opp, null, 2) : '(failed to parse)'}
                         {!o.reviewed && (
                           <div style={{marginTop:12, paddingTop:12, borderTop:'1px solid var(--border)'}}>

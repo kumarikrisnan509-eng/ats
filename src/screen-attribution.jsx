@@ -74,7 +74,7 @@ window.AttributionScreen = function AttributionScreen() {
           <strong style={{color:_pnlColorAttr(totalPnl), fontFamily:'monospace', fontSize:18}}>{_inrAttr(totalPnl)}</strong>
         </div>
         <div style={{flex:1}}/>
-        <select value={days} onChange={e => setDays(Number(e.target.value))} style={{padding:'2px 6px', fontSize:12, background:'var(--panel-2)', color:'var(--text-1)', border:'1px solid var(--border)', borderRadius:4}}>
+        <select value={days} onChange={e => setDays(Number(e.target.value))} style={{padding:'2px 6px', fontSize:12, background:'var(--surface-2)', color:'var(--text-1)', border:'1px solid var(--border)', borderRadius:4}}>
           <option value={7}>7 days</option>
           <option value={30}>30 days</option>
           <option value={90}>90 days</option>

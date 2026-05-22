@@ -108,7 +108,7 @@ window.SipScreen = function SipScreen() {
       <section style={{background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8, padding:14}}>
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:10}}>
           <h3 style={{margin:0, fontSize:14}}>Recent fires ({history.length})</h3>
-          <select value={days} onChange={e => setDays(Number(e.target.value))} style={{padding:'2px 6px', fontSize:12, background:'var(--panel-2, #11151f)', color:'var(--text-1)', border:'1px solid var(--border)', borderRadius:4}}>
+          <select value={days} onChange={e => setDays(Number(e.target.value))} style={{padding:'2px 6px', fontSize:12, background:'var(--surface-2)', color:'var(--text-1)', border:'1px solid var(--border)', borderRadius:4}}>
             <option value={7}>last 7 days</option>
             <option value={30}>last 30 days</option>
             <option value={90}>last 90 days</option>

@@ -81,25 +81,25 @@ window.WalkForwardScreen = function WalkForwardScreen() {
         <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))', gap:10, marginBottom:10}}>
           <div>
             <div style={{fontSize:11, color:'var(--text-3)'}}>Strategy</div>
-            <select value={strategy} onChange={e => setStrategy(e.target.value)} style={{width:'100%', padding:'4px 8px', background:'var(--panel-2)', color:'var(--text-1)', border:'1px solid var(--border)', borderRadius:4}}>
+            <select value={strategy} onChange={e => setStrategy(e.target.value)} style={{width:'100%', padding:'4px 8px', background:'var(--surface-2)', color:'var(--text-1)', border:'1px solid var(--border)', borderRadius:4}}>
               {strategies.map(s => <option key={s.id} value={s.id}>{s.name || s.id}</option>)}
             </select>
           </div>
           <div>
             <div style={{fontSize:11, color:'var(--text-3)'}}>Symbol (NSE)</div>
-            <input value={symbol} onChange={e => setSymbol(e.target.value)} style={{width:'100%', padding:'4px 8px', background:'var(--panel-2)', color:'var(--text-1)', border:'1px solid var(--border)', borderRadius:4, fontFamily:'monospace'}}/>
+            <input value={symbol} onChange={e => setSymbol(e.target.value)} style={{width:'100%', padding:'4px 8px', background:'var(--surface-2)', color:'var(--text-1)', border:'1px solid var(--border)', borderRadius:4, fontFamily:'monospace'}}/>
           </div>
           <div>
             <div style={{fontSize:11, color:'var(--text-3)'}}>IS window (bars)</div>
-            <input type="number" value={inWindow} onChange={e => setInWindow(Math.max(20, Number(e.target.value) || 60))} style={{width:'100%', padding:'4px 8px', background:'var(--panel-2)', color:'var(--text-1)', border:'1px solid var(--border)', borderRadius:4}}/>
+            <input type="number" value={inWindow} onChange={e => setInWindow(Math.max(20, Number(e.target.value) || 60))} style={{width:'100%', padding:'4px 8px', background:'var(--surface-2)', color:'var(--text-1)', border:'1px solid var(--border)', borderRadius:4}}/>
           </div>
           <div>
             <div style={{fontSize:11, color:'var(--text-3)'}}>OOS window (bars)</div>
-            <input type="number" value={outWindow} onChange={e => setOutWindow(Math.max(5, Number(e.target.value) || 14))} style={{width:'100%', padding:'4px 8px', background:'var(--panel-2)', color:'var(--text-1)', border:'1px solid var(--border)', borderRadius:4}}/>
+            <input type="number" value={outWindow} onChange={e => setOutWindow(Math.max(5, Number(e.target.value) || 14))} style={{width:'100%', padding:'4px 8px', background:'var(--surface-2)', color:'var(--text-1)', border:'1px solid var(--border)', borderRadius:4}}/>
           </div>
           <div>
             <div style={{fontSize:11, color:'var(--text-3)'}}>Step (bars)</div>
-            <input type="number" value={step} onChange={e => setStep(Math.max(1, Number(e.target.value) || 14))} style={{width:'100%', padding:'4px 8px', background:'var(--panel-2)', color:'var(--text-1)', border:'1px solid var(--border)', borderRadius:4}}/>
+            <input type="number" value={step} onChange={e => setStep(Math.max(1, Number(e.target.value) || 14))} style={{width:'100%', padding:'4px 8px', background:'var(--surface-2)', color:'var(--text-1)', border:'1px solid var(--border)', borderRadius:4}}/>
           </div>
         </div>
         <div style={{marginBottom:10}}>
@@ -108,7 +108,7 @@ window.WalkForwardScreen = function WalkForwardScreen() {
             value={paramGridJson}
             onChange={e => setParamGridJson(e.target.value)}
             rows={6}
-            style={{width:'100%', padding:'6px 8px', background:'var(--panel-2)', color:'var(--text-1)', border:'1px solid var(--border)', borderRadius:4, fontFamily:'monospace', fontSize:12}}
+            style={{width:'100%', padding:'6px 8px', background:'var(--surface-2)', color:'var(--text-1)', border:'1px solid var(--border)', borderRadius:4, fontFamily:'monospace', fontSize:12}}
           />
           <div style={{fontSize:10, color:'var(--text-3)', marginTop:2}}>
             Cartesian product of values. Max 200 combinations per run.
@@ -138,11 +138,11 @@ window.WalkForwardScreen = function WalkForwardScreen() {
             </div>
             <div style={{fontSize:13, color:'var(--text-2)', marginBottom:8}}>{result.recommendation.reason}</div>
             {result.recommendation.proposedParams && (
-              <div style={{fontSize:12, fontFamily:'monospace', background:'var(--panel-2)', padding:'6px 10px', borderRadius:4}}>
+              <div style={{fontSize:12, fontFamily:'monospace', background:'var(--surface-2)', padding:'6px 10px', borderRadius:4}}>
                 <strong>Proposed params:</strong> {JSON.stringify(result.recommendation.proposedParams)}
               </div>
             )}
-            <div style={{marginTop:10, padding:8, background:'var(--panel-2, #11151f)', borderRadius:4, fontSize:11, color:'var(--text-3)'}}>
+            <div style={{marginTop:10, padding:8, background:'var(--surface-2)', borderRadius:4, fontSize:11, color:'var(--text-3)'}}>
               This recommendation is <strong>advisory only</strong>. The engine
               does not apply these params automatically — review and edit your
               risk-config / strategy params manually if you agree.
