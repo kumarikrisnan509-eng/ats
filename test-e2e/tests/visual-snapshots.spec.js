@@ -29,12 +29,21 @@
 
 const { test, expect } = require('@playwright/test');
 const path             = require('path');
+const fs               = require('fs');
 
 const ENABLED = process.env.PLAYWRIGHT_VISUAL_SNAPSHOTS !== '0';
+const AUTH_FILE = path.resolve(__dirname, '..', 'playwright/.auth/user.json');
 
 function isProd(baseURL) {
   return baseURL && baseURL.includes('ats.rajasekarselvam.com')
       && !baseURL.includes('staging');
+}
+
+function hasAuthCookies() {
+  try {
+    const j = JSON.parse(fs.readFileSync(AUTH_FILE, 'utf8'));
+    return Array.isArray(j.cookies) && j.cookies.length > 0;
+  } catch { return false; }
 }
 
 // Public landing screen always covered (no auth needed). Protected screens
@@ -112,9 +121,16 @@ test.describe('Visual regression snapshots (Phase E)', () => {
 
   for (const [route, label, settleMs] of PROTECTED_SCREENS) {
     test(`snapshot (auth): ${label}`, async ({ page, baseURL }) => {
-      test.skip(isProd(baseURL),
-        'Phase E v4: visual snapshots of auth-gated screens skip on prod ' +
-        '(test-user is local/staging-only, prod has live-data flap).');
+      // Phase E v6: visual snapshots now run on prod IF auth cookies are
+      // present (i.e. PROD_E2E_EMAIL + PROD_E2E_PASSWORD were set in env so
+      // global-setup could log in as the synthetic prod test user). The
+      // synthetic user has no holdings / trades / broker, so most screens
+      // are empty-state which IS pixel-deterministic. Live-data overlays
+      // (market ticker, FII/DII, timestamps) are masked in toHaveScreenshot.
+      // Skip remains when there are no cookies -- without auth, every route
+      // redirects to landing and 10 snapshots would come out byte-identical.
+      test.skip(!hasAuthCookies(),
+        'No auth cookies -- set PROD_E2E_* / STAGING_E2E_* env vars to enable.');
       await snapshotScreen(page, route, label, settleMs);
     });
   }
