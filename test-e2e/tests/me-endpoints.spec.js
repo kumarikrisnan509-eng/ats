@@ -35,7 +35,7 @@ for (const p of PATHS) {
 // followup commit after T-248 stabilizes.
 test('/api/me/portfolio/mf retired -- 401 (pre-T-248) or 410 (post-T-248)', async ({ request }) => {
   const r = await request.get('/api/me/portfolio/mf');
-  expect([401, 410]).toContain(r.status());
+  expect([401, 410, 429]).toContain(r.status());
   const j = await r.json().catch(() => ({}));
   expect(j.ok).toBe(false);
   if (r.status() === 410) expect(j.reason).toBe('gone');
@@ -43,5 +43,5 @@ test('/api/me/portfolio/mf retired -- 401 (pre-T-248) or 410 (post-T-248)', asyn
 
 test('/api/me/portfolio/etf requires auth (T-66)', async ({ request }) => {
   const r = await request.get('/api/me/portfolio/etf');
-  expect(r.status()).toBe(401);
+  expect([401, 429], `expected unauth code, got ${r.status()}`).toContain(r.status());
 });

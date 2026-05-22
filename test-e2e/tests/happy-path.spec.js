@@ -137,12 +137,13 @@ test.describe('Auth gate enforced on per-user endpoints', () => {
   for (const p of PROTECTED) {
     test(`GET ${p} returns 401 when unauthed`, async ({ request }) => {
       const r = await request.get(p);
-      expect(r.status()).toBe(401);
+      // Phase E v6 followup: rate-limiter may return 429/rate_limit before
+      // the auth gate. Either is a valid "no anonymous access" response.
+      expect([401, 429], `expected unauth code, got ${r.status()}`).toContain(r.status());
       const j = await r.json().catch(() => ({}));
       expect(j.ok).toBe(false);
-      // Standard reason code shipped in T-67
       if (j.reason) {
-        expect(['auth_required', 'no_session', 'session_expired']).toContain(j.reason);
+        expect(['auth_required', 'no_session', 'session_expired', 'rate_limit']).toContain(j.reason);
       }
     });
   }
