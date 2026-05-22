@@ -179,6 +179,14 @@ jobs:
         # a fast subset for PRs and a full suite on push, but for now keep
         # parity so PR reviewers see the same gate that blocks deploy.
         working-directory: test-e2e
+        env:
+          # Phase E v6: prod synthetic e2e user credentials. global-setup.js
+          # reads these to log in and capture session cookies, so
+          # visual-snapshots.spec.js can pixel-diff auth-gated screens.
+          # If the secrets are absent (e.g. PR from a fork has no secrets
+          # access), the spec falls back to skip-on-no-cookies.
+          PROD_E2E_EMAIL:    ${{ secrets.PROD_E2E_EMAIL }}
+          PROD_E2E_PASSWORD: ${{ secrets.PROD_E2E_PASSWORD }}
         # T-175: continue-on-error REMOVED. All 80 specs green as of T-174,
         # so we now block the deploy if any E2E test regresses. If a real
         # regression ships, the deploy step won't run and the VM keeps the
