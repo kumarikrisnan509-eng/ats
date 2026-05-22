@@ -52,10 +52,11 @@ function hasAuthCookies() {
 // That's fine for screens we haven't pinned yet -- ErrorBoundary + empty-page
 // + screen-label gates still fire.
 const ROUTE_CONTRACTS = {
-  // Dashboard cockpit -- the home view after login.
+  // Dashboard cockpit -- the home view after login. Verified via Chrome MCP
+  // 2026-05-22: label is "Dashboard" (not Cockpit), apostrophes are ASCII.
   '#dashboard': {
-    label: 'Cockpit',
-    required: ['Welcome back', 'TODAY’S PLAN', 'AI INFERENCE', 'LAST SIGNAL', 'PORTFOLIO VALUE'],
+    label: 'Dashboard',
+    required: ['Welcome back', "TODAY'S PLAN", 'AI INFERENCE', 'PORTFOLIO VALUE'],
   },
 
   // Risk cockpit -- portfolio aggregates + regime banner + KPIs.
@@ -77,21 +78,23 @@ const ROUTE_CONTRACTS = {
   },
 
   // Audit trail -- SEBI compliance log, even if empty must show the frame.
+  // Verified: apostrophe is ASCII (U+0027), not U+2019.
   '#audit': {
     label: 'Order audit trail',
-    required: ['Order audit trail', 'TODAY’S ORDERS', 'FILL RATE', 'AVG SLIPPAGE', 'RISK BLOCKS'],
+    required: ['Order audit trail', "TODAY'S ORDERS", 'FILL RATE', 'AVG SLIPPAGE', 'RISK BLOCKS'],
   },
 
-  // SIP planner.
+  // SIP planner. Title in body uses "+" not "&" (sidebar says "&", header says "+").
+  // Apostrophe in "Today's plan" is ASCII.
   '#sip': {
     label: 'SIP plan & history',
-    required: ['SIP plan + history', 'Today’s plan', 'Recent fires'],
+    required: ['SIP plan + history', "Today's plan", 'Recent fires'],
   },
 
-  // Slippage tracker.
+  // Slippage tracker -- KPI cards are AVG/TOTAL COST/TRADES TRACKED.
   '#slippage': {
     label: 'Slippage tracker',
-    required: ['Slippage tracker', 'MEAN SLIPPAGE', 'MEDIAN', 'FILLS TRACKED', 'By strategy', 'By symbol'],
+    required: ['Slippage tracker', 'AVG SLIPPAGE', 'TOTAL SLIPPAGE COST', 'TRADES TRACKED', 'By strategy', 'By symbol'],
   },
 
   // Macro signals feed.
@@ -100,14 +103,12 @@ const ROUTE_CONTRACTS = {
     required: ['Macro signals', 'Fetcher:', 'Last fetch:'],
   },
 
-  // Options opportunities (shadow scanner — always rendered, even if empty).
-  '#options-opportunities': {
-    label: 'Options opportunities',
+  // Options opportunities (shadow scanner). Correct route is #options-opps
+  // (the misspelled "opps" is the canonical route key in app.jsx TITLES).
+  // Both #options-opportunities and #options-ops fall back to Dashboard.
+  '#options-opps': {
+    label: 'Options ops',
     required: ['Options opportunities', 'Scanner', 'Fetcher', 'Total opportunities'],
-  },
-  '#options-ops': {
-    label: 'Options opportunities',
-    required: ['Options opportunities', 'Scanner', 'Fetcher'],
   },
 
   // Strategy calibration (advisory only).
@@ -116,7 +117,7 @@ const ROUTE_CONTRACTS = {
     required: ['Strategy calibration', 'advisory only', 'retire', 'watch', 'keep'],
   },
 
-  // Walk-forward optimisation (advisory).
+  // Walk-forward optimisation (advisory). Label is "Walk-forward opt" (short).
   '#walk-forward': {
     label: 'Walk-forward opt',
     required: ['Walk-forward optimization', 'Strategy', 'Symbol (NSE)', 'IS window', 'OOS window', 'paramGrid'],
