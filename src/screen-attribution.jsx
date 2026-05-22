@@ -82,14 +82,14 @@ window.AttributionScreen = function AttributionScreen() {
       </div>
 
       {/* By strategy summary */}
-      <section style={{background:'var(--panel, #1a1f2e)', border:'1px solid var(--border, #2a3142)', borderRadius:8, marginBottom:20, padding:14}}>
+      <section style={{background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8, marginBottom:20, padding:14}}>
         <h3 style={{margin:'0 0 10px', fontSize:14}}>PnL by strategy ({stratRows.length})</h3>
         {stratRows.length === 0 ? (
           <div style={{color:'var(--text-2)', fontSize:13}}>No attribution snapshots yet (cron runs at 16:00 IST after close).</div>
         ) : (
           <table style={{width:'100%', borderCollapse:'collapse', fontSize:13}}>
             <thead>
-              <tr style={{borderBottom:'1px solid var(--border, #2a3142)', textAlign:'left', color:'var(--text-2)'}}>
+              <tr style={{borderBottom:'1px solid var(--border)', textAlign:'left', color:'var(--text-2)'}}>
                 <th style={{padding:'6px 4px'}}>Strategy</th>
                 <th style={{padding:'6px 4px', textAlign:'right'}}>PnL (window)</th>
                 <th style={{padding:'6px 4px', textAlign:'right'}}>Share</th>
@@ -97,7 +97,7 @@ window.AttributionScreen = function AttributionScreen() {
             </thead>
             <tbody>
               {stratRows.map(([s, p]) => (
-                <tr key={s} style={{borderBottom:'1px solid var(--border, #2a3142)'}}>
+                <tr key={s} style={{borderBottom:'1px solid var(--border)'}}>
                   <td style={{padding:'6px 4px', fontWeight:600}}>{s}</td>
                   <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace', color:_pnlColorAttr(p)}}>{_inrAttr(p)}</td>
                   <td style={{padding:'6px 4px', textAlign:'right', color:'var(--text-3)'}}>{totalPnl !== 0 ? `${(p / totalPnl * 100).toFixed(1)}%` : '-'}</td>
@@ -109,14 +109,14 @@ window.AttributionScreen = function AttributionScreen() {
       </section>
 
       {/* Daily rows */}
-      <section style={{background:'var(--panel, #1a1f2e)', border:'1px solid var(--border, #2a3142)', borderRadius:8, padding:14}}>
+      <section style={{background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8, padding:14}}>
         <h3 style={{margin:'0 0 10px', fontSize:14}}>Daily snapshots</h3>
         {rows.length === 0 ? (
           <div style={{color:'var(--text-2)', fontSize:13}}>No data.</div>
         ) : (
           <table style={{width:'100%', borderCollapse:'collapse', fontSize:13}}>
             <thead>
-              <tr style={{borderBottom:'1px solid var(--border, #2a3142)', textAlign:'left', color:'var(--text-2)'}}>
+              <tr style={{borderBottom:'1px solid var(--border)', textAlign:'left', color:'var(--text-2)'}}>
                 <th style={{padding:'6px 4px'}}>Date</th>
                 <th style={{padding:'6px 4px'}}>Regime</th>
                 <th style={{padding:'6px 4px', textAlign:'right'}}>PnL</th>
@@ -132,7 +132,7 @@ window.AttributionScreen = function AttributionScreen() {
                 const skipCount   = r.autorun && r.autorun.gateSkips
                   ? Object.values(r.autorun.gateSkips).reduce((s, v) => s + (Number(v) || 0), 0) : 0;
                 return (
-                <tr key={i} style={{borderBottom:'1px solid var(--border, #2a3142)'}}>
+                <tr key={i} style={{borderBottom:'1px solid var(--border)'}}>
                   <td style={{padding:'6px 4px'}}>{_fmtDateAttr(r.date)}</td>
                   <td style={{padding:'6px 4px', fontSize:11}}>{regimeLabel}</td>
                   <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace', color:_pnlColorAttr(r.totalPnl)}}>{_inrAttr(r.totalPnl)}</td>

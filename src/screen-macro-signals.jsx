@@ -73,7 +73,7 @@ window.MacroSignalsScreen = function MacroSignalsScreen() {
         </span>
       </h2>
 
-      <div style={{padding:'10px 14px', marginBottom:16, borderRadius:8, background:'var(--panel-2, #11151f)', border:'1px solid var(--border, #2a3142)', display:'flex', gap:18, alignItems:'center', fontSize:12, color:'var(--text-2)'}}>
+      <div style={{padding:'10px 14px', marginBottom:16, borderRadius:8, background:'var(--panel-2, #11151f)', border:'1px solid var(--border)', display:'flex', gap:18, alignItems:'center', fontSize:12, color:'var(--text-2)'}}>
         <div>
           <strong>Fetcher:</strong>{' '}
           <span style={{color: enabled ? '#15803d' : '#94a3b8'}}>
@@ -87,7 +87,7 @@ window.MacroSignalsScreen = function MacroSignalsScreen() {
         <button
           onClick={manualRefresh}
           disabled={refreshing}
-          style={{padding:'4px 12px', background:'var(--panel, #1a1f2e)', border:'1px solid var(--border, #2a3142)', color:'var(--text-1)', borderRadius:4, cursor: refreshing ? 'wait' : 'pointer', fontSize:12}}
+          style={{padding:'4px 12px', background:'var(--surface)', border:'1px solid var(--border)', color:'var(--text-1)', borderRadius:4, cursor: refreshing ? 'wait' : 'pointer', fontSize:12}}
         >{refreshing ? 'fetching...' : 'Refresh now'}</button>
       </div>
 
@@ -100,7 +100,7 @@ window.MacroSignalsScreen = function MacroSignalsScreen() {
       ) : (
         <>
           <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:12, marginBottom:18}}>
-            <div style={{padding:14, background:'var(--panel, #1a1f2e)', border:'1px solid var(--border, #2a3142)', borderRadius:8}}>
+            <div style={{padding:14, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8}}>
               <div style={{fontSize:11, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:0.4}}>FII / FPI net flow</div>
               <div style={{fontSize:24, fontWeight:600, fontFamily:'monospace', color:_flowColor(latest.fiiNetFlow)}}>
                 {latest.fiiNetFlow != null ? `${latest.fiiNetFlow > 0 ? '+' : ''}${_fmtMS(latest.fiiNetFlow)} cr` : '-'}
@@ -111,7 +111,7 @@ window.MacroSignalsScreen = function MacroSignalsScreen() {
               </div>
             </div>
 
-            <div style={{padding:14, background:'var(--panel, #1a1f2e)', border:'1px solid var(--border, #2a3142)', borderRadius:8}}>
+            <div style={{padding:14, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8}}>
               <div style={{fontSize:11, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:0.4}}>Market breadth (NIFTY 500)</div>
               <div style={{fontSize:24, fontWeight:600, fontFamily:'monospace', color:_breadthColor(latest.marketBreadth)}}>
                 {_fmtMS(latest.marketBreadth, 2)}
@@ -121,7 +121,7 @@ window.MacroSignalsScreen = function MacroSignalsScreen() {
               </div>
             </div>
 
-            <div style={{padding:14, background:'var(--panel, #1a1f2e)', border:'1px solid var(--border, #2a3142)', borderRadius:8, opacity: latest.highLowRatio == null ? 0.6 : 1}}>
+            <div style={{padding:14, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8, opacity: latest.highLowRatio == null ? 0.6 : 1}}>
               <div style={{fontSize:11, color:'var(--text-3)', textTransform:'uppercase', letterSpacing:0.4}}>52w highs : lows</div>
               <div style={{fontSize:24, fontWeight:600, fontFamily:'monospace'}}>
                 {_fmtMS(latest.highLowRatio, 2)}
@@ -141,7 +141,7 @@ window.MacroSignalsScreen = function MacroSignalsScreen() {
             </div>
           )}
 
-          <div style={{marginTop:18, padding:'10px 14px', background:'var(--panel-2, #11151f)', border:'1px solid var(--border, #2a3142)', borderRadius:6, fontSize:11, color:'var(--text-3)', lineHeight:1.6}}>
+          <div style={{marginTop:18, padding:'10px 14px', background:'var(--panel-2, #11151f)', border:'1px solid var(--border)', borderRadius:6, fontSize:11, color:'var(--text-3)', lineHeight:1.6}}>
             <strong>How this is used:</strong> Each non-null signal contributes ±1 to a
             "richScore". The regime detector (T-280b) uses richScore to boost confidence
             of the existing classification (NIFTY+VIX+ATR%-based) or flip a flat-neutral

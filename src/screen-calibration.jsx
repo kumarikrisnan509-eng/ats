@@ -61,7 +61,7 @@ window.CalibrationScreen = function CalibrationScreen() {
     <div style={{padding:'16px 24px', maxWidth:1200}}>
       <h2 style={{margin:'4px 0 12px', fontSize:20}}>Strategy calibration <span style={{fontSize:13, color:'var(--text-3)', fontWeight:400}}>(advisory only)</span></h2>
 
-      <div style={{padding:'10px 12px', background:'var(--panel-2, #11151f)', border:'1px solid var(--border, #2a3142)', borderRadius:6, marginBottom:14, fontSize:12, color:'var(--text-2)', lineHeight:1.5}}>
+      <div style={{padding:'10px 12px', background:'var(--panel-2, #11151f)', border:'1px solid var(--border)', borderRadius:6, marginBottom:14, fontSize:12, color:'var(--text-2)', lineHeight:1.5}}>
         Recommendations below are <strong>NEVER enforced automatically</strong>. The engine
         still respects your <code>activeStrategies</code> list in the Risk management page.
         To act on a "retire" recommendation, manually remove the strategy from your active
@@ -92,7 +92,7 @@ window.CalibrationScreen = function CalibrationScreen() {
       ) : (
         <table style={{width:'100%', borderCollapse:'collapse', fontSize:13}}>
           <thead>
-            <tr style={{borderBottom:'1px solid var(--border, #2a3142)', textAlign:'left', color:'var(--text-2)'}}>
+            <tr style={{borderBottom:'1px solid var(--border)', textAlign:'left', color:'var(--text-2)'}}>
               <th style={{padding:'6px 4px'}}>Strategy</th>
               <th style={{padding:'6px 4px'}}>Recommendation</th>
               <th style={{padding:'6px 4px', textAlign:'right'}}>Trades</th>
@@ -106,7 +106,7 @@ window.CalibrationScreen = function CalibrationScreen() {
           </thead>
           <tbody>
             {flat.map(s => (
-              <tr key={s.strategy} style={{borderBottom:'1px solid var(--border, #2a3142)'}}>
+              <tr key={s.strategy} style={{borderBottom:'1px solid var(--border)'}}>
                 <td style={{padding:'6px 4px', fontWeight:600}}>{s.strategy}</td>
                 <td style={{padding:'6px 4px'}}>
                   <span style={{

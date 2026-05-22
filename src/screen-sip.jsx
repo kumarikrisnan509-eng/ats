@@ -60,7 +60,7 @@ window.SipScreen = function SipScreen() {
       <h2 style={{margin:'4px 0 12px', fontSize:20}}>SIP plan + history</h2>
 
       {/* Today's plan */}
-      <section style={{background:'var(--panel, #1a1f2e)', border:'1px solid var(--border, #2a3142)', borderRadius:8, marginBottom:20, padding:14}}>
+      <section style={{background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8, marginBottom:20, padding:14}}>
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:10}}>
           <h3 style={{margin:0, fontSize:14}}>Today's plan</h3>
           <span style={{color:'var(--text-2)', fontSize:12}}>{plan && plan.fireDate ? _fmtDateSip(plan.fireDate) : 'n/a'}</span>
@@ -70,7 +70,7 @@ window.SipScreen = function SipScreen() {
         ) : (
           <table style={{width:'100%', borderCollapse:'collapse', fontSize:13}}>
             <thead>
-              <tr style={{borderBottom:'1px solid var(--border, #2a3142)', textAlign:'left', color:'var(--text-2)'}}>
+              <tr style={{borderBottom:'1px solid var(--border)', textAlign:'left', color:'var(--text-2)'}}>
                 <th style={{padding:'6px 4px'}}>Symbol</th>
                 <th style={{padding:'6px 4px', textAlign:'right'}}>Allocation %</th>
                 <th style={{padding:'6px 4px', textAlign:'right'}}>Amount</th>
@@ -81,7 +81,7 @@ window.SipScreen = function SipScreen() {
             </thead>
             <tbody>
               {planRows.map((r, i) => (
-                <tr key={i} style={{borderBottom:'1px solid var(--border, #2a3142)'}}>
+                <tr key={i} style={{borderBottom:'1px solid var(--border)'}}>
                   <td style={{padding:'6px 4px', fontWeight:600}}>{r.symbol}</td>
                   <td style={{padding:'6px 4px', textAlign:'right'}}>{Number(r.allocationPct || 0).toFixed(1)}%</td>
                   <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace'}}>{_inrSip(r.amount)}</td>
@@ -105,10 +105,10 @@ window.SipScreen = function SipScreen() {
       </section>
 
       {/* History */}
-      <section style={{background:'var(--panel, #1a1f2e)', border:'1px solid var(--border, #2a3142)', borderRadius:8, padding:14}}>
+      <section style={{background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8, padding:14}}>
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:10}}>
           <h3 style={{margin:0, fontSize:14}}>Recent fires ({history.length})</h3>
-          <select value={days} onChange={e => setDays(Number(e.target.value))} style={{padding:'2px 6px', fontSize:12, background:'var(--panel-2, #11151f)', color:'var(--text-1)', border:'1px solid var(--border, #2a3142)', borderRadius:4}}>
+          <select value={days} onChange={e => setDays(Number(e.target.value))} style={{padding:'2px 6px', fontSize:12, background:'var(--panel-2, #11151f)', color:'var(--text-1)', border:'1px solid var(--border)', borderRadius:4}}>
             <option value={7}>last 7 days</option>
             <option value={30}>last 30 days</option>
             <option value={90}>last 90 days</option>
@@ -120,7 +120,7 @@ window.SipScreen = function SipScreen() {
         ) : (
           <table style={{width:'100%', borderCollapse:'collapse', fontSize:13}}>
             <thead>
-              <tr style={{borderBottom:'1px solid var(--border, #2a3142)', textAlign:'left', color:'var(--text-2)'}}>
+              <tr style={{borderBottom:'1px solid var(--border)', textAlign:'left', color:'var(--text-2)'}}>
                 <th style={{padding:'6px 4px'}}>When</th>
                 <th style={{padding:'6px 4px'}}>Symbol</th>
                 <th style={{padding:'6px 4px', textAlign:'right'}}>Amount</th>
@@ -132,7 +132,7 @@ window.SipScreen = function SipScreen() {
             </thead>
             <tbody>
               {history.map(h => (
-                <tr key={h.id} style={{borderBottom:'1px solid var(--border, #2a3142)'}}>
+                <tr key={h.id} style={{borderBottom:'1px solid var(--border)'}}>
                   <td style={{padding:'6px 4px', whiteSpace:'nowrap'}}>{_fmtDateSip(h.fired_at)}</td>
                   <td style={{padding:'6px 4px', fontWeight:600}}>{h.symbol}</td>
                   <td style={{padding:'6px 4px', textAlign:'right', fontFamily:'monospace'}}>{_inrSip(h.amount_inr)}</td>

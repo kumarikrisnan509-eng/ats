@@ -77,7 +77,7 @@ window.WalkForwardScreen = function WalkForwardScreen() {
         </span>
       </h2>
 
-      <div style={{padding:14, background:'var(--panel, #1a1f2e)', border:'1px solid var(--border, #2a3142)', borderRadius:8, marginBottom:14}}>
+      <div style={{padding:14, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8, marginBottom:14}}>
         <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))', gap:10, marginBottom:10}}>
           <div>
             <div style={{fontSize:11, color:'var(--text-3)'}}>Strategy</div>
@@ -129,7 +129,7 @@ window.WalkForwardScreen = function WalkForwardScreen() {
 
       {result && (
         <>
-          <section style={{padding:14, background:'var(--panel, #1a1f2e)', border:'1px solid var(--border, #2a3142)', borderRadius:8, marginBottom:14}}>
+          <section style={{padding:14, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8, marginBottom:14}}>
             <div style={{display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:8}}>
               <h3 style={{margin:0, fontSize:14}}>Recommendation</h3>
               <span style={{padding:'2px 10px', borderRadius:4, fontSize:12, fontWeight:700, background:_badgeWF(result.recommendation.action)+'22', color:_badgeWF(result.recommendation.action)}}>
@@ -150,7 +150,7 @@ window.WalkForwardScreen = function WalkForwardScreen() {
           </section>
 
           {result.summary && (
-            <section style={{padding:14, background:'var(--panel, #1a1f2e)', border:'1px solid var(--border, #2a3142)', borderRadius:8, marginBottom:14, display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:10}}>
+            <section style={{padding:14, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8, marginBottom:14, display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:10}}>
               <div><div style={{fontSize:11, color:'var(--text-3)'}}>Windows tested</div><div style={{fontSize:20, fontWeight:600}}>{result.summary.windowCount}</div></div>
               <div><div style={{fontSize:11, color:'var(--text-3)'}}>Combos tested</div><div style={{fontSize:20, fontWeight:600}}>{result.combosTested}</div></div>
               <div><div style={{fontSize:11, color:'var(--text-3)'}}>Avg IS score</div><div style={{fontSize:20, fontWeight:600, fontFamily:'monospace'}}>{_fmtWF(result.summary.avgIsScore)}</div></div>
@@ -160,11 +160,11 @@ window.WalkForwardScreen = function WalkForwardScreen() {
             </section>
           )}
 
-          <section style={{padding:14, background:'var(--panel, #1a1f2e)', border:'1px solid var(--border, #2a3142)', borderRadius:8}}>
+          <section style={{padding:14, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8}}>
             <h3 style={{margin:'0 0 8px', fontSize:14}}>Per-window results ({result.windows.length})</h3>
             <table style={{width:'100%', borderCollapse:'collapse', fontSize:12}}>
               <thead>
-                <tr style={{borderBottom:'1px solid var(--border, #2a3142)', textAlign:'left', color:'var(--text-2)'}}>
+                <tr style={{borderBottom:'1px solid var(--border)', textAlign:'left', color:'var(--text-2)'}}>
                   <th style={{padding:'4px 6px'}}>Window</th>
                   <th style={{padding:'4px 6px'}}>IS params (best)</th>
                   <th style={{padding:'4px 6px', textAlign:'right'}}>IS score</th>
@@ -173,7 +173,7 @@ window.WalkForwardScreen = function WalkForwardScreen() {
               </thead>
               <tbody>
                 {result.windows.map((w, i) => (
-                  <tr key={i} style={{borderBottom:'1px solid var(--border, #2a3142)'}}>
+                  <tr key={i} style={{borderBottom:'1px solid var(--border)'}}>
                     <td style={{padding:'4px 6px', fontFamily:'monospace'}}>[{w.startIdx}..{w.endIdx}]</td>
                     <td style={{padding:'4px 6px', fontFamily:'monospace', fontSize:11}}>{JSON.stringify(w.isParams)}</td>
                     <td style={{padding:'4px 6px', textAlign:'right', fontFamily:'monospace'}}>{_fmtWF(w.isScore)}</td>
