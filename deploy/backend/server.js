@@ -340,6 +340,28 @@ async function init() {
     db = openDb();
     auth = createUsers({ db, emailAlerts: null, audit, secureCookie: ENV_NAME === 'prod' });
     console.log(`db: ${db.users.count()} users registered`);
+
+    // Phase E v4: test-user seed. When ATS_TEST_USER_SEED=1, ensure a
+    // deterministic test account exists so Playwright visual snapshots can
+    // log in and capture auth-gated screens against a known shape. The
+    // seed user is created idempotently; if it already exists we leave
+    // it alone. Hard-gated to non-prod via ENV_NAME check so prod can
+    // never accidentally seed a known-password account.
+    if (process.env.ATS_TEST_USER_SEED === '1' && ENV_NAME !== 'prod') {
+      try {
+        const TEST_EMAIL = 'test@local.invalid';
+        const TEST_PASSWORD = 'LocalTestUser_2026!';
+        const existing = db.users.byEmail(TEST_EMAIL);
+        if (!existing) {
+          await auth.signup({ email: TEST_EMAIL, password: TEST_PASSWORD, name: 'Local Test User' });
+          console.log(`[server] Phase E v4 test-user seeded: ${TEST_EMAIL}`);
+        } else {
+          console.log(`[server] Phase E v4 test-user already present: ${TEST_EMAIL}`);
+        }
+      } catch (e) {
+        console.warn('[server] test-user seed failed (non-fatal):', e && e.message);
+      }
+    }
   } catch (e) {
     console.error('!! DB init failed:', e.message);
     db = null; auth = null;

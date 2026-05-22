@@ -125,6 +125,10 @@ if (!NO_BACKEND) {
       OPTION_CHAIN_FETCH_ENABLED: 'false',
       OPTIONS_AUTORUN_ENABLED: 'false',
       NSE_MACRO_FETCH_ENABLED: 'false',
+      // Phase E v4: seed a deterministic test-user so Playwright visual
+      // snapshots can log in. Backend gates this on ENV_NAME !== 'prod'
+      // so prod can never accidentally create a known-password account.
+      ATS_TEST_USER_SEED: '1',
     },
   });
   // Ensure .local-dev exists + seed master.key for vault init.

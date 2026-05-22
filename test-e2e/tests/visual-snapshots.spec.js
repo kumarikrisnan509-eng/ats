@@ -1,63 +1,67 @@
-// visual-snapshots.spec.js -- Phase E
+// visual-snapshots.spec.js -- Phase E v4
 //
 // Pixel-level regression detection. Complements visual-rendering.spec.js:
 //   * visual-rendering catches "what's rendered is wrong" (object leaks, NaN)
 //   * visual-snapshots catches "what's rendered LOOKS wrong" (layout drift,
 //     CSS regression, missing icon, font swap, broken grid)
 //
-// How it works:
-//   First run (no baseline images exist):
-//     - Playwright generates baseline PNGs under
-//       tests/visual-snapshots.spec.js-snapshots/
-//     - The test fails, telling you to commit the baselines.
-//     - Run `npx playwright test --update-snapshots visual-snapshots`
-//       and commit the resulting files.
-//   Subsequent runs:
-//     - Playwright takes a fresh screenshot and pixel-compares against the
-//       committed baseline. Diff is tolerated up to maxDiffPixelRatio.
+// Phase E v4 unlocks auth-gated screens:
+//   - global-setup.js logs in once as the seeded test user (Phase E v4
+//     backend hook creates test@local.invalid on local boot).
+//   - This spec uses test.use({ storageState }) to start each test
+//     pre-authenticated, so we can snapshot dashboard / paper / etc.
 //
-// Why only 5 screens (not all 32):
-//   - Snapshot diffing is fragile against live data (chart series rendered
-//     from real prices, "lastUpdated 3 minutes ago" timers, FX moves).
-//     We deliberately pick screens whose rendered DOM is dominated by
-//     STRUCTURE (cards, tables, grid) rather than LIVE VALUES.
-//   - Pixel diffs on 32 screens generate too many false positives. Better to
-//     pick 5 high-signal screens whose visual stability matters most.
+// Skip conditions:
+//   - BASE_URL points at prod -- visual snapshots never run against prod
+//     because (a) we won't seed a test user there and (b) prod has live
+//     data that would flap the diff every minute.
+//   - BASE_URL points at localhost or staging -- spec runs, snapshots
+//     pixel-diffed against the committed baselines.
 //
-// Bootstrap mode: until baselines are committed, this spec is gated behind
-// PLAYWRIGHT_VISUAL_SNAPSHOTS=1. CI default skips it. Operator opts in once
-// to seed the baseline, commits the PNGs, then we flip the default.
+// First-run baseline seeding (operator does this once on Windows):
+//   1. npm run dev                            (in one terminal)
+//   2. cd test-e2e
+//   3. $env:BASE_URL = "http://localhost:8080"
+//   4. npx playwright test visual-snapshots --update-snapshots
+//   5. git add tests/visual-snapshots.spec.js-snapshots && git commit
+//
+// Set PLAYWRIGHT_VISUAL_SNAPSHOTS=0 to opt out temporarily.
 
 const { test, expect } = require('@playwright/test');
+const path             = require('path');
 
-// Phase E v3: default ENABLED. Baseline for the landing route is committed
-// under tests/visual-snapshots.spec.js-snapshots/landing-linux.png and the
-// CI Playwright run will pixel-diff against it on every push. Set
-// PLAYWRIGHT_VISUAL_SNAPSHOTS=0 to opt out temporarily.
 const ENABLED = process.env.PLAYWRIGHT_VISUAL_SNAPSHOTS !== '0';
 
-// Phase E v3: ONE public route. Discovered while seeding baselines that
-// the React app redirects anonymous sessions to the landing page
-// regardless of hash, so #auth and #legal produced byte-identical
-// screenshots to #landing. The proper fix for snapshotting auth-gated
-// screens (dashboard, paper, attribution, etc.) is to add a login
-// fixture that signs in a deterministic test user before each snapshot.
-// That requires:
-//   1. Backend support for a deterministic test-user seed (env var or
-//      bootstrap hook that creates a known user with known password).
-//   2. A Playwright fixture (beforeEach) that POSTs /api/auth/login
-//      against the seed credentials and captures the session cookie.
-//   3. Decision on whether snapshots are taken against LOCAL (with
-//      deterministic data seed) or against staging once provisioned.
-// Tracked as a Phase E v4 follow-up. For now this single landing-page
-// snapshot catches marketing-surface CSS regressions, which is real
-// value even if narrow.
-const VISUAL_SCREENS = [
-  ['',          'landing',     1500],   // app.html root -> landing/marketing
+function isProd(baseURL) {
+  return baseURL && baseURL.includes('ats.rajasekarselvam.com')
+      && !baseURL.includes('staging');
+}
+
+// Public landing screen always covered (no auth needed). Protected screens
+// covered only when running against local/staging.
+const PUBLIC_SCREENS = [
+  ['',  'landing',  1500],
+];
+const PROTECTED_SCREENS = [
+  ['#dashboard',           'dashboard',          1800],
+  ['#paper',               'paper',              1800],
+  ['#strategies',          'strategies',         1800],
+  ['#attribution',         'attribution',        1800],
+  ['#slippage',            'slippage',           1800],
+  ['#daily-attribution',   'daily-attribution',  1800],
+  ['#walk-forward',        'walk-forward',       1800],
+  ['#macro-signals',       'macro-signals',      1800],
+  ['#calibration',         'calibration',        1800],
+  ['#sip',                 'sip',                1800],
 ];
 
+// Use the auth state captured by global-setup.js for every test in this file.
+test.use({
+  storageState: path.resolve(__dirname, '..', 'playwright/.auth/user.json'),
+});
+
 test.describe('Visual regression snapshots (Phase E)', () => {
-  test.skip(!ENABLED, 'Phase E: visual regression skipped via PLAYWRIGHT_VISUAL_SNAPSHOTS=0');
+  test.skip(!ENABLED, 'PLAYWRIGHT_VISUAL_SNAPSHOTS=0 opted out');
 
   test.beforeEach(async ({ page }) => {
     // Freeze any animation that would cause pixel jitter between runs.
@@ -72,44 +76,46 @@ test.describe('Visual regression snapshots (Phase E)', () => {
           caret-color: transparent !important;
         }
       `;
-      // Insert as early as possible so React renders without transitions.
       const insert = () => document.head ? document.head.appendChild(style) : setTimeout(insert, 4);
       insert();
     });
   });
 
-  for (const [route, label, settleMs] of VISUAL_SCREENS) {
-    test(`snapshot: ${label}`, async ({ page }) => {
-      // Suppress console; visual-rendering already catches errors.
-      page.on('console', () => {});
-      page.on('pageerror', () => {});
+  async function snapshotScreen(page, route, label, settleMs) {
+    page.on('console', () => {});
+    page.on('pageerror', () => {});
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(`/${route}`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(settleMs);
+    await expect(page).toHaveScreenshot(`${label}.png`, {
+      fullPage: true,
+      animations: 'disabled',
+      caret: 'hide',
+      maxDiffPixelRatio: 0.02,
+      mask: [
+        page.locator('[data-live-value]'),
+        page.locator('.live-value'),
+        page.locator('.timestamp'),
+        page.locator('.last-updated'),
+        page.locator('text=/\\d+:\\d+:\\d+/'),
+        page.locator('text=/seconds? ago|minutes? ago/'),
+        page.locator('[data-testid="broker-banner"]'),
+      ],
+    });
+  }
 
-      // Pin viewport so snapshots are deterministic across CI machines.
-      await page.setViewportSize({ width: 1280, height: 800 });
+  for (const [route, label, settleMs] of PUBLIC_SCREENS) {
+    test(`snapshot (public): ${label}`, async ({ page }) => {
+      await snapshotScreen(page, route, label, settleMs);
+    });
+  }
 
-      await page.goto(`/${route}`, { waitUntil: 'networkidle' });
-      await page.waitForTimeout(settleMs);
-
-      // Mask live tickers + timestamps so screenshot diffs aren't dominated
-      // by them. Any element with [data-live-value] or .timestamp gets
-      // covered by a solid block before screenshot.
-      await expect(page).toHaveScreenshot(`${label}.png`, {
-        fullPage: true,
-        animations: 'disabled',
-        caret: 'hide',
-        // 2% of pixels can differ before failing. Generous because we don't
-        // mask every dynamic value yet.
-        maxDiffPixelRatio: 0.02,
-        // Mask common live elements so timestamps + ticks don't flap the diff.
-        mask: [
-          page.locator('[data-live-value]'),
-          page.locator('.live-value'),
-          page.locator('.timestamp'),
-          page.locator('.last-updated'),
-          page.locator('text=/\\d+:\\d+:\\d+/'),
-          page.locator('text=/seconds? ago|minutes? ago/'),
-        ],
-      });
+  for (const [route, label, settleMs] of PROTECTED_SCREENS) {
+    test(`snapshot (auth): ${label}`, async ({ page, baseURL }) => {
+      test.skip(isProd(baseURL),
+        'Phase E v4: visual snapshots of auth-gated screens skip on prod ' +
+        '(test-user is local/staging-only, prod has live-data flap).');
+      await snapshotScreen(page, route, label, settleMs);
     });
   }
 });

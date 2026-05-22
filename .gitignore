@@ -233,3 +233,6 @@ deploy/scripts/secrets.local.ps1
 test-e2e/node_modules/
 test-e2e/test-results/
 test-e2e/playwright-report/
+
+# Phase E v4: Playwright auth state captured by global-setup.js -- DO NOT COMMIT
+test-e2e/playwright/.auth/
