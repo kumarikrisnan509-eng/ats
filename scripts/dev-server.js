@@ -127,8 +127,18 @@ if (!NO_BACKEND) {
       NSE_MACRO_FETCH_ENABLED: 'false',
     },
   });
-  // Ensure .local-dev exists
+  // Ensure .local-dev exists + seed master.key for vault init.
+  // Phase A.5: pre-A.5 the vault stayed null on mock broker so AI keys +
+  // notifications endpoints returned 503 instead of 401/403. Now we always
+  // seed master.key (32 random bytes) so vault initialises and local matches
+  // prod auth-gate behaviour.
   fs.mkdirSync(path.join(ROOT, '.local-dev', 'data'), { recursive: true });
+  const masterKeyPath = path.join(ROOT, '.local-dev', 'master.key');
+  if (!fs.existsSync(masterKeyPath)) {
+    const crypto = require('crypto');
+    fs.writeFileSync(masterKeyPath, crypto.randomBytes(32), { mode: 0o600 });
+    console.log('[dev-server] generated fresh .local-dev/master.key for vault');
+  }
 } else {
   console.log(`[dev-server] backend skipped (NO_BACKEND set); proxying /api/* to ${PROXY_TARGET}`);
 }
@@ -202,6 +212,14 @@ function proxyToBackend(req, res) {
     method: req.method,
     headers: { ...req.headers, host: proxyUrl.host },
   };
+  // Phase A.5: mirror nginx's strip of X-ATS-Internal so the backend's
+  // requireInternal() gate sees the same shape it sees in prod. Without this,
+  // a curl with -H 'x-ats-internal: 1' reaches the backend, CSRF Origin
+  // mismatch fires before requireInternal, and tests get 400 instead of the
+  // expected 403. Strip in BOTH casings to match nginx's behaviour.
+  delete opts.headers['x-ats-internal'];
+  delete opts.headers['X-ATS-Internal'];
+
   // Add Origin matching the proxy target so CSRF Origin-check passes
   if (PROXY_TARGET.startsWith('https://')) {
     opts.headers.origin = `https://${proxyUrl.host}`;

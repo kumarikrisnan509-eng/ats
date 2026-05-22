@@ -577,13 +577,30 @@ async function init() {
   emailAlerts = new EmailAlerts({ audit });
   whatsAppAlerts = new WhatsAppAlerts({ audit });
 
-  if (BROKER_NAME === 'zerodha') {
-    if (!fs.existsSync(MASTER_KEY_PATH)) {
-      console.error(`!! ${MASTER_KEY_PATH} not found. Run: npm run init-master-key`);
-      process.exit(2);
+  // Phase A.5: vault + sessions init is now unconditional. Pre-A.5 these were
+  // gated behind BROKER_NAME === 'zerodha', which meant local backend running
+  // BROKER=mock had vault=null -> /api/me/ai-keys, /api/v1/me/notifications, and
+  // the internal bulk-rotate / seal-token endpoints all returned 503 ("vault not
+  // open"). Per-user encrypted state (AI keys, notification tokens) is
+  // independent of broker choice, so vault should always initialize when
+  // master.key exists. Broker-specific features (cron-reauth, token
+  // rehydration) remain gated below.
+  if (fs.existsSync(MASTER_KEY_PATH)) {
+    try {
+      vault = await Vault.open(MASTER_KEY_PATH);
+      sessions = new SessionStore({ tokensDir: TOKENS_DIR, vault });
+    } catch (e) {
+      console.error('!! vault init failed:', e.message);
+      if (BROKER_NAME === 'zerodha') process.exit(2);
     }
-    vault = await Vault.open(MASTER_KEY_PATH);
-    sessions = new SessionStore({ tokensDir: TOKENS_DIR, vault });
+  } else if (BROKER_NAME === 'zerodha') {
+    console.error(`!! ${MASTER_KEY_PATH} not found. Run: npm run init-master-key`);
+    process.exit(2);
+  } else {
+    console.warn(`[server] vault NOT initialized -- ${MASTER_KEY_PATH} missing. AI keys + notifications endpoints will 503.`);
+  }
+
+  if (BROKER_NAME === 'zerodha') {
 
     // Tier 80: daily auto-reauth cron — moved INSIDE init() because db+vault are
     // populated asynchronously here; the previous module-level init at line 368

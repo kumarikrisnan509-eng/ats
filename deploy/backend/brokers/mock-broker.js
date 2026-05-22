@@ -160,7 +160,22 @@ class MockBroker extends BrokerGateway {
   }
 
   health() {
-    return { name: this.name, connected: this._timer != null, subscribers: this._subs.size };
+    // Phase A.5: expose the same shape fields the zerodha broker does so the
+    // /api/health-deep contract is identical across brokers. T-34/T-37/T-42
+    // tests assert these as booleans; pre-A.5 mock broker omitted them and
+    // the test had a skip-when-mock guard that silently weakened coverage.
+    return {
+      name: this.name,
+      connected: this._timer != null,
+      subscribers: this._subs.size,
+      stalledOnToken: false,
+      tickStale: false,
+      hasAccessToken: true,
+      tickerInitialized: this._timer != null,
+      reconnectAttempts: 0,
+      subscribedInstruments: this._subs.size,
+      lagMs: 0,
+    };
   }
 }
 
