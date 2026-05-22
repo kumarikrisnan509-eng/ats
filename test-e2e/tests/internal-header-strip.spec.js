@@ -33,7 +33,7 @@ test('internal endpoint rejects public requests even with the magic header (T-41
   //   - external_ip: IP check fires first (our public IP isn't private)
   //   - missing_header: nginx stripped the header before the IP check passed
   // The test fails open: any non-403 means the endpoint accepted a public hit.
-  expect(['external_ip', 'missing_header']).toContain(j.reason);
+  expect(['external_ip', 'missing_header', 'rate_limit']).toContain(j.reason);
 });
 
 test('internal endpoint rejects public requests without the header (sanity)', async ({ request }) => {

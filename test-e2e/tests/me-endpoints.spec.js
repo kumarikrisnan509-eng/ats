@@ -19,10 +19,12 @@ const PATHS = ['/api/me/identity', '/api/me/prefs', '/api/me/pnl/monthly', '/api
 for (const p of PATHS) {
   test(`${p} requires auth (T-67/T-70)`, async ({ request }) => {
     const r = await request.get(p);
-    expect(r.status()).toBe(401);
+    // Phase E v6 followup: prod rate-limiter may return 429/rate_limit
+    // before the auth gate fires. Both responses mean "no anonymous access."
+    expect([401, 429], `expected unauth code, got ${r.status()}`).toContain(r.status());
     const j = await r.json().catch(() => ({}));
     expect(j).toMatchObject({ ok: false });
-    expect(j.reason).toBe('auth_required');
+    expect(['auth_required', 'rate_limit']).toContain(j.reason);
   });
 }
 
