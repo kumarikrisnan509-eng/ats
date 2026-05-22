@@ -1555,23 +1555,38 @@ const PUBLIC_AUTH_PATHS = new Set([
   '/auth/reset-password',
 ]);
 
-// Apply: gate all mutating methods + /api/audit
+// Apply: gate all mutating methods + /api/audit.
+//
+// T-330 follow-up: extended the session-auth allowance from /audit to every
+// /me/* path. The /me/* convention is "per-user data" -- those POSTs/PUTs/
+// DELETEs are the user mutating their own state from the browser, and they
+// carry the session cookie (not the ops bearer). Production-readiness audit
+// found POST /api/me/portfolio/stress returning 401 on every Risk Cockpit
+// mount because the broader POST gate funnelled it into authMiddleware
+// (bearer-only). Same class of bug as T-322b. Generalising prevents the
+// next /me/* POST being added later from hitting the same trap.
 app.use('/api', (req, res, next) => {
   // T-261: skip bearer check for public auth endpoints.
   if (PUBLIC_AUTH_PATHS.has(req.path)) return next();
-  if (req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE' || req.method === 'PATCH') {
+
+  const isMutating = req.method === 'POST' || req.method === 'PUT' ||
+                     req.method === 'DELETE' || req.method === 'PATCH';
+  const isMePath   = req.path.startsWith('/me/') || req.path === '/me';
+
+  if (isMutating) {
+    // Mutations on /me/* are the user's own state -- session is the right
+    // credential. Outside /me/* the ops bearer is still required (admin /
+    // internal calls).
+    if (isMePath && req.user && req.user.id) return next();
     return authMiddleware(req, res, next);
   }
-  // T-322b/T-323: /api/audit can be read by either the ops bearer (CI / CLI
-  // tools) OR a logged-in user session (so the operator can see their own
-  // audit trail in the UI without needing to paste a bearer token into the
-  // browser). The data is the operator's own activity log; gating it
-  // strictly behind the bearer locked the audit-trail page to "401: Could
-  // not load live data" for normal in-app use.
+
+  // /api/audit GETs: keep the session-OR-bearer behaviour from T-322b.
   if (req.path === '/audit' || req.path.startsWith('/audit?')) {
-    if (req.user && req.user.id) return next();   // session-authenticated
-    return authMiddleware(req, res, next);         // else require ops bearer
+    if (req.user && req.user.id) return next();
+    return authMiddleware(req, res, next);
   }
+
   next();
 });
 
