@@ -21,7 +21,9 @@ test('/api/health-deep sets x-request-id header (T-78)', async ({ request }) => 
 
 test('/api/auth-mode sets x-request-id header (T-78)', async ({ request }) => {
   const r = await request.get('/api/auth-mode');
-  expect(r.ok()).toBeTruthy();
+  // Phase E v6 followup: rate-limiter may 429 anonymous reads of public
+  // endpoints. The x-request-id header should still be set regardless.
+  expect([200, 429]).toContain(r.status());
   const reqId = r.headers()['x-request-id'];
   expect(reqId).toMatch(/^[0-9a-f]{16}$/);
 });

@@ -44,7 +44,7 @@ test('GET /api/v1/me/notifications requires auth (T-189)', async ({ request }) =
   expect([401, 429, 503], `expected unauth code, got ${r.status()}`).toContain(r.status());
   const j = await r.json().catch(() => ({}));
   expect(j.ok).toBe(false);
-  expect(j.reason).toBe('auth_required');
+  expect(['auth_required', 'rate_limit']).toContain(j.reason);
 });
 
 // ---- 3. POST /api/v1/me/notifications/test requires auth ----
