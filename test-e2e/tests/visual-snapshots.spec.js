@@ -64,71 +64,73 @@ const PROTECTED_SCREENS = [
   ['#sip',                 'sip',                1800],
 ];
 
-// Use the auth state captured by global-setup.js for every test in this file.
-test.use({
-  storageState: path.resolve(__dirname, '..', 'playwright/.auth/user.json'),
-});
+// Helper used by both describe blocks below.
+async function freezeAnimations(page) {
+  await page.addInitScript(() => {
+    const style = document.createElement('style');
+    style.textContent = `
+      *, *::before, *::after {
+        animation-duration: 0s !important;
+        animation-delay: 0s !important;
+        transition-duration: 0s !important;
+        transition-delay: 0s !important;
+        caret-color: transparent !important;
+      }
+    `;
+    const insert = () => document.head ? document.head.appendChild(style) : setTimeout(insert, 4);
+    insert();
+  });
+}
 
-test.describe('Visual regression snapshots (Phase E)', () => {
+async function snapshotScreen(page, route, label, settleMs) {
+  page.on('console', () => {});
+  page.on('pageerror', () => {});
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`/${route}`, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(settleMs);
+  await expect(page).toHaveScreenshot(`${label}.png`, {
+    fullPage: true,
+    animations: 'disabled',
+    caret: 'hide',
+    maxDiffPixelRatio: 0.02,
+    mask: [
+      page.locator('[data-live-value]'),
+      page.locator('.live-value'),
+      page.locator('.timestamp'),
+      page.locator('.last-updated'),
+      page.locator('text=/\\d+:\\d+:\\d+/'),
+      page.locator('text=/seconds? ago|minutes? ago/'),
+      page.locator('[data-testid="broker-banner"]'),
+    ],
+  });
+}
+
+// Public describe block: NO storageState. Landing always rendered as
+// anonymous, which matches what CI captures even when global-setup login
+// gets rate-limited or PROD_E2E_* aren't set. Baselines must be seeded
+// without auth too.
+test.describe('Visual regression snapshots — public (Phase E)', () => {
   test.skip(!ENABLED, 'PLAYWRIGHT_VISUAL_SNAPSHOTS=0 opted out');
 
-  test.beforeEach(async ({ page }) => {
-    // Freeze any animation that would cause pixel jitter between runs.
-    await page.addInitScript(() => {
-      const style = document.createElement('style');
-      style.textContent = `
-        *, *::before, *::after {
-          animation-duration: 0s !important;
-          animation-delay: 0s !important;
-          transition-duration: 0s !important;
-          transition-delay: 0s !important;
-          caret-color: transparent !important;
-        }
-      `;
-      const insert = () => document.head ? document.head.appendChild(style) : setTimeout(insert, 4);
-      insert();
-    });
-  });
-
-  async function snapshotScreen(page, route, label, settleMs) {
-    page.on('console', () => {});
-    page.on('pageerror', () => {});
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(`/${route}`, { waitUntil: 'networkidle' });
-    await page.waitForTimeout(settleMs);
-    await expect(page).toHaveScreenshot(`${label}.png`, {
-      fullPage: true,
-      animations: 'disabled',
-      caret: 'hide',
-      maxDiffPixelRatio: 0.02,
-      mask: [
-        page.locator('[data-live-value]'),
-        page.locator('.live-value'),
-        page.locator('.timestamp'),
-        page.locator('.last-updated'),
-        page.locator('text=/\\d+:\\d+:\\d+/'),
-        page.locator('text=/seconds? ago|minutes? ago/'),
-        page.locator('[data-testid="broker-banner"]'),
-      ],
-    });
-  }
+  test.beforeEach(async ({ page }) => { await freezeAnimations(page); });
 
   for (const [route, label, settleMs] of PUBLIC_SCREENS) {
     test(`snapshot (public): ${label}`, async ({ page }) => {
       await snapshotScreen(page, route, label, settleMs);
     });
   }
+});
+
+// Protected describe block: WITH storageState. Skips entirely if global-setup
+// didn't capture cookies.
+test.describe('Visual regression snapshots — auth-gated (Phase E)', () => {
+  test.skip(!ENABLED, 'PLAYWRIGHT_VISUAL_SNAPSHOTS=0 opted out');
+  test.use({ storageState: AUTH_FILE });
+
+  test.beforeEach(async ({ page }) => { await freezeAnimations(page); });
 
   for (const [route, label, settleMs] of PROTECTED_SCREENS) {
-    test(`snapshot (auth): ${label}`, async ({ page, baseURL }) => {
-      // Phase E v6: visual snapshots now run on prod IF auth cookies are
-      // present (i.e. PROD_E2E_EMAIL + PROD_E2E_PASSWORD were set in env so
-      // global-setup could log in as the synthetic prod test user). The
-      // synthetic user has no holdings / trades / broker, so most screens
-      // are empty-state which IS pixel-deterministic. Live-data overlays
-      // (market ticker, FII/DII, timestamps) are masked in toHaveScreenshot.
-      // Skip remains when there are no cookies -- without auth, every route
-      // redirects to landing and 10 snapshots would come out byte-identical.
+    test(`snapshot (auth): ${label}`, async ({ page }) => {
       test.skip(!hasAuthCookies(),
         'No auth cookies -- set PROD_E2E_* / STAGING_E2E_* env vars to enable.');
       await snapshotScreen(page, route, label, settleMs);
