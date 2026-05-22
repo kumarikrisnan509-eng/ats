@@ -62,7 +62,6 @@
     "node_modules",
     "deploy/backend/node_modules",
     "test-e2e",
-    "test-frontend",
     "out",
     ".local-dev",
     ".ci-tmp"

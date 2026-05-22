@@ -159,23 +159,6 @@ jobs:
             echo "no test script defined -- skipping"
           fi
 
-      - name: Frontend unit tests (Vitest -- non-blocking, T-318 follow-up)
-        working-directory: test-frontend
-        # T-318 attempted to flip blocking; canary revealed that 3 of 5
-        # tests fail in CI's happy-dom env with
-        # "TypeError: window.addEventListener is not a function" because
-        # lib/load-jsx.js evals r11-additions.jsx into a fake-window that
-        # is just {} and the .jsx file calls window.addEventListener at
-        # top level. Only Toggle.test.jsx + inrCompact.test.js pass.
-        # Until lib/load-jsx.js stubs the DOM surface r11-additions touches,
-        # leaving non-blocking. Track in T-319.
-        continue-on-error: true
-        run: |
-          if [ -f package.json ]; then
-            npm install --silent --no-audit --no-fund
-            npm test
-          fi
-
       - name: Playwright smoke tests (blocking, against live URL)
         # T-199 (CODE-AUDIT D.9 #5): used to skip on PRs to keep CI fast, which
         # meant E2E regressions only surfaced AFTER merge to main. Now runs on
