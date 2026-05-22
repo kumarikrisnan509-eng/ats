@@ -45,8 +45,8 @@ function hasAuthCookies() {
 
 test.describe('Auth smoke (Phase E v5)', () => {
   test.skip(!hasAuthCookies(),
-    'No auth cookies from global-setup -- set env-appropriate credentials ' +
-    '(local: auto, staging: STAGING_E2E_*, prod: PROD_E2E_*) to enable.');
+    'No auth cookies from global-setup -- set PROD_E2E_EMAIL + PROD_E2E_PASSWORD ' +
+    '(or run against local with `npm run dev`) to enable.');
 
   for (const route of SCREENS) {
     test(`auth smoke: ${route}`, async ({ page }) => {

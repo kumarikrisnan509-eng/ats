@@ -12,11 +12,6 @@
 //     The seed user is `test@local.invalid / LocalTestUser_2026!`. Hardcoded
 //     because the seed is also hardcoded server-side; no secret to protect.
 //
-//   staging.ats.rajasekarselvam.com
-//     Same backend seed enabled in staging compose env. Same credentials
-//     work because BROKER=mock and DB is isolated. Operator can override
-//     via STAGING_E2E_EMAIL / STAGING_E2E_PASSWORD env vars.
-//
 //   prod (ats.rajasekarselvam.com)
 //     The backend NEVER seeds in prod (server.js Phase E v4 gate is
 //     ENV_NAME !== "prod"). Operator must manually create a SYNTHETIC
@@ -43,7 +38,6 @@ const LOCAL_SEED_PASSWORD = 'LocalTestUser_2026!';
 function classifyBaseURL(baseURL) {
   if (!baseURL) return 'unknown';
   if (baseURL.includes('localhost') || baseURL.includes('127.0.0.1'))    return 'local';
-  if (baseURL.includes('staging.ats.rajasekarselvam.com'))                 return 'staging';
   if (baseURL.includes('ats.rajasekarselvam.com'))                         return 'prod';
   return 'unknown';
 }
@@ -51,13 +45,6 @@ function classifyBaseURL(baseURL) {
 function resolveCreds(envClass) {
   if (envClass === 'local') {
     return { email: LOCAL_SEED_EMAIL, password: LOCAL_SEED_PASSWORD, source: 'local-seed' };
-  }
-  if (envClass === 'staging') {
-    return {
-      email:    process.env.STAGING_E2E_EMAIL    || LOCAL_SEED_EMAIL,
-      password: process.env.STAGING_E2E_PASSWORD || LOCAL_SEED_PASSWORD,
-      source:   process.env.STAGING_E2E_EMAIL ? 'staging-env' : 'staging-seed-fallback',
-    };
   }
   if (envClass === 'prod') {
     if (process.env.PROD_E2E_EMAIL && process.env.PROD_E2E_PASSWORD) {

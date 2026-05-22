@@ -107,8 +107,7 @@ async function snapshotScreen(page, route, label, settleMs) {
 
 // Public describe block: NO storageState. Landing always rendered as
 // anonymous, which matches what CI captures even when global-setup login
-// gets rate-limited or PROD_E2E_* aren't set. Baselines must be seeded
-// without auth too.
+// is unavailable. Baselines must be seeded without auth too.
 test.describe('Visual regression snapshots — public (Phase E)', () => {
   test.skip(!ENABLED, 'PLAYWRIGHT_VISUAL_SNAPSHOTS=0 opted out');
 
@@ -132,7 +131,7 @@ test.describe('Visual regression snapshots — auth-gated (Phase E)', () => {
   for (const [route, label, settleMs] of PROTECTED_SCREENS) {
     test(`snapshot (auth): ${label}`, async ({ page }) => {
       test.skip(!hasAuthCookies(),
-        'No auth cookies -- set PROD_E2E_* / STAGING_E2E_* env vars to enable.');
+        'No auth cookies -- set PROD_E2E_EMAIL + PROD_E2E_PASSWORD to enable.');
       await snapshotScreen(page, route, label, settleMs);
     });
   }

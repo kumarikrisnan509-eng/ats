@@ -5,8 +5,7 @@
 | Env    | URL                                  | Visual snapshots | Auth smoke |
 |--------|--------------------------------------|------------------|------------|
 | local  | http://localhost:8080                | yes              | yes        |
-| staging| https://staging.ats.rajasekarselvam.com | yes              | yes        |
-| prod   | https://ats.rajasekarselvam.com      | NO (live data)   | yes        |
+| prod   | https://ats.rajasekarselvam.com      | yes (synthetic user) | yes    |
 
 ## How auth works
 
@@ -17,11 +16,6 @@ and logs in with the appropriate credentials.
 Zero config. `npm run dev` exports `ATS_TEST_USER_SEED=1` to the backend,
 which idempotently creates `test@local.invalid / LocalTestUser_2026!` on
 boot. The setup script reads those hardcoded credentials and logs in.
-
-### Staging
-Same backend seed, enabled in the staging compose env. Override if you
-want by setting `STAGING_E2E_EMAIL` and `STAGING_E2E_PASSWORD` in your
-shell or as GitHub Actions secrets.
 
 ### Prod
 The backend NEVER seeds in prod (gated on `ENV_NAME !== "prod"` in
