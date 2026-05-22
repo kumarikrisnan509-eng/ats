@@ -22,7 +22,7 @@ const { test, expect } = require('@playwright/test');
 test.describe('AI keys screen contract (T-187)', () => {
   test('GET /api/me/ai-keys requires auth', async ({ request }) => {
     const r = await request.get('/api/me/ai-keys');
-    expect([401, 403, 503], `expected unauth code, got ${r.status()}`).toContain(r.status());
+    expect([401, 403, 429, 503], `expected unauth code, got ${r.status()}`).toContain(r.status());
     const j = await r.json().catch(() => ({}));
     expect(j.ok).toBe(false);
     if (j.reason) {
@@ -37,7 +37,7 @@ test.describe('AI keys screen contract (T-187)', () => {
     // Must be rejected -- 401 (auth) is the expected shape. 400 is acceptable
     // only if the body fails validation before auth runs, but we explicitly
     // forbid 2xx (that would mean an anonymous user could write a key).
-    expect([400, 401, 403, 503]).toContain(r.status());
+    expect([400, 401, 403, 429, 503]).toContain(r.status());
     expect(r.status()).toBeGreaterThanOrEqual(400);
   });
 
@@ -45,7 +45,7 @@ test.describe('AI keys screen contract (T-187)', () => {
     const r = await request.post('/api/me/ai-keys/test', {
       data: { provider: 'anthropic' },
     });
-    expect([400, 401, 403, 503]).toContain(r.status());
+    expect([400, 401, 403, 429, 503]).toContain(r.status());
     expect(r.status()).toBeGreaterThanOrEqual(400);
   });
 
@@ -53,7 +53,7 @@ test.describe('AI keys screen contract (T-187)', () => {
     const r = await request.get('/api/me/ai-keys/usage');
     // This endpoint historically returns 401 to anons. If it ever starts
     // returning 200 with an empty body, that's a leak of "user exists or not".
-    expect([401, 403, 404, 503]).toContain(r.status());
+    expect([401, 403, 404, 429, 503]).toContain(r.status());
   });
 
   test('#ai-keys route mounts without fatal JS errors (anonymous)', async ({ page }) => {

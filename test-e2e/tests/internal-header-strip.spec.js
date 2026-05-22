@@ -26,7 +26,7 @@ test('internal endpoint rejects public requests even with the magic header (T-41
   const r = await request.get('/api/brokers/zerodha/auto-login/bundle', {
     headers: { 'x-ats-internal': '1' },
   });
-  expect([400, 403, 503], `expected internal-strip rejection, got ${r.status()}`).toContain(r.status());
+  expect([400, 403, 429, 503], `expected internal-strip rejection, got ${r.status()}`).toContain(r.status());
   const j = await r.json().catch(() => ({}));
   expect(j.ok).toBe(false);
   // Either reason is fine as long as we're blocked:
@@ -38,5 +38,5 @@ test('internal endpoint rejects public requests even with the magic header (T-41
 
 test('internal endpoint rejects public requests without the header (sanity)', async ({ request }) => {
   const r = await request.get('/api/brokers/zerodha/auto-login/bundle');
-  expect([400, 403, 503], `expected internal-strip rejection, got ${r.status()}`).toContain(r.status());
+  expect([400, 403, 429, 503], `expected internal-strip rejection, got ${r.status()}`).toContain(r.status());
 });

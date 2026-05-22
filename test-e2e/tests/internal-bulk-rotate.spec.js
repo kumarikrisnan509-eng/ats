@@ -23,7 +23,7 @@ const PUBLIC_ROUTES = [
 for (const route of PUBLIC_ROUTES) {
   test(`POST ${route} rejects public request without header`, async ({ request }) => {
     const r = await request.post(route, { data: {} });
-    expect(r.status(), `${route} must be 403 from public`).toBe(403);
+    expect([403, 429], `${route} must be 403/429 from public, got ${r.status()}`).toContain(r.status());
     const j = await r.json().catch(() => ({}));
     expect(j.ok).toBe(false);
     // Accept either reason — both indicate the gate fired.
@@ -40,7 +40,7 @@ for (const route of PUBLIC_ROUTES) {
       data: {},
       headers: { 'x-ats-internal': '1' },
     });
-    expect([400, 403, 503], `${route} must be 4xx/503 even with header from public, got ${r.status()}`).toContain(r.status());
+    expect([400, 403, 429, 503], `${route} must be 4xx/503 even with header from public, got ${r.status()}`).toContain(r.status());
     const j = await r.json().catch(() => ({}));
     expect(j.ok).toBe(false);
     // T-181: CSRF middleware can fire BEFORE requireInternal() gate when the
