@@ -159,13 +159,13 @@ jobs:
             echo "no test script defined -- skipping"
           fi
 
-      - name: Frontend unit tests (Vitest -- non-blocking initially per T-211)
+      - name: Frontend unit tests (Vitest -- BLOCKING, T-318)
         working-directory: test-frontend
-        # T-211 (CODE-AUDIT D.9 #2): scaffold + 5 tests. Wired as
-        # continue-on-error: true initially while we verify it runs reliably
-        # in CI. Flip to blocking after a week of clean runs, same pattern
-        # T-199 used for npm audit pre-blocking.
-        continue-on-error: true
+        # T-318 (cleanup): flipped from continue-on-error to blocking.
+        # 5 pure-function tests on canonical formatters + Toggle primitive,
+        # all running clean since T-211. Same canary -> gate pattern T-199
+        # used for npm audit. A regression here means a formatter contract
+        # changed without a deliberate test update -- worth blocking.
         run: |
           if [ -f package.json ]; then
             npm install --silent --no-audit --no-fund
