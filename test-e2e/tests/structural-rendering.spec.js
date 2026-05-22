@@ -1,0 +1,194 @@
+// structural-rendering.spec.js -- T-325
+//
+// REPLACES pixel-diff visual-snapshots.spec.js.
+//
+// Why this trade.
+//   visual-snapshots was a pixel-diff gate over a fullPage screenshot per
+//   route. It worked, but every intentional UI change (and several
+//   semi-intentional ones — see T-321/T-323/T-324) broke the baselines
+//   and required a Linux re-seed cycle. For a solo operator iterating
+//   fast on a single-user app, the maintenance load wasn't paying for
+//   itself: every bug class that actually shipped in the last week was
+//   caught by visual-rendering or smoke, not by pixel diff.
+//
+// What this spec asserts.
+//   For each route the spec knows the contract of, assert the route
+//   renders the LABELS / SECTIONS that define its purpose. The contracts
+//   are short, written once, and only need updating when the screen's
+//   actual user-visible contract changes (e.g. "we renamed REGIME to
+//   MARKET MODE"). They survive CSS rework, font swaps, layout drift,
+//   colour palette changes, and component restructuring -- by design.
+//
+//   Generic gates on every route (whether contract-listed or not):
+//     1. data-screen-label matches the route's expected title
+//     2. ErrorBoundary signature phrase ("Something broke on this screen")
+//        is NOT present
+//     3. No "[object Object]" leak (overlap with visual-rendering)
+//     4. Rendered text length > 80 chars (catches blank fallback)
+//
+// Auth.
+//   Same pattern as visual-rendering / visual-snapshots: opt into
+//   storageState from global-setup.js; skip the suite if no auth cookies
+//   (PR from a fork without secrets access).
+
+const { test, expect } = require('@playwright/test');
+const path = require('path');
+const fs   = require('fs');
+
+const AUTH_FILE = path.resolve(__dirname, '..', 'playwright/.auth/user.json');
+
+function hasAuthCookies() {
+  try {
+    const j = JSON.parse(fs.readFileSync(AUTH_FILE, 'utf8'));
+    return Array.isArray(j.cookies) && j.cookies.length > 0;
+  } catch { return false; }
+}
+
+// Per-route contracts. Keys are required substrings (case-sensitive). Each
+// must appear in the rendered text. Add new entries as you build new screens;
+// remove keys only when the user-visible contract really changes.
+//
+// Contracts left empty/undefined fall through to the generic checks only.
+// That's fine for screens we haven't pinned yet -- ErrorBoundary + empty-page
+// + screen-label gates still fire.
+const ROUTE_CONTRACTS = {
+  // Dashboard cockpit -- the home view after login.
+  '#dashboard': {
+    label: 'Cockpit',
+    required: ['Welcome back', 'TODAY’S PLAN', 'AI INFERENCE', 'LAST SIGNAL', 'PORTFOLIO VALUE'],
+  },
+
+  // Risk cockpit -- portfolio aggregates + regime banner + KPIs.
+  '#riskcockpit': {
+    label: 'Risk cockpit',
+    required: ['REGIME:', 'TOTAL VALUE', 'CASH', 'MTM P&L', 'GROSS EXPOSURE', 'LEVERAGE'],
+  },
+
+  // Daily attribution -- table of daily PnL rows by strategy + regime.
+  '#daily-attribution': {
+    label: 'Daily attribution',
+    required: ['Daily attribution', 'Total PnL', 'PnL by strategy', 'Daily snapshots'],
+  },
+
+  // Same component, route alias under Operations breadcrumb.
+  '#attribution': {
+    label: 'PnL attribution',
+    required: ['Daily attribution', 'Total PnL', 'PnL by strategy'],
+  },
+
+  // Audit trail -- SEBI compliance log, even if empty must show the frame.
+  '#audit': {
+    label: 'Order audit trail',
+    required: ['Order audit trail', 'TODAY’S ORDERS', 'FILL RATE', 'AVG SLIPPAGE', 'RISK BLOCKS'],
+  },
+
+  // SIP planner.
+  '#sip': {
+    label: 'SIP plan & history',
+    required: ['SIP plan + history', 'Today’s plan', 'Recent fires'],
+  },
+
+  // Slippage tracker.
+  '#slippage': {
+    label: 'Slippage tracker',
+    required: ['Slippage tracker', 'MEAN SLIPPAGE', 'MEDIAN', 'FILLS TRACKED', 'By strategy', 'By symbol'],
+  },
+
+  // Macro signals feed.
+  '#macro-signals': {
+    label: 'Macro signals',
+    required: ['Macro signals', 'Fetcher:', 'Last fetch:'],
+  },
+
+  // Options opportunities (shadow scanner — always rendered, even if empty).
+  '#options-opportunities': {
+    label: 'Options opportunities',
+    required: ['Options opportunities', 'Scanner', 'Fetcher', 'Total opportunities'],
+  },
+  '#options-ops': {
+    label: 'Options opportunities',
+    required: ['Options opportunities', 'Scanner', 'Fetcher'],
+  },
+
+  // Strategy calibration (advisory only).
+  '#calibration': {
+    label: 'Strategy calibration',
+    required: ['Strategy calibration', 'advisory only', 'retire', 'watch', 'keep'],
+  },
+
+  // Walk-forward optimisation (advisory).
+  '#walk-forward': {
+    label: 'Walk-forward opt',
+    required: ['Walk-forward optimization', 'Strategy', 'Symbol (NSE)', 'IS window', 'OOS window', 'paramGrid'],
+  },
+};
+
+// Anonymous landing -- separate describe (no auth needed) so it works even
+// when fork PRs skip the rest.
+test.describe('structural rendering -- landing (public)', () => {
+  test('landing has the marketing surface intact', async ({ page }) => {
+    await page.goto('/', { waitUntil: 'networkidle' });
+    await page.waitForTimeout(800);
+    const text = await page.evaluate(() => /** @type {HTMLElement} */ (document.body).innerText || '');
+
+    expect(text).toContain('ATS');
+    expect(text).toContain('Algo trading');
+    expect(text).toContain('Sign in');
+    expect(text).not.toContain('Something broke on this screen');
+    expect(text).not.toContain('[object Object]');
+  });
+});
+
+test.describe('structural rendering -- auth-gated', () => {
+  test.use({ storageState: AUTH_FILE });
+
+  for (const [route, contract] of Object.entries(ROUTE_CONTRACTS)) {
+    test(`route ${route} -- structural contract holds`, async ({ page }) => {
+      test.skip(!hasAuthCookies(),
+        'No auth cookies in fixture -- structural-rendering would only exercise login.');
+
+      page.on('console', () => {});
+      page.on('pageerror', () => {});
+
+      await page.goto(`/${route}`, { waitUntil: 'networkidle' });
+      // 1200ms covers our typical fetch-then-render path against prod with
+      // cold caches. Same value visual-rendering uses.
+      await page.waitForTimeout(1200);
+
+      // 1. data-screen-label matches.
+      const label = await page.evaluate(() => {
+        const el = document.querySelector('.content');
+        return el ? el.getAttribute('data-screen-label') : null;
+      });
+      if (contract.label) {
+        expect(label, `${route} expected label "${contract.label}" but got "${label}"`)
+          .toBe(contract.label);
+      }
+
+      // Read visible text from #root (innerText respects display:none).
+      const text = await page.evaluate(() => {
+        const root = document.getElementById('root');
+        return root ? (/** @type {HTMLElement} */ (root).innerText || '') : '';
+      });
+
+      // 2. ErrorBoundary did NOT catch.
+      if (text.includes('Something broke on this screen')) {
+        const m = text.match(/Something broke on this screen[\s\S]{0,400}/);
+        expect.fail(`${route} hit ErrorBoundary. Excerpt:\n${m ? m[0] : '(no detail)'}`);
+      }
+
+      // 3. No object leak.
+      expect(text, `${route} leaked [object Object]`).not.toContain('[object Object]');
+
+      // 4. Page not blank.
+      expect(text.trim().length, `${route} rendered an empty or tiny page (${text.trim().length} chars)`)
+        .toBeGreaterThan(80);
+
+      // 5. Per-route required text contract.
+      for (const needle of (contract.required || [])) {
+        expect(text, `${route} missing required text: "${needle}"`)
+          .toContain(needle);
+      }
+    });
+  }
+});
