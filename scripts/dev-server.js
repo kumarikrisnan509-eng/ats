@@ -231,6 +231,47 @@ const server = http.createServer((req, res) => {
   res.end(`Not found: ${req.url}`);
 });
 
+// WebSocket upgrade forwarding. Phase A.2 fix: prior to this block the HTTP
+// proxy only handled regular req/res pairs, so the /ws upgrade handshake
+// from the browser hit our HTTP server and got 200 / never upgraded.
+// Forward the underlying TCP socket to the backend so the upgrade headers
+// (Sec-WebSocket-Key + 101 response) flow end-to-end.
+const net = require('net');
+server.on('upgrade', (req, clientSocket, head) => {
+  // Only forward /ws (and any future WS-using paths). Everything else gets
+  // closed immediately so e.g. a stray Connection: upgrade header on /api/*
+  // can't accidentally hijack the proxy.
+  if (!req.url.startsWith('/ws')) {
+    clientSocket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+    return;
+  }
+  const upstreamSocket = net.connect(
+    proxyUrl.port || (proxyIsHttps ? 443 : 80),
+    proxyUrl.hostname,
+    () => {
+      // Re-emit the original upgrade request to the backend.
+      const headers = [
+        `${req.method} ${req.url} HTTP/${req.httpVersion}`,
+        ...Object.entries(req.headers)
+          .filter(([k]) => k.toLowerCase() !== 'host')
+          .map(([k, v]) => `${k}: ${v}`),
+        `host: ${proxyUrl.host}`,
+        '',
+        '',
+      ].join('\r\n');
+      upstreamSocket.write(headers);
+      if (head && head.length) upstreamSocket.write(head);
+      upstreamSocket.pipe(clientSocket);
+      clientSocket.pipe(upstreamSocket);
+    }
+  );
+  upstreamSocket.on('error', (e) => {
+    try { clientSocket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n'); } catch {}
+    console.error('[dev-server] ws upstream error:', e.message);
+  });
+  clientSocket.on('error', () => { try { upstreamSocket.destroy(); } catch {} });
+});
+
 server.listen(PORT, () => {
   console.log('');
   console.log('=======================================================');

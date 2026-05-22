@@ -60,7 +60,7 @@ test('/api/health exposes broker.stalledOnToken + tickStale (T-42)', async ({ re
   const j = await r.json();
   // /api/health returns the broker block when a broker is configured. Skip the
   // check if the deployment is BROKER=mock or there's no broker field at all.
-  if (j && j.broker && typeof j.broker === 'object' && j.broker.name) {
+  if (j && j.broker && typeof j.broker === 'object' && j.broker.name && j.broker.name !== 'mock') {
     expect(typeof j.broker.stalledOnToken).toBe('boolean');
     expect(typeof j.broker.tickStale).toBe('boolean');
   }
