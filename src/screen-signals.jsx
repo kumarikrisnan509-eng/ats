@@ -513,27 +513,15 @@ const SignalsScreen = () => {
       {/* Sources & rules */}
       <div className="grid grid-2" style={{ marginBottom: 16 }}>
         <Card title="Signal sources" sub="AI models and indicator engines feeding the pipeline" flush>
-          <table className="table">
-            <thead><tr><th>Source</th><th>Kind</th><th className="num-l">Signals (24h)</th><th className="num-l">Accuracy</th><th>Status</th></tr></thead>
-            <tbody>
-              {[
-                { n: "Claude Haiku 4.5",    k: "LLM · intraday",    s: 14, a: 72, ok: true },
-                { n: "GPT-4o macro",        k: "LLM · news/macro",  s: 6,  a: 58, ok: true },
-                { n: "Ensemble v3",         k: "ML · XGBoost+LSTM", s: 18, a: 68, ok: true },
-                { n: "RSI + MACD composite",k: "Indicator",         s: 32, a: 54, ok: true },
-                { n: "Options IV scanner",  k: "Indicator",         s: 8,  a: 61, ok: true },
-                { n: "TradingView webhooks",k: "External",          s: 11, a: 49, ok: false },
-              ].map((r, i) => (
-                <tr key={i}>
-                  <td style={{ fontWeight: 500 }}>{r.n}</td>
-                  <td><span className="muted" style={{ fontSize: 12 }}>{r.k}</span></td>
-                  <td className="num">{r.s}</td>
-                  <td className="num">{r.a}%</td>
-                  <td>{r.ok ? <Pill kind="up" dot>online</Pill> : <Pill kind="warn" dot>degraded</Pill>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {/* T-361: this Signal-sources table was a second hardcoded fixture
+              that T-353c (which emptied the 5-stage cols array) missed.
+              T-349's prod-readiness spec flagged the fake AI source names leaking
+              into the live render. Until a backend endpoint exposes the real
+              AI/indicator engine catalog (none exists yet), show empty-state. */}
+          <div style={{ padding: 24, textAlign: "center", color: "var(--text-3)", fontSize: 13 }}>
+            Source registry will populate once /api/me/signal-sources ships.
+            Until then no AI / indicator metadata is reported here.
+          </div>
         </Card>
 
         <Card title="Promotion rules" sub="When a signal auto-advances to the next stage">
