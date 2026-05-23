@@ -1560,6 +1560,23 @@ app.use('/api', (req, res, next) => {
   // T-261: skip bearer check for public auth endpoints.
   if (PUBLIC_AUTH_PATHS.has(req.path)) return next();
   if (req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE' || req.method === 'PATCH') {
+    // T-362: cookie-authenticated browser users (req.user populated by
+    // optionalAuth at line 1313) MUST NOT be forced through the ops-bearer
+    // gate. Otherwise every legit browser POST to /api/me/* gets
+    // 401 missing_bearer the moment ATS_OPS_KEY is set in backend.env
+    // (which it is on prod). Same pattern T-322b/T-323 used for /api/audit
+    // below, generalized to all mutating cookie-auth paths.
+    //
+    // Defense-in-depth still holds for cookie-auth paths:
+    //   - Origin gate (line 1398) blocks cross-origin POSTs
+    //   - CSRF middleware (line 1469) HARD-FAILS 403 on missing X-CSRF-Token
+    //   - Per-handler withAuth() / `if (!req.user)` does role/auth gating
+    // Bearer callers (server-to-server ops scripts) still go through
+    // authMiddleware and need a valid ATS_OPS_KEY.
+    //
+    // Caught when T-349's prod-readiness spec failed on every commit since
+    // b19ec1f with "2 API failures on #riskcockpit -- 401 /api/me/portfolio/stress".
+    if (req.user && req.user.id) return next();
     return authMiddleware(req, res, next);
   }
   // T-322b/T-323: /api/audit can be read by either the ops bearer (CI / CLI
