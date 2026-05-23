@@ -19,6 +19,10 @@ function seriesRandom(seed, n, min = 0, max = 100, trend = 0) {
 
 /* ===== Sparkline (small) ===== */
 const Sparkline = ({ data, width = 120, height = 36, color, fill = true, strokeW = 1.5 }) => {
+  // T-345: same empty-data guard as AreaChart.
+  if (!Array.isArray(data) || data.length === 0) {
+    return <svg className="spark" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none"/>;
+  }
   const min = Math.min(...data), max = Math.max(...data);
   const rng = max - min || 1;
   const step = width / (data.length - 1);
@@ -56,6 +60,17 @@ const AreaChart = ({ data, height = 240, color = "var(--accent)", formatter = (v
     ro.observe(ref.current);
     return () => ro.disconnect();
   }, []);
+  // T-345: empty-data guard. Without it Math.min(...[])=Infinity,
+  // Math.max(...[])=-Infinity, rng=-Infinity, every tick computes as NaN
+  // and renders as "NaN" labels on the y-axis. Same class as the Candles
+  // T-326 fix. Show a friendly placeholder instead.
+  if (!Array.isArray(data) || data.length === 0) {
+    return (
+      <div ref={ref} style={{ width: '100%', height, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-3)', fontSize: 12 }}>
+        No chart data yet.
+      </div>
+    );
+  }
   const pad = { t: 12, r: 12, b: 22, l: 44 };
   const W = w, H = height;
   const min = Math.min(...data), max = Math.max(...data);
