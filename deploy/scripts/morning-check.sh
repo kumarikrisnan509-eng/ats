@@ -27,10 +27,19 @@ if [ -z "$HEALTH" ]; then
     exit 1
 fi
 
+# T-334: also probe /api/profile -- broker.connected reflects WEBSOCKET
+# state which Zerodha keeps alive even after they invalidate the daily HTTP
+# API token at ~06:00 IST. Without this check, the cron skipped auto-login
+# every morning because the WS was up, leaving the HTTP token broken until
+# manual operator reauth.
 CONNECTED=$(echo "$HEALTH" | python3 -c "import sys,json; print(json.load(sys.stdin)['broker']['connected'])" 2>/dev/null || echo "")
+PROFILE_OK=$(curl -sS --max-time 5 http://127.0.0.1:8080/api/profile 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('ok') is True)" 2>/dev/null || echo "False")
 if [ "$CONNECTED" = "True" ] || [ "$CONNECTED" = "true" ]; then
-    log "already connected — skipping auto-login"
-    exit 0
+    if [ "$PROFILE_OK" = "True" ]; then
+        log "already connected AND profile call works -- skipping auto-login"
+        exit 0
+    fi
+    log "WS connected but /api/profile fails -- token is stale, proceeding with auto-login"
 fi
 
 log "running auto-login-host.js"

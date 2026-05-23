@@ -37,7 +37,11 @@ cat > "$CRON_PATH" <<'CRONEOF'
 # regardless of weekend/holiday, so the auto-login needs to run every day.
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-20 3 * * * ubuntu /opt/ats/scripts/morning-check.sh >> /var/log/ats/morning-check.log 2>&1
+# T-334: 00:45 UTC = 06:15 IST. Zerodha invalidates the daily access_token at
+# ~06:00 IST -- running 15min AFTER ensures we refresh into a token that's
+# valid for the whole trading day. The previous 03:20 UTC (08:50 IST) value
+# was 2h 50m after expiry, leaving the morning window broken every day.
+45 0 * * * ubuntu /opt/ats/scripts/morning-check.sh >> /var/log/ats/morning-check.log 2>&1
 CRONEOF
 chmod 0644 "$CRON_PATH"
 # cron requires a trailing newline — re-emit just in case the heredoc strips it.
