@@ -221,19 +221,29 @@ function App() {
     recon:      <ReconScreen/>,
     attribution:<AttributionScreen/>,
     margin:     <MarginScreen/>,
-    money:      window.MoneyScreen ? <window.MoneyScreen/> : null,
-    'ai-keys':  window.AiKeysScreen ? <window.AiKeysScreen/> : null,
+    money:      <window.MoneyScreen/>,
+    'ai-keys':  <window.AiKeysScreen/>,
     // T-248: mf route retired; replaced by longterm ETF basket screen.
-    longterm:   window.LongTermScreen ? <window.LongTermScreen/> : null,
-    riskconfig: window.RiskConfigScreen ? <window.RiskConfigScreen/> : null,
-    riskcockpit: window.RiskCockpitScreen ? <window.RiskCockpitScreen/> : null,
-    'options-opps': window.OptionsOpportunitiesScreen ? <window.OptionsOpportunitiesScreen/> : null,
-    sip:        window.SipScreen ? <window.SipScreen/> : null,
-    'daily-attribution': <AttributionScreen/>,   // T-368: harmonize with line 222 (attribution) -- both render AttributionScreen unconditionally.
-    slippage:   window.SlippageScreen ? <window.SlippageScreen/> : null,
-    calibration: window.CalibrationScreen ? <window.CalibrationScreen/> : null,
-    'macro-signals': window.MacroSignalsScreen ? <window.MacroSignalsScreen/> : null,
-    'walk-forward': window.WalkForwardScreen ? <window.WalkForwardScreen/> : null,
+    longterm:   <window.LongTermScreen/>,
+    riskconfig: <window.RiskConfigScreen/>,
+    riskcockpit: <window.RiskCockpitScreen/>,
+    'options-opps': <window.OptionsOpportunitiesScreen/>,
+    sip:        <window.SipScreen/>,
+    // T-368: all the routes below used to have a `window.X ? <window.X/> : null`
+    // defensive guard. That guard introduced a script-load-order race: if
+    // app.jsx evaluated before the screen file finished setting window.X,
+    // the route would be permanently `null` for the page's lifetime --
+    // `screens[route] || screens.dashboard` would fall back to Dashboard,
+    // so the structural-rendering spec would see Dashboard content (not the
+    // requested screen) and fail. Dropped the guards. If window.X is
+    // legitimately undefined (screen script failed to load), React renders
+    // `<undefined/>` with a console warning instead of silently swapping
+    // for Dashboard -- much easier to debug.
+    'daily-attribution': <AttributionScreen/>,
+    slippage:   <window.SlippageScreen/>,
+    calibration: <window.CalibrationScreen/>,
+    'macro-signals': <window.MacroSignalsScreen/>,
+    'walk-forward': <window.WalkForwardScreen/>,
   };
 
   const [crumb, title] = TITLES[route] || TITLES.dashboard;
