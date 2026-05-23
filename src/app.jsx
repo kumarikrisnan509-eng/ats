@@ -229,7 +229,7 @@ function App() {
     riskcockpit: window.RiskCockpitScreen ? <window.RiskCockpitScreen/> : null,
     'options-opps': window.OptionsOpportunitiesScreen ? <window.OptionsOpportunitiesScreen/> : null,
     sip:        window.SipScreen ? <window.SipScreen/> : null,
-    'daily-attribution': window.AttributionScreen ? <window.AttributionScreen/> : null,
+    'daily-attribution': <AttributionScreen/>,   // T-368: harmonize with line 222 (attribution) -- both render AttributionScreen unconditionally.
     slippage:   window.SlippageScreen ? <window.SlippageScreen/> : null,
     calibration: window.CalibrationScreen ? <window.CalibrationScreen/> : null,
     'macro-signals': window.MacroSignalsScreen ? <window.MacroSignalsScreen/> : null,
