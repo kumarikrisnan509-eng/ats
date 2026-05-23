@@ -2973,7 +2973,12 @@ app.get('/api/orders', async (req, res) => {
     const rows = await r.broker.getOrders();
     res.json({ ok: true, brokerConnected: true, rows });
   } catch (e) {
-    res.status(500).json({ ok: false, reason: e.message });
+    // T-332: same broker-auth soft-fail as /api/profile.
+    const msg = String(e && e.message || '');
+    if (/Incorrect\s+`?api_key|access[\s_]?token|TokenException|invalid_token/i.test(msg)) {
+      return res.json({ ok: true, brokerConnected: false, reason: 'broker_auth_invalid', detail: msg, rows: [] });
+    }
+    res.status(500).json({ ok: false, reason: msg });
   }
 });
 
@@ -2996,7 +3001,15 @@ app.get('/api/profile', async (req, res) => {
     if (!p.broker) return res.status(503).json({ ok: false, reason: 'broker_unavailable' });
     res.json({ ok: true, profile: await p.broker.getProfile(), isUserOwn: p.isUserOwn });
   } catch (e) {
-    res.status(500).json({ ok: false, reason: e.message });
+    // T-332: detect broker-auth failures (operator-fixable via Brokers
+    // page re-auth) and soft-fail instead of dumping a raw 500 onto the
+    // dashboard. The frontend reads brokerConnected:false to show the
+    // Brokers banner; raw 500s were swallowed and the user got no signal.
+    const msg = String(e && e.message || '');
+    if (/Incorrect\s+`?api_key|access[\s_]?token|TokenException|invalid_token/i.test(msg)) {
+      return res.json({ ok: false, brokerConnected: false, reason: 'broker_auth_invalid', detail: msg });
+    }
+    res.status(500).json({ ok: false, reason: msg });
   }
 });
 
