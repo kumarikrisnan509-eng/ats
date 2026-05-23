@@ -783,15 +783,19 @@ const DashboardScreen = () => {
   React.useEffect(() => { try { localStorage.setItem("ats.dash.more", showMore ? "1" : "0"); } catch (e) { console.debug('[screen-dashboard] swallowed:', e && e.message); } }, [showMore]);
 
   // Live activity feed — synthetic events generated on ticks
-  const [activity, setActivity] = useState([
+  // T-343: previously seeded 6 fake events AND a tick-driven gen() loop
+  // pushed more fake events every ~4s with random strategy names. Both
+  // gated behind demo so live mode starts empty.
+  const [activity, setActivity] = useState(demo ? [
     { t: "09:42:11", m: "BUY",  sym: "INFY",      qty: 60,  px: 1843.00, strat: "Momentum AI",     ok: true },
     { t: "10:02:34", m: "AI",   sym: "NIFTY",     qty: null, px: null,   strat: "Signal · breakout 22540", ok: true, tag: "signal" },
     { t: "10:08:02", m: "BUY",  sym: "NIFTY CE",  qty: 150, px: 82.40,  strat: "Momentum AI",     ok: true },
     { t: "11:15:40", m: "SELL", sym: "TITAN",     qty: 30,  px: 3612.00, strat: "Mean Reversion",  ok: true },
     { t: "11:42:08", m: "RISK", sym: "—",         qty: null, px: null,   strat: "Max loss 30% of daily cap used", ok: false, tag: "risk" },
     { t: "12:18:55", m: "BUY",  sym: "RELIANCE",  qty: 40,  px: 2932.10, strat: "Mean Reversion",  ok: true },
-  ]);
+  ] : []);
   React.useEffect(() => {
+    if (!demo) return;  // T-343: no fake activity events in live mode
     const SYMS = ["RELIANCE", "INFY", "TCS", "HDFCBANK", "ICICIBANK", "SBIN", "ITC", "LT", "TITAN", "BAJFINANCE"];
     const STRATS = ["Momentum AI", "Mean Reversion v2", "Trend Follow", "Grid Trader", "Swing Bot"];
     const SIGNALS = ["breakout above VWAP", "RSI oversold bounce", "20-EMA crossover", "volume spike +180%", "support test held"];
@@ -822,7 +826,7 @@ const DashboardScreen = () => {
     };
     window.addEventListener("tick", onTick);
     return () => window.removeEventListener("tick", onTick);
-  }, []);
+  }, [demo]);
 
   return (
     <>
@@ -941,28 +945,37 @@ const DashboardScreen = () => {
 
         <Card title="Allocation" sub="Capital split across buckets">
           <div style={{ display: "flex", gap: 18, alignItems: "center" }}>
+            {/* T-343: previously hardcoded 38/24/18/12/8. Now demo-only;
+                live mode shows a neutral single-segment donut until
+                /api/me/allocation wires real bucket weights. */}
             <Donut
               size={160} thickness={18}
-              data={[
+              data={demo ? [
                 { value: 38, color: "var(--accent)" },
                 { value: 24, color: "var(--info)" },
                 { value: 18, color: "var(--violet)" },
                 { value: 12, color: "var(--warn)" },
                 { value: 8, color: "var(--border-strong)" },
-              ]}>
+              ] : [{ value: 1, color: "var(--bg-sunk)" }]}>
               <div>
                 <div className="muted" style={{ fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase" }}>Total</div>
                 <div style={{ fontFamily: "var(--mono)", fontSize: 18, fontWeight: 600 }}>{liveSummary && liveSummary.portfolioValue > 0 ? inrCompact(liveSummary.portfolioValue) : "--"}</div>
               </div>
             </Donut>
             <div style={{ flex: 1 }}>
-              {[
+              {(demo ? [
                 { k: "Intraday & F&O", v: "38%", c: "var(--accent)" },
                 { k: "Swing equity",   v: "24%", c: "var(--info)" },
                 { k: "Long-term",      v: "18%", c: "var(--violet)" },
                 { k: "Mutual funds",   v: "12%", c: "var(--warn)" },
                 { k: "Cash / Liquid",  v: "8%",  c: "var(--border-strong)" },
-              ].map((r, i) => (
+              ] : [
+                { k: "Intraday & F&O", v: "--", c: "var(--accent)" },
+                { k: "Swing equity",   v: "--", c: "var(--info)" },
+                { k: "Long-term",      v: "--", c: "var(--violet)" },
+                { k: "Mutual funds",   v: "--", c: "var(--warn)" },
+                { k: "Cash / Liquid",  v: "--", c: "var(--border-strong)" },
+              ]).map((r, i) => (
                 <div key={i} className="between" style={{ padding: "5px 0", fontSize: 12 }}>
                   <div className="row"><span style={{ width: 8, height: 8, borderRadius: 2, background: r.c }}/><span>{r.k}</span></div>
                   <span className="mono">{r.v}</span>
