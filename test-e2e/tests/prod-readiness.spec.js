@@ -84,6 +84,11 @@ test.describe('prod-readiness -- zero fake fixtures in live mode (T-349)', () =>
         if (!url.includes('/api/')) return;
         const status = resp.status();
         if (status < 400) return;
+        // 429: prod rate-limiter trips during CI's burst traffic. Same allowance
+        // the broader e2e suite makes (T-318 sweep added 429 tolerance to all
+        // toBe(401) assertions). Real per-route capacity is verified by the
+        // dedicated rate-limit spec, not here.
+        if (status === 429) return;
         const path = url.replace(/^https?:\/\/[^/]+/, '').split('?')[0];
         const isExpected4xx = status < 500 && EXPECTED_4XX_PATHS.some(p => path === p || path.startsWith(p + '/'));
         if (isExpected4xx) return;
