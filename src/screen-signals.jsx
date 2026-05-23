@@ -572,14 +572,15 @@ const SignalsScreen = () => {
           <table className="table">
             <thead><tr><th>Source</th><th>Kind</th><th className="num-l">Signals (24h)</th><th className="num-l">Accuracy</th><th>Status</th></tr></thead>
             <tbody>
-              {[
+              {/* T-346: gate the 6 hardcoded signal-source rows behind demo. */}
+              {(demo ? [
                 { n: "Claude Haiku 4.5",    k: "LLM · intraday",    s: 14, a: 72, ok: true },
                 { n: "GPT-4o macro",        k: "LLM · news/macro",  s: 6,  a: 58, ok: true },
                 { n: "Ensemble v3",         k: "ML · XGBoost+LSTM", s: 18, a: 68, ok: true },
                 { n: "RSI + MACD composite",k: "Indicator",         s: 32, a: 54, ok: true },
                 { n: "Options IV scanner",  k: "Indicator",         s: 8,  a: 61, ok: true },
                 { n: "TradingView webhooks",k: "External",          s: 11, a: 49, ok: false },
-              ].map((r, i) => (
+              ] : []).map((r, i) => (
                 <tr key={i}>
                   <td style={{ fontWeight: 500 }}>{r.n}</td>
                   <td><span className="muted" style={{ fontSize: 12 }}>{r.k}</span></td>

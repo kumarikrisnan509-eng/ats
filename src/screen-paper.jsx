@@ -536,6 +536,7 @@ const SpanMarginPanel = () => {
 };
 
 const PaperScreen = () => {
+  const [demo] = (window.useDemoMode ? window.useDemoMode() : [false]);
   const [account, setAccount] = useState("50L");
   const [, bump] = useState(0);
   React.useEffect(() => {
@@ -572,24 +573,29 @@ const PaperScreen = () => {
   ];
   const acc = accounts.find(a => a.id === account);
 
-  const paperOrders = [
+  // T-346: gate the 6 hardcoded paper-order fixtures behind demo so live
+  // mode shows no fake history. Real fills come from /api/paper/orders
+  // (already used elsewhere in this screen).
+  const paperOrders = demo ? [
     { t: "14:41:08", s: "RELIANCE",   side: "BUY",  qty: 80,  req: 2948.50, fill: 2948.85, slip: 0.35, strat: "Momentum AI",   st: "filled" },
     { t: "14:32:19", s: "HDFCBANK",   side: "BUY",  qty: 50,  req: 1582.00, fill: 1582.15, slip: 0.15, strat: "Mean Rev. v2",  st: "filled" },
     { t: "14:18:44", s: "NIFTY 22500 CE", side: "BUY",  qty: 75,  req: 142.20, fill: 143.05, slip: 0.85, strat: "Iron Condor",  st: "filled" },
     { t: "13:58:02", s: "TATASTEEL", side: "SELL", qty: 200, req: 148.40, fill: 148.28, slip: 0.12, strat: "Breakout",      st: "filled" },
     { t: "13:44:30", s: "INFY",      side: "BUY",  qty: 40,  req: 1472.00, fill: 1472.00, slip: 0.00, strat: "Momentum AI",   st: "pending" },
     { t: "13:22:15", s: "SBIN",      side: "SELL", qty: 150, req: 782.50,  fill: 782.32,  slip: 0.18, strat: "Grid Trader",   st: "filled" },
-  ];
+  ] : [];
 
-  const pnlSeries = seriesRandom(9, 40, -8000, 160000, 3500);
+  // T-346: synthetic PnL series only in demo mode.
+  const pnlSeries = demo ? seriesRandom(9, 40, -8000, 160000, 3500) : [];
 
   // Paper vs live calibration
-  const paperVsLive = [
+  // T-346: paper-vs-live calibration is fixture data; gate behind demo.
+  const paperVsLive = demo ? [
     { k: "Avg slippage",  paper: "0.08%", live: "0.14%", delta: "+0.06%", note: "Live has 1.75× more slippage" },
     { k: "Avg fill time", paper: "12ms",  live: "284ms", delta: "+272ms", note: "Broker RTT + exchange queue" },
     { k: "Rejection rate",paper: "0.2%",  live: "1.8%",  delta: "+1.6%",  note: "Margin / circuit / illiquid" },
     { k: "Partial fills",  paper: "0%",    live: "6.4%",  delta: "+6.4%",  note: "Modeled Q2 2026" },
-  ];
+  ] : [];
 
   const Wrap = window.PaperChrome || React.Fragment;
   return (
@@ -826,7 +832,9 @@ const PaperScreen = () => {
             </tr>
           </thead>
           <tbody>
-            {[
+            {/* T-346: 7 hardcoded fake strategies in the promotion-gates table.
+                Gated behind demo. */}
+            {(demo ? [
               { n: "Momentum AI",        d: 48, t: 142, w: 71, sh: 1.84, dd: "-3.2%" },
               { n: "Mean Reversion v2",  d: 42, t:  89, w: 66, sh: 1.42, dd: "-4.8%" },
               { n: "Iron Condor Weekly", d: 45, t:  34, w: 82, sh: 2.14, dd: "-1.8%" },
@@ -834,7 +842,7 @@ const PaperScreen = () => {
               { n: "Covered Call",       d: 28, t:  12, w: 66, sh: 1.40, dd: "-1.2%" },
               { n: "Grid Trader",        d: 80, t: 310, w: 52, sh: 0.72, dd: "-7.2%" },
               { n: "Stock Futures Momentum", d: 22, t: 6, w: 58, sh: 1.20, dd: "-2.4%" },
-            ].map((s, i) => {
+            ] : []).map((s, i) => {
               const stratMeta = window.getStrategy(s.n);
               const mode = stratMeta?.mode || "intraday";
               const modeMeta = window.MODE_META[mode];

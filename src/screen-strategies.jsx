@@ -176,6 +176,7 @@ const AutorunPanel = () => {
 };
 
 const StrategiesScreen = () => {
+  const [demo] = (window.useDemoMode ? window.useDemoMode() : [false]);
   // Real backend strategy registry + watchlist backtest trigger, exposed via window helpers.
   const [backendStrats, setBackendStrats] = React.useState([]);
   const [runStatus, setRunStatus]         = React.useState(null);
@@ -434,20 +435,29 @@ const StrategiesScreen = () => {
       )}
 
       <Card title="Strategy returns — monthly" sub="Heatmap of % returns per strategy / month" style={{ marginTop: 16 }}>
-        <Heatmap
-          rows={["Momentum AI", "Mean Rev. v2", "Grid Trader", "Trend Follow", "Iron Condor", "Short Straddle", "NIFTY Fut"]}
-          cols={["Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr"]}
-          values={[
-            [2.1, 3.4, -1.2, 4.8, 2.6, 3.1, 5.2, 4.1, 3.8],
-            [1.6, 2.8, 2.1, -0.8, 3.4, 2.2, 2.9, 3.6, 2.4],
-            [-0.4, 1.2, -2.1, 0.8, 1.4, -1.8, 0.6, -1.2, -0.8],
-            [1.2, 1.8, 0.9, 2.1, 2.6, 1.9, 2.4, 2.8, 2.2],
-            [null, null, 1.8, 2.4, 2.1, 1.9, 3.2, 2.8, 2.1],
-            [null, null, null, 1.4, 1.8, 2.1, 2.4, 1.9, 1.6],
-            [null, null, null, null, null, 0.8, 1.2, 0.9, 0.6],
-          ]}
-          min={-3} max={6}
-        />
+        {/* T-346: previously had 7 hardcoded fake strategies with 9 months
+            of fake returns. Until /api/me/pnl/by-strategy/monthly is wired,
+            show empty state in live; demo keeps the showcase heatmap. */}
+        {demo ? (
+          <Heatmap
+            rows={["Momentum AI", "Mean Rev. v2", "Grid Trader", "Trend Follow", "Iron Condor", "Short Straddle", "NIFTY Fut"]}
+            cols={["Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr"]}
+            values={[
+              [2.1, 3.4, -1.2, 4.8, 2.6, 3.1, 5.2, 4.1, 3.8],
+              [1.6, 2.8, 2.1, -0.8, 3.4, 2.2, 2.9, 3.6, 2.4],
+              [-0.4, 1.2, -2.1, 0.8, 1.4, -1.8, 0.6, -1.2, -0.8],
+              [1.2, 1.8, 0.9, 2.1, 2.6, 1.9, 2.4, 2.8, 2.2],
+              [null, null, 1.8, 2.4, 2.1, 1.9, 3.2, 2.8, 2.1],
+              [null, null, null, 1.4, 1.8, 2.1, 2.4, 1.9, 1.6],
+              [null, null, null, null, null, 0.8, 1.2, 0.9, 0.6],
+            ]}
+            min={-3} max={6}
+          />
+        ) : (
+          <div style={{ padding: '24px 8px', textAlign: 'center', color: 'var(--text-3)', fontSize: 12 }}>
+            No monthly return data yet. Populates once strategies accumulate per-month closed trades.
+          </div>
+        )}
       </Card>
     </>
   );
