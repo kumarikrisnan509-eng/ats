@@ -159,14 +159,22 @@ function mountOrdersRoutes(app, deps) {
     if (_pt && typeof _pt.check === 'function') {
       const verdict = _pt.check({ userId: req.user && req.user.id, payload: normalizedPayload });
       if (!verdict.ok) {
-        audit('order.blocked.preTrade', { ...normalizedPayload, reason: verdict.reason });
+        // T-358 (security): server-side audit gets the full detail, but the
+        // client response now ships only {ok, reason, clientOrderId}. Previous
+        // version leaked verdict.detail (pre-trade-check internals) and
+        // validatedPayload (echo of user's order params, useful for an attacker
+        // to confirm a probe). Reason code remains so the UI can show a
+        // meaningful message.
+        audit('order.blocked.preTrade', {
+          ...normalizedPayload,
+          reason: verdict.reason,
+          detail: verdict.detail,    // logged server-side for ops
+          message: verdict.message,
+        });
         return res.status(verdict.status || 503).json({
           ok: false,
           reason: verdict.reason,
-          message: verdict.message,
-          detail: verdict.detail,
           clientOrderId,
-          validatedPayload: normalizedPayload,
         });
       }
       // All gates passed -- skip the legacy inline checks below. They're

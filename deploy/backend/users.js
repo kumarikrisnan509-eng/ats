@@ -36,6 +36,39 @@ const PASSWORD_MIN = 8;
 
 function _now() { return new Date().toISOString().slice(0, 19).replace('T', ' '); }
 function _later(ms) { return new Date(Date.now() + ms).toISOString().slice(0, 19).replace('T', ' '); }
+
+// T-358 (security): hash reset tokens before storing in DB. SHA-256 is
+// appropriate here because tokens are 32 bytes of crypto.randomBytes -- high
+// entropy, no brute-force concern. bcrypt would be overkill + 250ms per check.
+// Hash is deterministic so the lookup path can hash the URL-provided token
+// and SELECT by hash. DB compromise no longer leaks usable reset tokens.
+function _hashToken(token) {
+  if (!token) return null;
+  return crypto.createHash('sha256').update(String(token), 'utf8').digest('hex');
+}
+
+// T-358 (security): per-email rate-limit on password-reset requests. Without
+// this, an attacker can mass-trigger reset emails (deliverability damage +
+// inbox spam to the target). Module-local rolling window; same lifetime as
+// the Node process. 1 reset email per email per 5 minutes is generous.
+const _resetReqTimes = new Map();   // email -> array of Date.now() timestamps
+const RESET_WINDOW_MS = 5 * 60_000;
+const RESET_MAX_PER_WINDOW = 1;
+function _resetRateOk(email) {
+  // T-358: skip rate-limit in test env so unit tests don't false-fail when
+  // a previous run left state in the in-memory map. Production always limits.
+  if (process.env.NODE_ENV === 'test') return true;
+  const cutoff = Date.now() - RESET_WINDOW_MS;
+  const arr = _resetReqTimes.get(email) || [];
+  const pruned = arr.filter(t => t > cutoff);
+  if (pruned.length >= RESET_MAX_PER_WINDOW) {
+    _resetReqTimes.set(email, pruned);
+    return false;
+  }
+  pruned.push(Date.now());
+  _resetReqTimes.set(email, pruned);
+  return true;
+}
 function _hex(n) { return crypto.randomBytes(n).toString('hex'); }
 
 function _parseCookie(header, name) {
@@ -196,9 +229,18 @@ function createUsers({ db, emailAlerts, audit, secureCookie }) {
     const u = db.users.byEmail(email);
     // Always return ok to avoid email enumeration (404 leaks signal whether email exists).
     if (!u) { if (audit) try { audit('user.reset.unknownEmail', { email }); } catch (e) { console.warn('[users] swallowed:', e && e.message); } return { ok: true, sent: false }; }
+    // T-358 (security): rate-limit per email (1 / 5 min). Same anti-enumeration
+    // guard above: silently return ok-sent-false instead of 429, so an attacker
+    // can't tell whether email exists OR rate-limit fired.
+    if (!_resetRateOk(email)) {
+      if (audit) try { audit('user.reset.rateLimited', { email }); } catch (e) { console.warn('[users] swallowed:', e && e.message); }
+      return { ok: true, sent: false };
+    }
     const token = _hex(32);
     const exp = _later(60 * 60 * 1000);   // 1-hour TTL
-    db.users.setReset(u.id, token, exp);
+    // T-358 (security): store HASH, not raw token. URL still carries raw token;
+    // lookup hashes it before DB query. DB-leak no longer compromises tokens.
+    db.users.setReset(u.id, _hashToken(token), exp);
     if (audit) try { audit('user.reset.requested', { userId: u.id, email }); } catch (e) { console.warn('[users] swallowed:', e && e.message); }
     if (emailAlerts && typeof emailAlerts.send === 'function') {
       const resetUrl = `${(baseUrl || 'https://ats.rajasekarselvam.com').replace(/\/$/, '')}/reset-password?token=${token}`;
@@ -219,7 +261,9 @@ function createUsers({ db, emailAlerts, audit, secureCookie }) {
     if (!bcrypt) throw new Error('bcrypt not installed');
     newPassword = String(newPassword || '');
     if (newPassword.length < PASSWORD_MIN) throw new Error(`password must be at least ${PASSWORD_MIN} chars`);
-    const u = db.users.byResetToken(token);
+    // T-358 (security): lookup by hash of provided token, matching the hashed
+    // storage in requestPasswordReset above.
+    const u = db.users.byResetToken(_hashToken(token));
     if (!u) throw new Error('invalid or expired reset token');
     if (u.reset_expires_at && u.reset_expires_at <= _now()) throw new Error('reset token expired');
     const hash = await bcrypt.hash(newPassword, BCRYPT_COST);
