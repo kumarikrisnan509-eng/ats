@@ -10,6 +10,14 @@
 */
 
 // Static mode definitions — would live in backend config in production
+// T-351: All numeric fields in MODE_META[*].strategies[*] are zeroed (cap,
+// alloc, pnl30, winR, trades, sharpe, paperDays) and st='draft'. The hardcoded
+// values that used to live here (Momentum AI ₹42,340 30d PnL, Mean Reversion ₹31,200,
+// etc.) showed on #modes as if they were real strategy performance. Per-strategy
+// performance must come from the backend (/api/me/strategy-attribution or similar).
+// The strategy NAMES, CATEGORIES (k), DESCRIPTIONS, and MARKET tags (mkt) remain --
+// they form a legitimate static "available-strategies" catalog. They are NOT real
+// allocations or P&L.
 const MODE_META = {
   intraday: {
     id: "intraday", label: "Intraday", shortLabel: "MIS",
@@ -24,12 +32,12 @@ const MODE_META = {
     riskProfile: "Aggressive",
     strategies: [
       // ---- Intraday (6) ----
-      { n: "Momentum AI",       k: "ML · intraday",      st: "live",   cap: 800000, alloc: 28, pnl30:  42340, winR: 68, trades: 142, sharpe: 1.9, mkt: "NSE · NFO", paperDays: 48, desc: "Claude-scored momentum breakouts on 5/15-min" },
-      { n: "Mean Reversion v2", k: "Indicator · MIS",    st: "live",   cap: 600000, alloc: 21, pnl30:  31200, winR: 61, trades:  84, sharpe: 1.5, mkt: "NSE",       paperDays: 62, desc: "RSI + Bollinger reversion on liquid large-caps" },
-      { n: "Grid Trader",       k: "Custom Python",     st: "live",   cap: 400000, alloc: 14, pnl30:  -4820, winR: 52, trades: 310, sharpe: 0.7, mkt: "NSE",       paperDays: 80, desc: "Range-bound grid with volatility brake" },
-      { n: "Breakout Scalper",  k: "Indicator · intraday",st: "paper",  cap: 250000, alloc:  9, pnl30:   2140, winR: 58, trades:  62, sharpe: 1.1, mkt: "NSE",       paperDays: 22, desc: "Opening-range breakout · first 30 minutes" },
-      { n: "VWAP Pullback",     k: "Indicator · MIS",    st: "paper",  cap: 200000, alloc:  7, pnl30:    820, winR: 55, trades:  48, sharpe: 1.0, mkt: "NSE",       paperDays: 18, desc: "Pullback to VWAP after strong trend bar" },
-      { n: "Opening Range",     k: "Indicator · MIS",    st: "draft",  cap: 150000, alloc:  5, pnl30:      0, winR:  0, trades:   0, sharpe: 0,   mkt: "NSE",       paperDays:  0, desc: "ORB on NIFTY · 9:15-9:45 range" },
+      { n: "Momentum AI",       k: "ML · intraday",      st: "draft",   cap: 0, alloc: 0, pnl30: 0, winR: 0, trades: 0, sharpe: 0, mkt: "NSE · NFO", paperDays: 0, desc: "Claude-scored momentum breakouts on 5/15-min" },
+      { n: "Mean Reversion v2", k: "Indicator · MIS",    st: "draft",   cap: 0, alloc: 0, pnl30: 0, winR: 0, trades: 0, sharpe: 0, mkt: "NSE",       paperDays: 0, desc: "RSI + Bollinger reversion on liquid large-caps" },
+      { n: "Grid Trader",       k: "Custom Python",     st: "draft",   cap: 0, alloc: 0, pnl30: 0, winR: 0, trades: 0, sharpe: 0, mkt: "NSE",       paperDays: 0, desc: "Range-bound grid with volatility brake" },
+      { n: "Breakout Scalper",  k: "Indicator · intraday",st: "draft",  cap: 0, alloc: 0, pnl30: 0, winR: 0, trades: 0, sharpe: 0, mkt: "NSE",       paperDays: 0, desc: "Opening-range breakout · first 30 minutes" },
+      { n: "VWAP Pullback",     k: "Indicator · MIS",    st: "draft",  cap: 0, alloc: 0, pnl30: 0, winR: 0, trades: 0, sharpe: 0, mkt: "NSE",       paperDays: 0, desc: "Pullback to VWAP after strong trend bar" },
+      { n: "Opening Range",     k: "Indicator · MIS",    st: "draft",  cap: 0, alloc: 0, pnl30: 0, winR: 0, trades: 0, sharpe: 0,   mkt: "NSE",       paperDays: 0, desc: "ORB on NIFTY · 9:15-9:45 range" },
     ],
     defaults: { enabled: true, capitalPct: 25, dailyLossCapPct: 2.0, maxPositions: 8, maxPerTradePct: 3 },
     warnings: (s) => {
@@ -59,10 +67,10 @@ const MODE_META = {
     riskProfile: "Moderate",
     strategies: [
       // ---- Swing (4) ----
-      { n: "Trend Follow",        k: "ML · multi-day",     st: "live",  cap: 500000, alloc: 18, pnl30: 18940, winR: 64, trades: 22, sharpe: 1.7, mkt: "NSE", paperDays: 55, desc: "Claude-scored 20-day EMA trend continuation" },
-      { n: "Sector Rotator",      k: "Quant · sector",     st: "paper", cap: 300000, alloc: 11, pnl30:  6210, winR: 59, trades: 14, sharpe: 1.3, mkt: "NSE", paperDays: 31, desc: "Rotate capital to top-N sector by 30d momentum" },
-      { n: "Breakout Swing",      k: "Indicator · CNC",    st: "paper", cap: 250000, alloc:  9, pnl30:  3420, winR: 56, trades: 11, sharpe: 1.1, mkt: "NSE", paperDays: 24, desc: "52-week high breakout with volume filter" },
-      { n: "Value Momentum",      k: "Fundamental + price",st: "draft", cap: 200000, alloc:  7, pnl30:     0, winR:  0, trades:  0, sharpe: 0,   mkt: "NSE", paperDays:  0, desc: "Low P/E + positive price momentum screen" },
+      { n: "Trend Follow",        k: "ML · multi-day",     st: "draft",  cap: 0, alloc: 0, pnl30: 0, winR: 0, trades: 0, sharpe: 0, mkt: "NSE", paperDays: 0, desc: "Claude-scored 20-day EMA trend continuation" },
+      { n: "Sector Rotator",      k: "Quant · sector",     st: "draft", cap: 0, alloc: 0, pnl30: 0, winR: 0, trades: 0, sharpe: 0, mkt: "NSE", paperDays: 0, desc: "Rotate capital to top-N sector by 30d momentum" },
+      { n: "Breakout Swing",      k: "Indicator · CNC",    st: "draft", cap: 0, alloc: 0, pnl30: 0, winR: 0, trades: 0, sharpe: 0, mkt: "NSE", paperDays: 0, desc: "52-week high breakout with volume filter" },
+      { n: "Value Momentum",      k: "Fundamental + price",st: "draft", cap: 0, alloc: 0, pnl30: 0, winR: 0, trades: 0, sharpe: 0,   mkt: "NSE", paperDays: 0, desc: "Low P/E + positive price momentum screen" },
     ],
     defaults: { enabled: true, capitalPct: 35, dailyLossCapPct: 1.5, maxPositions: 15, maxPerTradePct: 5 },
     warnings: () => [],
@@ -80,11 +88,11 @@ const MODE_META = {
     riskProfile: "Variable · strategy-specific",
     strategies: [
       // ---- Options (5) ----
-      { n: "Iron Condor Weekly",  k: "Defined-risk",       st: "paper",  cap: 300000, alloc: 10, pnl30: 8420,  winR: 72, trades: 18, sharpe: 1.8, mkt: "NFO", paperDays: 45, desc: "NIFTY weekly IC at 1SD wings · Thursday expiry" },
-      { n: "Short Straddle",      k: "IV-harvest",         st: "paused", cap: 200000, alloc:  7, pnl30:    0, winR:  0, trades:  0, sharpe: 0,   mkt: "NFO", paperDays: 30, desc: "ATM straddle · gamma hedge at 1.5x delta" },
-      { n: "PE Hedge",            k: "Tail-hedge",         st: "live",   cap: 100000, alloc:  4, pnl30: -1820, winR: 40, trades:  8, sharpe: 0.3, mkt: "NFO", paperDays: 40, desc: "OTM PE insurance for portfolio drawdown" },
-      { n: "Covered Call",        k: "Yield-enhance",      st: "paper",  cap: 180000, alloc:  6, pnl30:  2140, winR: 66, trades: 12, sharpe: 1.4, mkt: "NFO", paperDays: 28, desc: "Write OTM CE on CNC holdings · 5% OTM" },
-      { n: "Bull Call Spread",    k: "Directional · defined",st: "draft", cap: 120000, alloc:  4, pnl30:    0, winR:  0, trades:  0, sharpe: 0,   mkt: "NFO", paperDays:  0, desc: "Buy ATM + sell OTM on confirmed trend" },
+      { n: "Iron Condor Weekly",  k: "Defined-risk",       st: "draft",  cap: 0, alloc: 0, pnl30: 0,  winR: 0, trades: 0, sharpe: 0, mkt: "NFO", paperDays: 0, desc: "NIFTY weekly IC at 1SD wings · Thursday expiry" },
+      { n: "Short Straddle",      k: "IV-harvest",         st: "draft", cap: 0, alloc: 0, pnl30: 0, winR: 0, trades: 0, sharpe: 0,   mkt: "NFO", paperDays: 0, desc: "ATM straddle · gamma hedge at 1.5x delta" },
+      { n: "PE Hedge",            k: "Tail-hedge",         st: "draft",   cap: 0, alloc: 0, pnl30: 0, winR: 0, trades: 0, sharpe: 0, mkt: "NFO", paperDays: 0, desc: "OTM PE insurance for portfolio drawdown" },
+      { n: "Covered Call",        k: "Yield-enhance",      st: "draft",  cap: 0, alloc: 0, pnl30: 0, winR: 0, trades: 0, sharpe: 0, mkt: "NFO", paperDays: 0, desc: "Write OTM CE on CNC holdings · 5% OTM" },
+      { n: "Bull Call Spread",    k: "Directional · defined",st: "draft", cap: 0, alloc: 0, pnl30: 0, winR: 0, trades: 0, sharpe: 0,   mkt: "NFO", paperDays: 0, desc: "Buy ATM + sell OTM on confirmed trend" },
     ],
     defaults: { enabled: true, capitalPct: 25, dailyLossCapPct: 2.5, maxPositions: 6, maxPerTradePct: 8 },
     warnings: () => {
@@ -112,9 +120,9 @@ const MODE_META = {
     riskProfile: "Aggressive",
     strategies: [
       // ---- Futures (3) ----
-      { n: "NIFTY Futures Trend",   k: "Directional",     st: "draft",  cap: 250000, alloc: 9, pnl30:    0, winR:  0, trades:  0, sharpe: 0,   mkt: "NFO", paperDays:  0, desc: "NIFTY fut trend follow · daily close crossover" },
-      { n: "Stock Futures Momentum", k: "Directional",    st: "paper",  cap: 180000, alloc: 6, pnl30: 1840, winR: 58, trades:  6, sharpe: 1.2, mkt: "NFO", paperDays: 22, desc: "Liquid stock fut momentum · sector-neutral" },
-      { n: "Calendar Spread",        k: "Arb · defined",   st: "draft",  cap: 120000, alloc: 4, pnl30:    0, winR:  0, trades:  0, sharpe: 0,   mkt: "NFO", paperDays:  0, desc: "Near-month vs far-month spread on NIFTY" },
+      { n: "NIFTY Futures Trend",   k: "Directional",     st: "draft",  cap: 0, alloc: 0, pnl30: 0, winR: 0, trades: 0, sharpe: 0,   mkt: "NFO", paperDays: 0, desc: "NIFTY fut trend follow · daily close crossover" },
+      { n: "Stock Futures Momentum", k: "Directional",    st: "draft",  cap: 0, alloc: 0, pnl30: 0, winR: 0, trades: 0, sharpe: 0, mkt: "NFO", paperDays: 0, desc: "Liquid stock fut momentum · sector-neutral" },
+      { n: "Calendar Spread",        k: "Arb · defined",   st: "draft",  cap: 0, alloc: 0, pnl30: 0, winR: 0, trades: 0, sharpe: 0,   mkt: "NFO", paperDays: 0, desc: "Near-month vs far-month spread on NIFTY" },
     ],
     defaults: { enabled: false, capitalPct: 15, dailyLossCapPct: 2.0, maxPositions: 4, maxPerTradePct: 10 },
     warnings: () => {
