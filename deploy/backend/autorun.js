@@ -112,7 +112,17 @@ class AutoRunner {
         this._config       = raw.config || null;
         this._history      = Array.isArray(raw.history) ? raw.history.slice(-HISTORY_MAX) : [];
         this._lastFiredKey = raw.lastFiredKey || null;
-        console.log(`[autorun] loaded: enabled=${!!(this._config && this._config.enabled)}, history=${this._history.length}`);
+        // T-359: restore the daily trade counter, but rollover if the stored
+        // day != today (calendar-day boundary in IST).
+        const today = _todayIST();
+        if (raw.tradeCountDay && raw.tradeCountDay === today && Number.isFinite(raw.tradesToday)) {
+          this._tradesToday = raw.tradesToday;
+          this._tradeCountDay = raw.tradeCountDay;
+        } else {
+          this._tradesToday = 0;
+          this._tradeCountDay = today;
+        }
+        console.log(`[autorun] loaded: enabled=${!!(this._config && this._config.enabled)}, history=${this._history.length}, tradesToday=${this._tradesToday}`);
       }
     } catch (e) { console.warn('[autorun] load failed:', e.message); }
   }
@@ -124,6 +134,11 @@ class AutoRunner {
         config: this._config,
         history: this._history.slice(-HISTORY_MAX),
         lastFiredKey: this._lastFiredKey,
+        // T-359: persist the daily-trade counter so a mid-day process restart
+        // doesn't reset it to 0 (otherwise user could exceed maxDailyTrades by
+        // restarting the backend, intentionally or otherwise).
+        tradesToday: this._tradesToday,
+        tradeCountDay: this._tradeCountDay,
         updatedAt: new Date().toISOString(),
       }, null, 2));
     } catch (e) { console.error('[autorun] persist failed:', e.message); }

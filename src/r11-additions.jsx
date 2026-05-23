@@ -1,7 +1,6 @@
 /* eslint-disable */
 /* Round 11 — focused polish from the audit.
    - #7  formatINR — single number formatter, INR-aware (lakh/crore)
-   - #15 DemoBanner — sticky strip when demo mode is on
    - #16 PaperChrome — yellow accent + watermark for paper-trading isolation
    - #24 EmptyFilter — message when a filter produces zero rows
    - #20 visibility-aware tick loops (best-effort patch on top of LiveTicks)
@@ -52,16 +51,11 @@ const formatNumber = (value, opts = {}) => {
   });
 };
 
-// ============ #15 DemoBanner ============
-// Tier 59 rewrite: the banner now follows the auth + broker state machine.
-//   - Authenticated + broker connected + access_token valid -> hidden
-//   - Authenticated + no broker / token expired             -> hidden here
-//                                                              (BrokerNotConnectedBanner handles that case from Tier 58)
-//   - Unauthenticated browser                               -> shown (blue, "Sign in")
-//   - Authenticated + explicit demo toggle ON               -> shown (amber, "Exit demo")
-// T83: DemoBanner removed -- demo mode killed entirely. Component returns null to
-// remain backward-compatible with any callers still rendering it.
-const DemoBanner = () => null;
+// T-360: DemoBanner removed entirely. T83 killed demo mode in 2024 and
+// reduced this component to `() => null`. After two years of being a no-op
+// it's dead code; the only render site (app.jsx) was also a no-op due to
+// `window.DemoBanner && <window.DemoBanner/>`. Cleaned up here and at the
+// render site so future readers don't waste time understanding it.
 
 // ============ #16 PaperChrome ============
 // Visual isolation for paper-trading screens — yellow accent strip + watermark.
@@ -139,7 +133,7 @@ const EmptyFilter = ({ onClear, message = "No matches for your filters" }) => (
 
 Object.assign(window, {
   formatINR, formatPct, formatNumber,
-  DemoBanner, PaperChrome, EmptyFilter,
+  PaperChrome, EmptyFilter,
 });
 
 // ============ #5 useUrlState ============

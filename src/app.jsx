@@ -240,7 +240,6 @@ function App() {
 
   return (
     <div className="app">
-      {window.DemoBanner && <window.DemoBanner/>}
       <Sidebar route={route} setRoute={go}/>
       <div className="main">
         <TopBar title={title} crumb={crumb} theme={theme} setTheme={setTheme} setRoute={go}/>

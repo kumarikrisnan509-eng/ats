@@ -349,8 +349,16 @@ function mountOrdersRoutes(app, deps) {
         }
       } catch (_e) {
         // Instruments master miss is non-fatal -- fall through and let the
-        // broker's own validation catch it. (Logging the lookup miss to audit
-        // would be noisy; the broker.placeError on the next call is enough.)
+        // broker's own validation catch it. T-359: but DO emit an audit line
+        // so ops can spot a repeatedly-stale instruments table or a broker
+        // adapter that doesn't expose getInstrument(). Previously silent.
+        try {
+          audit('order.lotSizeCheck.skipped', {
+            symbol: normalizedPayload.symbol,
+            exchange: normalizedPayload.exchange,
+            error: _e && _e.message,
+          });
+        } catch (_audit) { /* never let audit kill the order path */ }
       }
     }
 
