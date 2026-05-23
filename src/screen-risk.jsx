@@ -253,48 +253,40 @@ const RiskScreen = () => {
 
       <div className="grid grid-2" style={{ marginBottom: 16 }}>
         <Card title="Global limits" sub="Portfolio-wide safety net">
-          <div className="col" style={{ gap: 14 }}>
-            {[
-              { label: "Daily loss limit", val: "₹15,000", prog: 32, kind: "warn", note: "On breach → kill switch auto-engages" },
-              { label: "Max position size", val: "₹3,00,000", prog: 0, kind: "up", note: "Per single instrument" },
-              { label: "Max leverage", val: "3.0x", prog: 42, kind: "info", note: "Across MIS + F&O combined" },
-              { label: "Max open positions", val: "15", prog: 33, kind: "up", note: "Includes F&O legs" },
-              { label: "Circuit-breaker cooldown", val: "15 min", prog: 0, kind: "up", note: "After 3 consecutive losses" },
-              { label: "Per-order max ₹", val: "₹1,00,000", prog: 0, kind: "up", note: "Rejects orders above threshold" },
-            ].map((r, i) => (
-              <div key={i}>
-                <div className="between" style={{ marginBottom: 4 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500 }}>{r.label}</div>
-                  <span className="mono" style={{ fontSize: 13 }}>{r.val}</span>
-                </div>
-                <div style={{ marginBottom: 4 }}><Progress value={r.prog} kind={r.kind}/></div>
-                <div className="muted" style={{ fontSize: 11 }}>{r.note}</div>
-              </div>
-            ))}
+          {/* T-342: previously rendered a hardcoded array of 6 fake limits
+              (Daily loss ₹15K, Max position ₹3L, etc.). Operator
+              could mistake these for real, in-effect limits. Until
+              /api/me/risk-config is wired here, show an empty state pointing
+              to the actual config page (#riskconfig). */}
+          <div style={{ padding: '24px 8px', textAlign: 'center' }}>
+            <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 12 }}>
+              No risk limits configured yet.
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 16, lineHeight: 1.5 }}>
+              Define daily-loss caps, position-size limits, leverage ceilings, and per-order maximums on the Risk management page.
+            </div>
+            <a href="#riskconfig" className="btn btn--sm">
+              Open Risk management →
+            </a>
           </div>
         </Card>
 
-        <Card title="Per-strategy caps" sub="Capital ceilings and loss cutoffs" flush>
-          <table className="table">
-            <thead><tr><th>Strategy</th><th className="num-l">Capital cap</th><th className="num-l">Loss cutoff</th><th>State</th></tr></thead>
-            <tbody>
-              {[
-                { n: "Momentum AI",      cap: 800000, sl: 8000,  ok: true },
-                { n: "Mean Reversion v2",cap: 600000, sl: 6000,  ok: true },
-                { n: "Grid Trader",      cap: 400000, sl: 4000,  ok: false },
-                { n: "Iron Condor Wkly", cap: 300000, sl: 5000,  ok: true },
-                { n: "Breakout Scanner", cap: 250000, sl: 3000,  ok: true },
-                { n: "MCX Arbitrage",    cap: 200000, sl: 2500,  ok: true },
-              ].map((s, i) => (
-                <tr key={i}>
-                  <td style={{ fontWeight: 500 }}>{s.n}</td>
-                  <td className="num">{inrCompact(s.cap)}</td>
-                  <td className="num">{inr(s.sl)}</td>
-                  <td>{s.ok ? <Pill kind="up" dot>ok</Pill> : <Pill kind="warn" dot>near cutoff</Pill>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <Card title="Per-strategy caps" sub="Capital ceilings and loss cutoffs">
+          {/* T-342: previously rendered 6 hardcoded fake strategies (Momentum
+              AI, Mean Reversion v2, Grid Trader, Iron Condor Wkly, Breakout
+              Scanner, MCX Arbitrage) -- none exist in /api/strategies. Show
+              empty state pointing to the real Strategies page. */}
+          <div style={{ padding: '24px 8px', textAlign: 'center' }}>
+            <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 12 }}>
+              No per-strategy caps configured yet.
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 16, lineHeight: 1.5 }}>
+              Per-strategy capital ceilings and loss cutoffs are managed alongside each strategy definition.
+            </div>
+            <a href="#strategies" className="btn btn--sm">
+              Open Strategies →
+            </a>
+          </div>
         </Card>
       </div>
 
