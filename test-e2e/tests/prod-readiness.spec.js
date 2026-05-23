@@ -68,13 +68,26 @@ test.describe('prod-readiness -- zero fake fixtures in live mode (T-349)', () =>
       test.skip(!hasAuthCookies(),
         'No auth cookies in fixture; prod-readiness audit needs login.');
 
-      // Capture every 4xx/5xx /api/* response during mount.
+      // Capture genuine API failures (5xx) and unexpected 4xx (excluding
+      // documented auth-flow paths). Some endpoints return 401 by design
+      // (e.g. /api/csrf-token issues the token AFTER the auth handshake;
+      // first call without bearer is a no-op 401). Don't flag those.
+      const EXPECTED_4XX_PATHS = [
+        '/api/csrf-token',     // auth-flow handshake
+        '/api/auth/me',        // returns 401 if cookie not yet attached
+        '/api/profile',        // 503/401 when broker token rejected -- T-332 soft-fail
+        '/api/orders',         // same -- T-332 soft-fail to brokerConnected:false
+      ];
       const apiFailures = [];
       page.on('response', resp => {
         const url = resp.url();
-        if (url.includes('/api/') && resp.status() >= 400) {
-          apiFailures.push(`${resp.status()} ${url.replace(/^https?:\/\/[^/]+/, '')}`);
-        }
+        if (!url.includes('/api/')) return;
+        const status = resp.status();
+        if (status < 400) return;
+        const path = url.replace(/^https?:\/\/[^/]+/, '').split('?')[0];
+        const isExpected4xx = status < 500 && EXPECTED_4XX_PATHS.some(p => path === p || path.startsWith(p + '/'));
+        if (isExpected4xx) return;
+        apiFailures.push(`${status} ${url.replace(/^https?:\/\/[^/]+/, '')}`);
       });
 
       // Silence noisy console hooks; smoke spec covers console errors.
