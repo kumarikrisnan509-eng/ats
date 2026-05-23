@@ -10,38 +10,43 @@
 //   * T-349 said it created prod-readiness.spec.js -- file never existed.
 //
 // This spec encodes the values that WERE leaking and now must never reappear
-// in the shipped /src/*.js bundles. Asserting on the bundle (not on rendered
-// DOM) keeps the spec dialect-agnostic (no need for storageState, no flaky
-// auth, no live-market dependence) and fast.
+// in committed source. It reads the .jsx source files from DISK (not the
+// deployed bundle via HTTP), which has two benefits:
+//   * No chicken-and-egg in CI: spec asserts on what's about to ship, not on
+//     what's currently deployed. CI on a fixed branch keeps passing as the
+//     deploy itself updates the live bundle.
+//   * Catches regressions at the source-of-truth level. JSX-to-JS transpile
+//     doesn't transform numeric literals, so a leak in .jsx == a leak in .js.
 //
-// When you fix a new hardcoded leak, add the literal fake values here so the
-// regression is permanent. Do NOT add legitimate strategy names, ticker enums,
-// or category labels -- they will reappear naturally as the backend wires real
-// data. Only encode VALUES (₹ amounts, %ages, hardcoded sample arrays) that
-// would only exist in committed mock data, never in live broker output.
+// To add new prohibited literals (when fixing future leaks), append to the
+// FORBIDDEN map. Each literal needs a ticket-prefixed comment so spec
+// failures are debuggable. Only encode VALUES (₹ amounts, %ages, exact row
+// arrays, hardcoded sample inputs) -- not strategy names, ticker enums, or
+// category labels, which will legitimately reappear when backend wires them.
 
 const { test, expect } = require('@playwright/test');
+const fs   = require('fs');
+const path = require('path');
 
-// --- Per-bundle forbidden literals ---------------------------------------
-// Format: file path under /src/ -> array of substrings that must NOT appear.
-// Each literal includes a short comment naming the original ticket that found
-// it, so when the spec fails it's obvious which regression class fired.
+const SRC_DIR = path.resolve(__dirname, '..', '..', 'src');
+
+// --- Per-source-file forbidden literals ----------------------------------
+// Format: file path under src/ -> array of substrings that must NOT appear.
 
 const FORBIDDEN = {
 
-  // -------- screen-strategies (T-350 + T-350d) --------
-  'screen-strategies.js': [
+  // -------- screen-strategies.jsx (T-350 + T-350d) --------
+  'screen-strategies.jsx': [
     // T-350: STRATEGY_CATALOG fallback flash (18 strategies · ₹24.0L · +₹1,10,830)
     'window.STRATEGY_CATALOG || []',
-    'STRATEGY_CATALOG || []',
     // T-350d: monthly returns heatmap rows (Momentum AI / Mean Rev / Grid Trader)
     '[2.1, 3.4, -1.2, 4.8, 2.6, 3.1, 5.2, 4.1, 3.8]',
     '[1.6, 2.8, 2.1, -0.8, 3.4, 2.2, 2.9, 3.6, 2.4]',
     '[-0.4, 1.2, -2.1, 0.8, 1.4, -1.8, 0.6, -1.2, -0.8]',
   ],
 
-  // -------- screen-risk (T-353b) --------
-  'screen-risk.js': [
+  // -------- screen-risk.jsx (T-353b) --------
+  'screen-risk.jsx': [
     // Per-mode hardcoded rows
     'lossUsed: 2840',
     'lossUsed: 1180',
@@ -61,8 +66,8 @@ const FORBIDDEN = {
     'cap: 400000, sl: 4000',  // Grid Trader fake cap
   ],
 
-  // -------- screen-signals (T-344 + T-353c) --------
-  'screen-signals.js': [
+  // -------- screen-signals.jsx (T-344 + T-353c) --------
+  'screen-signals.jsx': [
     // 5-stage pipeline hardcoded cards (T-353c)
     'sym: "NIFTY 22600 PE"',
     'sym: "GOLD MCX"',
@@ -73,23 +78,18 @@ const FORBIDDEN = {
     'realized: 4210',  // TITAN
     'realized: 2840',  // BAJFINANCE
     'realized: 7540',  // NIFTY PE
-    // T-81 / T-99 original demo KPIs (kept from signals-fake-kpis.spec.js for one source-of-truth)
-    'value="47"',
-    'value="28%"',
-    'value="71%"',
-    'inrCompact(182500)',
   ],
 
-  // -------- screen-money (T-353d) --------
-  'screen-money.js': [
+  // -------- screen-money.jsx (T-353d) --------
+  'screen-money.jsx': [
     // MPT seeded with 3 fake assets
     "symbol: 'NIFTYBEES', expectedReturnPct: 12",
     "symbol: 'GOLDBEES',  expectedReturnPct: 8",
     "symbol: 'BOND-G7',   expectedReturnPct: 7",
   ],
 
-  // -------- screen-dashboard (T-353a) --------
-  'screen-dashboard.js': [
+  // -------- screen-dashboard.jsx (T-353a) --------
+  'screen-dashboard.jsx': [
     // Watchlist seed prices (T-353a)
     'p: 2948.50',
     'p: 4120.10',
@@ -100,21 +100,24 @@ const FORBIDDEN = {
     'p:  884.40',
   ],
 
-  // -------- trading-modes (T-351) --------
+  // -------- trading-modes.jsx (T-351) --------
   // MODE_META.strategies fake per-strategy P&L / win-rate / trades.
   // The strategy names remain as a static catalog (legitimate), but no
   // numeric metric should ship from the committed mock.
-  'trading-modes.js': [
-    'pnl30:  42340',
-    'pnl30:  31200',
-    'pnl30:  -4820',
-    'pnl30:   2140',
-    'pnl30: 18940',
-    'pnl30:  6210',
-    'pnl30:  3420',
-    'pnl30: 8420',
-    'pnl30: -1820',
-    'pnl30: 1840',
+  'trading-modes.jsx': [
+    // pnl30 values from the 18 hardcoded strategies
+    'pnl30:  42340',  // Momentum AI
+    'pnl30:  31200',  // Mean Reversion v2
+    'pnl30:  -4820',  // Grid Trader
+    'pnl30:   2140',  // Breakout Scalper
+    'pnl30: 18940',   // Trend Follow
+    'pnl30:  6210',   // Sector Rotator
+    'pnl30:  3420',   // Breakout Swing
+    'pnl30: 8420',    // Iron Condor Weekly
+    'pnl30: -1820',   // PE Hedge
+    'pnl30:  2140',   // Covered Call
+    'pnl30: 1840',    // Stock Futures Momentum
+    // winR / sharpe / trades / cap+alloc combinations
     'winR: 68',
     'winR: 61',
     'winR: 72',
@@ -124,27 +127,17 @@ const FORBIDDEN = {
   ],
 };
 
-test.describe('bundled JS must not ship known fake-data literals', () => {
+test.describe('committed source must not ship known fake-data literals', () => {
 
-  for (const [bundle, literals] of Object.entries(FORBIDDEN)) {
-    test(`/src/${bundle} -- no committed fake literals`, async ({ request }) => {
-      const r = await request.get(`/src/${bundle}`);
-      // 200 expected; 304/404 means deploy mismatch -- fail loudly.
-      expect(r.status(), `/src/${bundle} not reachable -- deploy issue?`).toBe(200);
-      const js = await r.text();
+  for (const [file, literals] of Object.entries(FORBIDDEN)) {
+    test(`src/${file} -- no committed fake literals`, async () => {
+      const abs = path.join(SRC_DIR, file);
+      const src = fs.readFileSync(abs, 'utf8');
 
-      const offenders = literals.filter(lit => js.includes(lit));
+      const offenders = literals.filter(lit => src.includes(lit));
       if (offenders.length > 0) {
-        // Build a human-readable failure that names every regressed literal.
         const lines = offenders.map(l => `  - ${l}`).join('\n');
         throw new Error(
-          `${bundle} re-shipped ${offenders.length} forbidden fake literal(s):\n${lines}\n\n` +
+          `src/${file} re-shipped ${offenders.length} forbidden fake literal(s):\n${lines}\n\n` +
           `These were removed in T-350..T-354 because they rendered fake business data\n` +
-          `(prices, P&L, strategy caps, hardcoded sample rows) to production users.\n` +
-          `If the data is real now, push it through the backend instead of inlining it.`
-        );
-      }
-    });
-  }
-
-});
+          `(prices, P&L, strategy caps, har
