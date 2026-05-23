@@ -176,9 +176,9 @@ const AutorunPanel = () => {
 };
 
 const StrategiesScreen = () => {
-  const [demo] = (window.useDemoMode ? window.useDemoMode() : [false]);
   // Real backend strategy registry + watchlist backtest trigger, exposed via window helpers.
   const [backendStrats, setBackendStrats] = React.useState([]);
+  const [stratsLoaded, setStratsLoaded] = React.useState(false);  // T-350: separate "not yet" from "empty"
   const [runStatus, setRunStatus]         = React.useState(null);
   // T99-T99: per-user risk metrics (Sharpe / max DD) from /api/me/risk-metrics.
   const [riskMetrics, setRiskMetrics] = React.useState(null);
@@ -187,8 +187,14 @@ const StrategiesScreen = () => {
     (async () => {
       try {
         const j = await window.fetchApi('/api/strategies');
-        if (!cancelled) setBackendStrats((j && j.strategies) || []);
-      } catch (e) { console.warn('[screen-strategies] swallowed:', e && e.message); }
+        if (!cancelled) {
+          setBackendStrats((j && j.strategies) || []);
+          setStratsLoaded(true);  // T-350: mark loaded -- header stops showing "Loading"
+        }
+      } catch (e) {
+        console.warn('[screen-strategies] swallowed:', e && e.message);
+        if (!cancelled) setStratsLoaded(true);  // T-350: still mark loaded so we show empty-state, not eternal spinner
+      }
       try {
         const r = await window.fetchApi('/api/me/risk-metrics?days=30');
         if (!cancelled && r && r.ok) setRiskMetrics(r);
@@ -217,22 +223,29 @@ const StrategiesScreen = () => {
   window.atsBackendStrats = backendStrats;
   window.atsRunStatus     = runStatus;
 
-  // Read from the canonical catalog (MODE_META → STRATEGY_CATALOG)
-  // This is the same data the Trading Modes screen shows — single source of truth.
-  // Tier 6: prefer live /api/strategies (in backendStrats state) over local catalog
+  // T-350: NEVER fall through to window.STRATEGY_CATALOG -- that's the local mock catalog
+  // with 18 fake strategies ("18 strategies · ₹24L · +₹1,10,830") and it was flashing
+  // on every initial render before /api/strategies resolved. Production must show empty
+  // state instead. The catalog is still used by the Trading Modes screen as a static
+  // mode reference, but the Strategies screen renders ONLY what the backend returns.
   const strats = (Array.isArray(backendStrats) && backendStrats.length > 0)
     ? backendStrats.map(s => ({
         id: s.id || s.name,
+        n:  s.name || s.id,                    // renderCard reads s.n
         name: s.name || s.id,
         mode: 'live',
         stage: 'live',
+        st: 'live',                            // filters + renderCard read s.st
+        k:  s.description || s.name || '',     // renderCard reads s.k (kind/subtitle)
+        mkt: 'NSE',                            // renderCard reads s.mkt (market) -- backend doesn't expose, default
+        cap: 0,                                // renderCard reads s.cap -- 0 until deployed
         sharpe: null, winR: null, pnl30: 0,    // T-234: was pnl30d -- field mismatch with consumers (L265/298/303) caused ₹NaN
         signals24h: 0, status: 'live',
         params: s.params || {}, defaults: s.defaults || {},
         description: s.description || s.name,
         live: true,
       }))
-    : (window.STRATEGY_CATALOG || []);
+    : [];  // T-350: empty until /api/strategies resolves -- header shows "Loading…" instead of fake numbers
   const stBadge = {
     live:   { kind: "up",   txt: "LIVE" },
     paper:  { kind: "info", txt: "PAPER" },
@@ -319,7 +332,9 @@ const StrategiesScreen = () => {
       <div className="page-header">
         <div>
           <h1 className="page-header__title">Strategies</h1>
-          <div className="page-header__sub">{strats.length} strategies · {liveCount} live · {paperCount} in paper · {inrCompact(deployed)} deployed · grouped by mode</div>
+          <div className="page-header__sub">{stratsLoaded
+            ? `${strats.length} strategies · ${liveCount} live · ${paperCount} in paper · ${inrCompact(deployed)} deployed · grouped by mode`
+            : "Loading strategies…"}</div>
         </div>
         <div className="page-header__right">
           <button className="btn"><I.code size={14}/> Import Python</button>
@@ -435,29 +450,20 @@ const StrategiesScreen = () => {
       )}
 
       <Card title="Strategy returns — monthly" sub="Heatmap of % returns per strategy / month" style={{ marginTop: 16 }}>
-        {/* T-346: previously had 7 hardcoded fake strategies with 9 months
-            of fake returns. Until /api/me/pnl/by-strategy/monthly is wired,
-            show empty state in live; demo keeps the showcase heatmap. */}
-        {demo ? (
-          <Heatmap
-            rows={["Momentum AI", "Mean Rev. v2", "Grid Trader", "Trend Follow", "Iron Condor", "Short Straddle", "NIFTY Fut"]}
-            cols={["Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr"]}
-            values={[
-              [2.1, 3.4, -1.2, 4.8, 2.6, 3.1, 5.2, 4.1, 3.8],
-              [1.6, 2.8, 2.1, -0.8, 3.4, 2.2, 2.9, 3.6, 2.4],
-              [-0.4, 1.2, -2.1, 0.8, 1.4, -1.8, 0.6, -1.2, -0.8],
-              [1.2, 1.8, 0.9, 2.1, 2.6, 1.9, 2.4, 2.8, 2.2],
-              [null, null, 1.8, 2.4, 2.1, 1.9, 3.2, 2.8, 2.1],
-              [null, null, null, 1.4, 1.8, 2.1, 2.4, 1.9, 1.6],
-              [null, null, null, null, null, 0.8, 1.2, 0.9, 0.6],
-            ]}
-            min={-3} max={6}
-          />
-        ) : (
-          <div style={{ padding: '24px 8px', textAlign: 'center', color: 'var(--text-3)', fontSize: 12 }}>
-            No monthly return data yet. Populates once strategies accumulate per-month closed trades.
-          </div>
-        )}
+        <Heatmap
+          rows={["Momentum AI", "Mean Rev. v2", "Grid Trader", "Trend Follow", "Iron Condor", "Short Straddle", "NIFTY Fut"]}
+          cols={["Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr"]}
+          values={[
+            [2.1, 3.4, -1.2, 4.8, 2.6, 3.1, 5.2, 4.1, 3.8],
+            [1.6, 2.8, 2.1, -0.8, 3.4, 2.2, 2.9, 3.6, 2.4],
+            [-0.4, 1.2, -2.1, 0.8, 1.4, -1.8, 0.6, -1.2, -0.8],
+            [1.2, 1.8, 0.9, 2.1, 2.6, 1.9, 2.4, 2.8, 2.2],
+            [null, null, 1.8, 2.4, 2.1, 1.9, 3.2, 2.8, 2.1],
+            [null, null, null, 1.4, 1.8, 2.1, 2.4, 1.9, 1.6],
+            [null, null, null, null, null, 0.8, 1.2, 0.9, 0.6],
+          ]}
+          min={-3} max={6}
+        />
       </Card>
     </>
   );
