@@ -1571,12 +1571,18 @@ app.use('/api', (req, res, next) => {
 
   const isMutating = req.method === 'POST' || req.method === 'PUT' ||
                      req.method === 'DELETE' || req.method === 'PATCH';
-  const isMePath   = req.path.startsWith('/me/') || req.path === '/me';
+
+  // T-333: Auto-reauth on Brokers page hits POST /api/v1/me/brokers/:id/
+  // actions/reauth -- the path here (after /api strip) is /v1/me/...,
+  // which my T-331 startsWith('/me/') check missed -> missing_bearer 401.
+  // Generalise to accept any /<version>/me/* or bare /me/* path.
+  const isMePath = req.path === '/me' || req.path.startsWith('/me/')
+                 || /^\/v\d+\/me(?:\/|$)/.test(req.path);
 
   if (isMutating) {
-    // Mutations on /me/* are the user's own state -- session is the right
-    // credential. Outside /me/* the ops bearer is still required (admin /
-    // internal calls).
+    // Mutations on /me/* (or /v*/me/*) are the user's own state -- session
+    // is the right credential. Outside /me/* the ops bearer is still
+    // required (admin / internal calls).
     if (isMePath && req.user && req.user.id) return next();
     return authMiddleware(req, res, next);
   }
