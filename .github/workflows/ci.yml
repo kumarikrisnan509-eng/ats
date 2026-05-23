@@ -1,10 +1,29 @@
-# PR + push validation. Cheap. Runs on every push and every pull request.
+# T-364: PR + post-deploy validation.
+#
+# Trigger model (after T-364):
+#   - pull_request -> runs immediately (validates the PR's code; Playwright
+#                     hits the live URL, which is still the pre-merge bundle).
+#   - workflow_run -> runs AFTER the deploy workflow completes on main.
+#                     This sequences CI after deploy so the prod-readiness
+#                     spec sees the JUST-DEPLOYED bundle, not the OLD one.
+#                     Before T-364, ci.yml and deploy.yml both triggered on
+#                     `push: branches: [main]` and raced -- CI tested the
+#                     pre-deploy bundle ~80% of the time, false-failing on
+#                     every fix that touched a hardcoded fixture string (the
+#                     Claude Haiku saga in T-358..T-361 was entirely this).
+#   - workflow_call -> internal reuse from other workflows.
+#
+# Skip-condition on workflow_run: if deploy failed, don't bother running CI
+# (deploy is gated by its own validate-step Playwright so a failed deploy
+# means the bundle didn't even rsync -- testing it is meaningless).
 name: ci
 
 on:
   pull_request:
     branches: [main]
-  push:
+  workflow_run:
+    workflows: [deploy]
+    types: [completed]
     branches: [main]
   workflow_call: {}
 
@@ -16,6 +35,9 @@ jobs:
     name: validate (lint + syntax)
     runs-on: ubuntu-latest
     timeout-minutes: 8
+    # T-364: when triggered by workflow_run, only proceed if the upstream
+    # deploy succeeded. (pull_request + workflow_call always run.)
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
 
     steps:
       - name: Checkout
