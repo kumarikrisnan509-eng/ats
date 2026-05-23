@@ -211,6 +211,14 @@ const ModeGateBanner = () => {
 };
 
 const SignalsScreen = () => {
+  // T-344: gate the hardcoded `cols` fixture (15+ fake signal cards across
+  // 5 columns including fake AI names like "Claude Haiku 4.5" and fake
+  // strategies that don't exist in /api/strategies). The real-signals
+  // pipeline already streams from /api/scanner/history -- that table sits
+  // ABOVE this fixture and IS live. The 5-stage pipeline below was just
+  // an illustrative demo; in live mode it renders as collapsed columns
+  // with "No signals yet" empty states.
+  const [demo] = (window.useDemoMode ? window.useDemoMode() : [false]);
   // Re-render when mode gates flip
   const [, bump] = React.useReducer(x => x + 1, 0);
   const [explainSig, setExplainSig] = React.useState(null);
@@ -290,7 +298,7 @@ const SignalsScreen = () => {
   window.atsTriggerScan = triggerScan;
   window.atsScannerStats = scannerStats;
   window.atsRealSignals = realSignals;
-  const cols = [
+  const cols = demo ? [
     {
       title: "1 · Signal",
       meta: "Emitted by strategies",
@@ -342,6 +350,12 @@ const SignalsScreen = () => {
         { sym: "GOLDBEES",           strategy: "— sweep rule",  src: "20% auto",   amount: 3000, when: "Mon 10:00" },
       ],
     },
+  ] : [
+    { title: "1 · Signal",   meta: "Emitted by strategies",     accent: "info", cards: [] },
+    { title: "2 · Paper",    meta: "Simulated fills · promotion gated", accent: "acc", cards: [] },
+    { title: "3 · Live",     meta: "Real capital deployed",     accent: "vio", cards: [] },
+    { title: "4 · Profit",   meta: "Realized · awaiting sweep", accent: "up",  cards: [] },
+    { title: "5 · Long-term",meta: "Auto-invested via SIP / lump", accent: "warn", cards: [] },
   ];
 
   return (
