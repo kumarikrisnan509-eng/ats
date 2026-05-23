@@ -211,14 +211,6 @@ const ModeGateBanner = () => {
 };
 
 const SignalsScreen = () => {
-  // T-344: gate the hardcoded `cols` fixture (15+ fake signal cards across
-  // 5 columns including fake AI names like "Claude Haiku 4.5" and fake
-  // strategies that don't exist in /api/strategies). The real-signals
-  // pipeline already streams from /api/scanner/history -- that table sits
-  // ABOVE this fixture and IS live. The 5-stage pipeline below was just
-  // an illustrative demo; in live mode it renders as collapsed columns
-  // with "No signals yet" empty states.
-  const [demo] = (window.useDemoMode ? window.useDemoMode() : [false]);
   // Re-render when mode gates flip
   const [, bump] = React.useReducer(x => x + 1, 0);
   const [explainSig, setExplainSig] = React.useState(null);
@@ -298,64 +290,16 @@ const SignalsScreen = () => {
   window.atsTriggerScan = triggerScan;
   window.atsScannerStats = scannerStats;
   window.atsRealSignals = realSignals;
-  const cols = demo ? [
-    {
-      title: "1 · Signal",
-      meta: "Emitted by strategies",
-      accent: "info",
-      cards: [
-        { sym: "HDFCBANK",       act: "BUY",  strategy: "Momentum AI",        src: "Claude Haiku 4.5",  conf: 82, tgt: "1745", sl: "1698", age: "2m",  senti: -0.54, sentiNote: "RBI flag on unsecured loans" },
-        { sym: "NIFTY 22600 PE", act: "BUY",  strategy: "Iron Condor Weekly", src: "Ensemble v3",       conf: 74, tgt: "112",  sl: "68",   age: "8m" },
-        { sym: "GOLD MCX",       act: "SELL", strategy: "Mean Reversion v2",  src: "GPT-4o macro",      conf: 61, tgt: "73980",sl: "74820",age: "14m", senti: -0.32, sentiNote: "Fed cut bets fade" },
-        { sym: "USDINR FUT",     act: "BUY",  strategy: "NIFTY Futures Trend",src: "RSI + MACD",        conf: 58, tgt: "83.42",sl: "83.18",age: "22m" },
-      ],
-    },
-    {
-      title: "2 · Paper",
-      meta: "Simulated fills · promotion gated",
-      accent: "acc",
-      cards: [
-        { sym: "TCS",           act: "SELL", strategy: "Mean Reversion v2",  src: "Ensemble v3",      conf: 79, tgt: "4080", sl: "4160", age: "1h", pnl: "+₹1,240", bars: 7 },
-        { sym: "BANKNIFTY FUT", act: "BUY",  strategy: "Stock Futures Momentum", src: "Claude Haiku", conf: 76, tgt: "48,450", sl: "48,040", age: "3h", pnl: "+₹3,860", bars: 12 },
-        { sym: "SBIN",          act: "BUY",  strategy: "Grid Trader",        src: "Indicator",        conf: 66, tgt: "898",  sl: "876",  age: "4h", pnl: "-₹420",  bars: 5 },
-      ],
-    },
-    {
-      title: "3 · Live",
-      meta: "Real capital deployed",
-      accent: "vio",
-      cards: [
-        { sym: "INFY",            act: "BUY", strategy: "Momentum AI",       src: "Claude Haiku 4.5", conf: 88, tgt: "1910", sl: "1830", age: "2h", pnl: "+₹1,995", live: true, senti: 0.78, sentiNote: "FY27 guide raised on AI deals" },
-        { sym: "RELIANCE",        act: "BUY", strategy: "Mean Reversion v2", src: "Ensemble v3",      conf: 81, tgt: "2995", sl: "2910", age: "3h", pnl: "+₹656",   live: true, senti: 0.62, sentiNote: "Jio crosses 500M subs" },
-        { sym: "NIFTY 22550 CE",  act: "BUY", strategy: "Iron Condor Weekly",src: "Claude Haiku 4.5", conf: 85, tgt: "120",  sl: "70",   age: "5h", pnl: "+₹2,227", live: true },
-      ],
-    },
-    {
-      title: "4 · Profit",
-      meta: "Realized · awaiting sweep",
-      accent: "up",
-      cards: [
-        { sym: "TITAN",      strategy: "Trend Follow",        src: "ML · multi-day",  realized: 4210, closed: "Yesterday" },
-        { sym: "BAJFINANCE", strategy: "Mean Reversion v2",   src: "Ensemble v3",     realized: 2840, closed: "2d ago" },
-        { sym: "NIFTY PE",   strategy: "Momentum AI",         src: "Claude Haiku 4.5",realized: 7540, closed: "3d ago" },
-      ],
-    },
-    {
-      title: "5 · Long-term",
-      meta: "Auto-invested via SIP / lump",
-      accent: "warn",
-      cards: [
-        { sym: "NIFTYBEES ETF",      strategy: "— sweep rule",  src: "40% auto",   amount: 6000, when: "Mon 10:00" },
-        { sym: "Parag Parikh Flexi", strategy: "— SIP booster", src: "Monthly",    amount: 4000, when: "1st of month" },
-        { sym: "GOLDBEES",           strategy: "— sweep rule",  src: "20% auto",   amount: 3000, when: "Mon 10:00" },
-      ],
-    },
-  ] : [
-    { title: "1 · Signal",   meta: "Emitted by strategies",     accent: "info", cards: [] },
-    { title: "2 · Paper",    meta: "Simulated fills · promotion gated", accent: "acc", cards: [] },
-    { title: "3 · Live",     meta: "Real capital deployed",     accent: "vio", cards: [] },
-    { title: "4 · Profit",   meta: "Realized · awaiting sweep", accent: "up",  cards: [] },
-    { title: "5 · Long-term",meta: "Auto-invested via SIP / lump", accent: "warn", cards: [] },
+  // T-353c: Was 5-stage pipeline with 15 hardcoded cards (HDFCBANK conf 82% tgt 1745,
+  // TCS pnl -₹340, INFY pnl +₹1,995, NIFTYBEES ₹6,000/Mon, etc.). T-344 claimed to
+  // gate this but never did. Production pipeline must populate from realSignals fetch
+  // (window.atsRealSignals). Until that wiring ships, render empty stages.
+  const cols = [
+    { title: "1 · Signal",    meta: "Emitted by strategies",       accent: "info", cards: [] },
+    { title: "2 · Paper",     meta: "Simulated fills · gated",     accent: "acc",  cards: [] },
+    { title: "3 · Live",      meta: "Real capital deployed",       accent: "vio",  cards: [] },
+    { title: "4 · Profit",    meta: "Realized · awaiting sweep",   accent: "up",   cards: [] },
+    { title: "5 · Long-term", meta: "Auto-invested via SIP / lump",accent: "warn", cards: [] },
   ];
 
   return (
@@ -572,15 +516,14 @@ const SignalsScreen = () => {
           <table className="table">
             <thead><tr><th>Source</th><th>Kind</th><th className="num-l">Signals (24h)</th><th className="num-l">Accuracy</th><th>Status</th></tr></thead>
             <tbody>
-              {/* T-346: gate the 6 hardcoded signal-source rows behind demo. */}
-              {(demo ? [
+              {[
                 { n: "Claude Haiku 4.5",    k: "LLM · intraday",    s: 14, a: 72, ok: true },
                 { n: "GPT-4o macro",        k: "LLM · news/macro",  s: 6,  a: 58, ok: true },
                 { n: "Ensemble v3",         k: "ML · XGBoost+LSTM", s: 18, a: 68, ok: true },
                 { n: "RSI + MACD composite",k: "Indicator",         s: 32, a: 54, ok: true },
                 { n: "Options IV scanner",  k: "Indicator",         s: 8,  a: 61, ok: true },
                 { n: "TradingView webhooks",k: "External",          s: 11, a: 49, ok: false },
-              ] : []).map((r, i) => (
+              ].map((r, i) => (
                 <tr key={i}>
                   <td style={{ fontWeight: 500 }}>{r.n}</td>
                   <td><span className="muted" style={{ fontSize: 12 }}>{r.k}</span></td>

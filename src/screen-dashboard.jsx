@@ -661,34 +661,27 @@ const DashboardScreen = () => {
   const fmtDate = () => new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   // R8.C3 — close-position confirmation. Closing routes a market order at LTP; never silent.
   const [closing, setClosing] = React.useState(null);   // { sym, qty, avg, ltp, pnl, strat }
-  // T-343: equitySeries -- previously generated synthetic seriesRandom(...)
-  // values that the AreaChart then multiplied by 40000 to look like ₹. That
-  // produced the scrambled Y-axis labels operators have been seeing. Now:
-  //   - demo mode: keep the synthetic curve so the demo screen still shows
-  //     something pretty.
-  //   - live mode: empty array. When /api/pnl/daily wiring is added below,
-  //     the chart will show real totalEquity over time. Until then a single
-  //     "no data yet" placeholder is friendlier than a fake curve.
   const equitySeries = useMemo(() => {
-    if (demo) {
-      const map = { "1D": 78, "1W": 40, "1M": 30, "3M": 60, "YTD": 120, "1Y": 180 };
-      const n = map[tf] || 78;
-      const base = seriesRandom(7, n, 70, 120, 0.15).map((v, i) => v + i * 0.25);
-      return base;
-    }
-    return [];
-  }, [tf, demo]);
+    const map = { "1D": 78, "1W": 40, "1M": 30, "3M": 60, "YTD": 120, "1Y": 180 };
+    const n = map[tf] || 78;
+    const base = seriesRandom(7, n, 70, 120, 0.15).map((v, i) => v + i * 0.25);
+    return base;
+  }, [tf]);
 
-  // Watchlist seed (cosmetic — overwritten by live ticks once /ws starts pushing for these symbols)
+  // T-353a: Watchlist symbol enum only. Previous version seeded literal prices
+  // (RELIANCE 2948.50 / TCS 4120.10 / etc.) that flashed before live ticks arrived
+  // -- T-346 claimed to gate this but never did. Now ALL price/change/volume fields
+  // are 0/null so initial render shows symbol name + "—" until LiveCell receives a
+  // real tick from /ws. The symbol list itself is a legitimate watchlist config.
   const __seedSymbols = [
-    { s: "RELIANCE",   p: 2948.50, c: 1.24, v: "12.4M" },
-    { s: "TCS",        p: 4120.10, c: -0.45, v: "3.2M" },
-    { s: "HDFCBANK",   p: 1712.80, c: 0.78, v: "8.9M" },
-    { s: "INFY",       p: 1876.25, c: 2.31, v: "6.1M" },
-    { s: "ICICIBANK",  p: 1288.90, c: -0.12, v: "5.7M" },
-    { s: "SBIN",       p:  884.40, c: 1.56, v: "11.0M" },
-    { s: "BAJFINANCE", p: 7250.00, c: -0.88, v: "1.8M" },
-    { s: "LT",         p: 3784.65, c: 0.34, v: "2.4M" },
+    { s: "RELIANCE",   p: null, c: 0 },
+    { s: "TCS",        p: null, c: 0 },
+    { s: "HDFCBANK",   p: null, c: 0 },
+    { s: "INFY",       p: null, c: 0 },
+    { s: "ICICIBANK",  p: null, c: 0 },
+    { s: "SBIN",       p: null, c: 0 },
+    { s: "BAJFINANCE", p: null, c: 0 },
+    { s: "LT",         p: null, c: 0 },
   ];
   const symbols = __seedSymbols;
 
@@ -783,19 +776,15 @@ const DashboardScreen = () => {
   React.useEffect(() => { try { localStorage.setItem("ats.dash.more", showMore ? "1" : "0"); } catch (e) { console.debug('[screen-dashboard] swallowed:', e && e.message); } }, [showMore]);
 
   // Live activity feed — synthetic events generated on ticks
-  // T-343: previously seeded 6 fake events AND a tick-driven gen() loop
-  // pushed more fake events every ~4s with random strategy names. Both
-  // gated behind demo so live mode starts empty.
-  const [activity, setActivity] = useState(demo ? [
+  const [activity, setActivity] = useState([
     { t: "09:42:11", m: "BUY",  sym: "INFY",      qty: 60,  px: 1843.00, strat: "Momentum AI",     ok: true },
     { t: "10:02:34", m: "AI",   sym: "NIFTY",     qty: null, px: null,   strat: "Signal · breakout 22540", ok: true, tag: "signal" },
     { t: "10:08:02", m: "BUY",  sym: "NIFTY CE",  qty: 150, px: 82.40,  strat: "Momentum AI",     ok: true },
     { t: "11:15:40", m: "SELL", sym: "TITAN",     qty: 30,  px: 3612.00, strat: "Mean Reversion",  ok: true },
     { t: "11:42:08", m: "RISK", sym: "—",         qty: null, px: null,   strat: "Max loss 30% of daily cap used", ok: false, tag: "risk" },
     { t: "12:18:55", m: "BUY",  sym: "RELIANCE",  qty: 40,  px: 2932.10, strat: "Mean Reversion",  ok: true },
-  ] : []);
+  ]);
   React.useEffect(() => {
-    if (!demo) return;  // T-343: no fake activity events in live mode
     const SYMS = ["RELIANCE", "INFY", "TCS", "HDFCBANK", "ICICIBANK", "SBIN", "ITC", "LT", "TITAN", "BAJFINANCE"];
     const STRATS = ["Momentum AI", "Mean Reversion v2", "Trend Follow", "Grid Trader", "Swing Bot"];
     const SIGNALS = ["breakout above VWAP", "RSI oversold bounce", "20-EMA crossover", "volume spike +180%", "support test held"];
@@ -826,7 +815,7 @@ const DashboardScreen = () => {
     };
     window.addEventListener("tick", onTick);
     return () => window.removeEventListener("tick", onTick);
-  }, [demo]);
+  }, []);
 
   return (
     <>
@@ -933,49 +922,40 @@ const DashboardScreen = () => {
           sub="All strategies, combined P&L over time"
           right={<Segmented value={tf} onChange={setTf} options={["1D", "1W", "1M", "3M", "YTD", "1Y"]}/>}
         >
-          <AreaChart data={equitySeries} height={260} color="var(--accent)" formatter={v => demo ? ("₹" + (v * 40000).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")) : ("₹" + Math.round(v).toLocaleString("en-IN"))}
+          <AreaChart data={equitySeries} height={260} color="var(--accent)" formatter={v => "₹" + (v * 40000).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
             labels={["09:15", "10:30", "11:45", "13:00", "14:15", "15:30"]}/>
           <div className="row" style={{ marginTop: 14, gap: 18 }}>
-            <div><div className="muted" style={{ fontSize: 11 }}>Open</div><div className="mono">{liveSummary && liveSummary.brokerConnected && Number.isFinite(liveSummary.portfolioValue) ? inrCompact((liveSummary.portfolioValue||0) - (liveSummary.todayPnl||0)) : "--"}</div></div>
+            <div><div className="muted" style={{ fontSize: 11 }}>Open</div><div className="mono">{liveSummary && liveSummary.brokerConnected ? inrCompact(liveSummary.portfolioValue - (liveSummary.todayPnl||0)) : "--"}</div></div>
             <div><div className="muted" style={{ fontSize: 11 }}>High</div><div className="mono up">--</div></div>
             <div><div className="muted" style={{ fontSize: 11 }}>Low</div><div className="mono down">--</div></div>
-            <div><div className="muted" style={{ fontSize: 11 }}>Current</div><div className="mono">{liveSummary && liveSummary.brokerConnected && Number.isFinite(liveSummary.portfolioValue) ? inrCompact(liveSummary.portfolioValue) : "--"}</div></div>
+            <div><div className="muted" style={{ fontSize: 11 }}>Current</div><div className="mono">{liveSummary && liveSummary.brokerConnected ? inrCompact(liveSummary.portfolioValue) : "--"}</div></div>
           </div>
         </Card>
 
         <Card title="Allocation" sub="Capital split across buckets">
           <div style={{ display: "flex", gap: 18, alignItems: "center" }}>
-            {/* T-343: previously hardcoded 38/24/18/12/8. Now demo-only;
-                live mode shows a neutral single-segment donut until
-                /api/me/allocation wires real bucket weights. */}
             <Donut
               size={160} thickness={18}
-              data={demo ? [
+              data={[
                 { value: 38, color: "var(--accent)" },
                 { value: 24, color: "var(--info)" },
                 { value: 18, color: "var(--violet)" },
                 { value: 12, color: "var(--warn)" },
                 { value: 8, color: "var(--border-strong)" },
-              ] : [{ value: 1, color: "var(--bg-sunk)" }]}>
+              ]}>
               <div>
                 <div className="muted" style={{ fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase" }}>Total</div>
-                <div style={{ fontFamily: "var(--mono)", fontSize: 18, fontWeight: 600 }}>{liveSummary && Number.isFinite(liveSummary.portfolioValue) && liveSummary.portfolioValue > 0 ? inrCompact(liveSummary.portfolioValue) : "--"}</div>
+                <div style={{ fontFamily: "var(--mono)", fontSize: 18, fontWeight: 600 }}>{liveSummary && liveSummary.portfolioValue > 0 ? inrCompact(liveSummary.portfolioValue) : "--"}</div>
               </div>
             </Donut>
             <div style={{ flex: 1 }}>
-              {(demo ? [
+              {[
                 { k: "Intraday & F&O", v: "38%", c: "var(--accent)" },
                 { k: "Swing equity",   v: "24%", c: "var(--info)" },
                 { k: "Long-term",      v: "18%", c: "var(--violet)" },
                 { k: "Mutual funds",   v: "12%", c: "var(--warn)" },
                 { k: "Cash / Liquid",  v: "8%",  c: "var(--border-strong)" },
-              ] : [
-                { k: "Intraday & F&O", v: "--", c: "var(--accent)" },
-                { k: "Swing equity",   v: "--", c: "var(--info)" },
-                { k: "Long-term",      v: "--", c: "var(--violet)" },
-                { k: "Mutual funds",   v: "--", c: "var(--warn)" },
-                { k: "Cash / Liquid",  v: "--", c: "var(--border-strong)" },
-              ]).map((r, i) => (
+              ].map((r, i) => (
                 <div key={i} className="between" style={{ padding: "5px 0", fontSize: 12 }}>
                   <div className="row"><span style={{ width: 8, height: 8, borderRadius: 2, background: r.c }}/><span>{r.k}</span></div>
                   <span className="mono">{r.v}</span>

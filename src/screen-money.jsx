@@ -28,11 +28,11 @@ const MoneyScreen = () => {
   const [rebal, setRebal]         = React.useState(null);
   const [rebalBusy, setRebalBusy] = React.useState(false);
   // Tier 25: MPT portfolio optimiser
-  const [mptInputs, setMptInputs] = React.useState([
-    { symbol: 'NIFTYBEES', expectedReturnPct: 12, volPct: 18 },
-    { symbol: 'GOLDBEES',  expectedReturnPct: 8,  volPct: 15 },
-    { symbol: 'BOND-G7',   expectedReturnPct: 7,  volPct: 7  },
-  ]);
+  // T-353d: Initial state was seeded with 3 fake assets (NIFTYBEES 12%/18%, GOLDBEES
+  // 8%/15%, BOND-G7 7%/7%) -- never gated to demo, so every user saw fabricated
+  // expected-return / volatility numbers in the asset-allocation tool. Start empty
+  // and let the user add assets via the Add-Asset button.
+  const [mptInputs, setMptInputs] = React.useState([]);
   const [mptResult, setMptResult] = React.useState(null);
   const [mptBusy, setMptBusy]     = React.useState(false);
   const runOptimize = async () => {

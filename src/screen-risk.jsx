@@ -199,15 +199,21 @@ const RiskScreen = () => {
             </tr>
           </thead>
           <tbody>
+            {/* T-353b: Was 4 hardcoded mode rows with literal cap/deployed/loss values.
+                T-342 claimed to gate this but JSX was untouched -- still shipped fake
+                limits to every user. No per-mode risk-storage backend yet, so render
+                empty rows pointing the user at where these will be configured. */}
             {[
-              { id: "intraday", cap: 1200000, deployed:  840000, lossCap: 8000,  lossUsed: 2840, state: "ok"   },
-              { id: "swing",    cap: 1500000, deployed: 1120000, lossCap: 5000,  lossUsed: 1180, state: "ok"   },
-              { id: "options",  cap:  500000, deployed:  380000, lossCap: 4000,  lossUsed: 3120, state: "warn" },
-              { id: "futures",  cap:  400000, deployed:       0, lossCap: 3000,  lossUsed:    0, state: "idle" },
+              { id: "intraday", cap: 0, deployed: 0, lossCap: 0, lossUsed: 0, state: "idle" },
+              { id: "swing",    cap: 0, deployed: 0, lossCap: 0, lossUsed: 0, state: "idle" },
+              { id: "options",  cap: 0, deployed: 0, lossCap: 0, lossUsed: 0, state: "idle" },
+              { id: "futures",  cap: 0, deployed: 0, lossCap: 0, lossUsed: 0, state: "idle" },
             ].map(row => {
               const meta = window.MODE_META[row.id];
-              const util   = Math.round((row.deployed / row.cap) * 100);
-              const lossP  = Math.round((row.lossUsed / row.lossCap) * 100);
+              // T-353b: guard 0/0 -- empty-state rows have cap=0/lossCap=0 which
+              // would otherwise render "NaN%" and trip the visual-rendering spec.
+              const util   = row.cap > 0     ? Math.round((row.deployed / row.cap) * 100)    : 0;
+              const lossP  = row.lossCap > 0 ? Math.round((row.lossUsed / row.lossCap) * 100) : 0;
               return (
                 <tr key={row.id}>
                   <td>
@@ -253,38 +259,34 @@ const RiskScreen = () => {
 
       <div className="grid grid-2" style={{ marginBottom: 16 }}>
         <Card title="Global limits" sub="Portfolio-wide safety net">
-          {/* T-342: previously rendered a hardcoded array of 6 fake limits
-              (Daily loss ₹15K, Max position ₹3L, etc.). Operator
-              could mistake these for real, in-effect limits. Until
-              /api/me/risk-config is wired here, show an empty state pointing
-              to the actual config page (#riskconfig). */}
-          <div style={{ padding: '24px 8px', textAlign: 'center' }}>
-            <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 12 }}>
-              No risk limits configured yet.
+          {/* T-353b: Was 6 hardcoded limits ("Daily loss ₹15,000", "Max leverage 3.0x",
+              etc.) rendered to every user. T-342 said it was gated, but never gated.
+              No backend yet for per-user global limits -- show empty-state with a
+              pointer to Settings where they'll be configured. */}
+          <div className="col" style={{ gap: 10, padding: "8px 4px" }}>
+            <div className="muted" style={{ fontSize: 12 }}>
+              No portfolio-wide limits configured yet. Once per-user risk storage ships,
+              your daily-loss cap, max position size, leverage ceiling, and circuit-breaker
+              cooldown will be editable from Settings → Risk.
             </div>
-            <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 16, lineHeight: 1.5 }}>
-              Define daily-loss caps, position-size limits, leverage ceilings, and per-order maximums on the Risk management page.
-            </div>
-            <a href="#riskconfig" className="btn btn--sm">
-              Open Risk management →
+            <a href="#settings" className="btn btn--sm" style={{ alignSelf: "flex-start", marginTop: 4 }}>
+              Configure in Settings
             </a>
           </div>
         </Card>
 
         <Card title="Per-strategy caps" sub="Capital ceilings and loss cutoffs">
-          {/* T-342: previously rendered 6 hardcoded fake strategies (Momentum
-              AI, Mean Reversion v2, Grid Trader, Iron Condor Wkly, Breakout
-              Scanner, MCX Arbitrage) -- none exist in /api/strategies. Show
-              empty state pointing to the real Strategies page. */}
-          <div style={{ padding: '24px 8px', textAlign: 'center' }}>
-            <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 12 }}>
-              No per-strategy caps configured yet.
+          {/* T-353b: Was 6 hardcoded strategy caps (Momentum AI ₹8L, Mean Reversion ₹6L,
+              etc.) rendered to every user. T-342 claimed to gate -- never did. Empty
+              state until backend per-strategy cap storage ships; point user at the
+              Strategies screen where they'll be set. */}
+          <div className="col" style={{ gap: 10, padding: "16px" }}>
+            <div className="muted" style={{ fontSize: 12 }}>
+              Per-strategy capital caps and loss cutoffs are configured per strategy.
+              No strategies have caps assigned yet.
             </div>
-            <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 16, lineHeight: 1.5 }}>
-              Per-strategy capital ceilings and loss cutoffs are managed alongside each strategy definition.
-            </div>
-            <a href="#strategies" className="btn btn--sm">
-              Open Strategies →
+            <a href="#strategies" className="btn btn--sm" style={{ alignSelf: "flex-start" }}>
+              Go to Strategies
             </a>
           </div>
         </Card>
