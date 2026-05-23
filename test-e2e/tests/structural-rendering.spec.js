@@ -157,13 +157,14 @@ test.describe('structural rendering -- auth-gated', () => {
       await page.waitForTimeout(1200);
 
       // 1. data-screen-label matches.
-      const label = await page.evaluate(() => {
-        const el = document.querySelector('.content');
-        return el ? el.getAttribute('data-screen-label') : null;
-      });
+      // T-349 followup: when the wider prod-readiness suite runs in parallel,
+      // the .content element can be queried before React has populated the
+      // attribute. Use Playwright's auto-retrying locator assertion instead
+      // of a one-shot page.evaluate(getAttribute) so the check waits up to
+      // 5s for the attribute to materialise.
       if (contract.label) {
-        expect(label, `${route} expected label "${contract.label}" but got "${label}"`)
-          .toBe(contract.label);
+        await expect(page.locator('.content'))
+          .toHaveAttribute('data-screen-label', contract.label, { timeout: 5000 });
       }
 
       // Read visible text from #root (innerText respects display:none).
