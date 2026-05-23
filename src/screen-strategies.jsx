@@ -450,20 +450,12 @@ const StrategiesScreen = () => {
       )}
 
       <Card title="Strategy returns — monthly" sub="Heatmap of % returns per strategy / month" style={{ marginTop: 16 }}>
-        <Heatmap
-          rows={["Momentum AI", "Mean Rev. v2", "Grid Trader", "Trend Follow", "Iron Condor", "Short Straddle", "NIFTY Fut"]}
-          cols={["Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr"]}
-          values={[
-            [2.1, 3.4, -1.2, 4.8, 2.6, 3.1, 5.2, 4.1, 3.8],
-            [1.6, 2.8, 2.1, -0.8, 3.4, 2.2, 2.9, 3.6, 2.4],
-            [-0.4, 1.2, -2.1, 0.8, 1.4, -1.8, 0.6, -1.2, -0.8],
-            [1.2, 1.8, 0.9, 2.1, 2.6, 1.9, 2.4, 2.8, 2.2],
-            [null, null, 1.8, 2.4, 2.1, 1.9, 3.2, 2.8, 2.1],
-            [null, null, null, 1.4, 1.8, 2.1, 2.4, 1.9, 1.6],
-            [null, null, null, null, null, 0.8, 1.2, 0.9, 0.6],
-          ]}
-          min={-3} max={6}
-        />
+        {/* T-350d: gated -- was hardcoded 7-row x 9-month fake (Momentum AI +2.1 Aug, etc.).
+            T-346 listed this as fixed but never actually replaced the JSX. Live mode has no
+            monthly-returns backend yet, so render an empty-state until one exists. */}
+        <div style={{ padding: "24px", textAlign: "center", color: "var(--text-3)" }}>
+          No monthly return data yet. Populates once strategies accumulate per-month closed trades.
+        </div>
       </Card>
     </>
   );
