@@ -661,12 +661,23 @@ const DashboardScreen = () => {
   const fmtDate = () => new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   // R8.C3 — close-position confirmation. Closing routes a market order at LTP; never silent.
   const [closing, setClosing] = React.useState(null);   // { sym, qty, avg, ltp, pnl, strat }
+  // T-343: equitySeries -- previously generated synthetic seriesRandom(...)
+  // values that the AreaChart then multiplied by 40000 to look like ₹. That
+  // produced the scrambled Y-axis labels operators have been seeing. Now:
+  //   - demo mode: keep the synthetic curve so the demo screen still shows
+  //     something pretty.
+  //   - live mode: empty array. When /api/pnl/daily wiring is added below,
+  //     the chart will show real totalEquity over time. Until then a single
+  //     "no data yet" placeholder is friendlier than a fake curve.
   const equitySeries = useMemo(() => {
-    const map = { "1D": 78, "1W": 40, "1M": 30, "3M": 60, "YTD": 120, "1Y": 180 };
-    const n = map[tf] || 78;
-    const base = seriesRandom(7, n, 70, 120, 0.15).map((v, i) => v + i * 0.25);
-    return base;
-  }, [tf]);
+    if (demo) {
+      const map = { "1D": 78, "1W": 40, "1M": 30, "3M": 60, "YTD": 120, "1Y": 180 };
+      const n = map[tf] || 78;
+      const base = seriesRandom(7, n, 70, 120, 0.15).map((v, i) => v + i * 0.25);
+      return base;
+    }
+    return [];
+  }, [tf, demo]);
 
   // Watchlist seed (cosmetic — overwritten by live ticks once /ws starts pushing for these symbols)
   const __seedSymbols = [
@@ -918,7 +929,7 @@ const DashboardScreen = () => {
           sub="All strategies, combined P&L over time"
           right={<Segmented value={tf} onChange={setTf} options={["1D", "1W", "1M", "3M", "YTD", "1Y"]}/>}
         >
-          <AreaChart data={equitySeries} height={260} color="var(--accent)" formatter={v => "₹" + (v * 40000).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
+          <AreaChart data={equitySeries} height={260} color="var(--accent)" formatter={v => demo ? ("₹" + (v * 40000).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")) : ("₹" + Math.round(v).toLocaleString("en-IN"))}
             labels={["09:15", "10:30", "11:45", "13:00", "14:15", "15:30"]}/>
           <div className="row" style={{ marginTop: 14, gap: 18 }}>
             <div><div className="muted" style={{ fontSize: 11 }}>Open</div><div className="mono">{liveSummary && liveSummary.brokerConnected ? inrCompact(liveSummary.portfolioValue - (liveSummary.todayPnl||0)) : "--"}</div></div>
