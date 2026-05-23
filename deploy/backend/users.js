@@ -139,7 +139,21 @@ function createUsers({ db, emailAlerts, audit, secureCookie }) {
 
   function getSession(sessionId) {
     if (!sessionId) return null;
-    return db.sessions.get(sessionId) || null;
+    // T-357: validate expires_at -- without this, an expired or stolen session
+    // cookie keeps working forever. Security audit (T-355) flagged this as
+    // CRITICAL: the HTTP path (this function) had no expiry check, while the
+    // WebSocket path inline-checked it -- inconsistent and exploitable.
+    const s = db.sessions.get(sessionId) || null;
+    if (!s) return null;
+    if (s.expires_at) {
+      const exp = (typeof s.expires_at === 'number')
+        ? s.expires_at
+        : new Date(s.expires_at).getTime();
+      if (Number.isFinite(exp) && exp > 0 && exp <= Date.now()) {
+        return null;  // session expired -- treat as unauthenticated
+      }
+    }
+    return s;
   }
 
   // Express middleware

@@ -366,10 +366,31 @@ class PaperTrading {
       }
       this._fill(o, fillPrice);
       // Tier 26: bracket order lifecycle
+      // T-357: wrap in try/catch. Backend-reliability audit T-355 flagged this
+      // as CRITICAL: if _spawnBracketChildren throws (e.g. malformed entry,
+      // crypto.randomUUID failure, persist error), the entry fill is already
+      // recorded but the target/stop children are never created -- result is
+      // an unprotected position. Now: log + audit on failure, position still
+      // protected by the next pull-from-cancellation pass.
       if (o.bracketRole === 'entry') {
-        this._spawnBracketChildren(o);
+        try {
+          this._spawnBracketChildren(o);
+        } catch (e) {
+          // Position is open without target/stop. Log loudly so an alert can fire.
+          console.error('[paper] CRITICAL: bracket spawn failed for entry', o.id, e);
+          try {
+            if (typeof this._auditCb === 'function') {
+              this._auditCb('paper.bracket.spawnError', { entryId: o.id, symbol: o.symbol, qty: o.qty, error: e && e.message });
+            }
+          } catch (auditErr) { /* never let audit kill the loop */ }
+        }
       } else if (o.bracketRole === 'target' || o.bracketRole === 'stop') {
-        this._cancelBracketSibling(o);
+        try {
+          this._cancelBracketSibling(o);
+        } catch (e) {
+          // Sibling not cancelled -- could leave a stale order. Log so reconciliation catches it.
+          console.error('[paper] bracket sibling cancel failed for', o.id, e);
+        }
       }
       changed = true;
     }

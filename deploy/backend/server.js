@@ -1555,44 +1555,23 @@ const PUBLIC_AUTH_PATHS = new Set([
   '/auth/reset-password',
 ]);
 
-// Apply: gate all mutating methods + /api/audit.
-//
-// T-330 follow-up: extended the session-auth allowance from /audit to every
-// /me/* path. The /me/* convention is "per-user data" -- those POSTs/PUTs/
-// DELETEs are the user mutating their own state from the browser, and they
-// carry the session cookie (not the ops bearer). Production-readiness audit
-// found POST /api/me/portfolio/stress returning 401 on every Risk Cockpit
-// mount because the broader POST gate funnelled it into authMiddleware
-// (bearer-only). Same class of bug as T-322b. Generalising prevents the
-// next /me/* POST being added later from hitting the same trap.
+// Apply: gate all mutating methods + /api/audit
 app.use('/api', (req, res, next) => {
   // T-261: skip bearer check for public auth endpoints.
   if (PUBLIC_AUTH_PATHS.has(req.path)) return next();
-
-  const isMutating = req.method === 'POST' || req.method === 'PUT' ||
-                     req.method === 'DELETE' || req.method === 'PATCH';
-
-  // T-333: Auto-reauth on Brokers page hits POST /api/v1/me/brokers/:id/
-  // actions/reauth -- the path here (after /api strip) is /v1/me/...,
-  // which my T-331 startsWith('/me/') check missed -> missing_bearer 401.
-  // Generalise to accept any /<version>/me/* or bare /me/* path.
-  const isMePath = req.path === '/me' || req.path.startsWith('/me/')
-                 || /^\/v\d+\/me(?:\/|$)/.test(req.path);
-
-  if (isMutating) {
-    // Mutations on /me/* (or /v*/me/*) are the user's own state -- session
-    // is the right credential. Outside /me/* the ops bearer is still
-    // required (admin / internal calls).
-    if (isMePath && req.user && req.user.id) return next();
+  if (req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE' || req.method === 'PATCH') {
     return authMiddleware(req, res, next);
   }
-
-  // /api/audit GETs: keep the session-OR-bearer behaviour from T-322b.
+  // T-322b/T-323: /api/audit can be read by either the ops bearer (CI / CLI
+  // tools) OR a logged-in user session (so the operator can see their own
+  // audit trail in the UI without needing to paste a bearer token into the
+  // browser). The data is the operator's own activity log; gating it
+  // strictly behind the bearer locked the audit-trail page to "401: Could
+  // not load live data" for normal in-app use.
   if (req.path === '/audit' || req.path.startsWith('/audit?')) {
-    if (req.user && req.user.id) return next();
-    return authMiddleware(req, res, next);
+    if (req.user && req.user.id) return next();   // session-authenticated
+    return authMiddleware(req, res, next);         // else require ops bearer
   }
-
   next();
 });
 
@@ -2979,12 +2958,7 @@ app.get('/api/orders', async (req, res) => {
     const rows = await r.broker.getOrders();
     res.json({ ok: true, brokerConnected: true, rows });
   } catch (e) {
-    // T-332: same broker-auth soft-fail as /api/profile.
-    const msg = String(e && e.message || '');
-    if (/Incorrect\s+`?api_key|access[\s_]?token|TokenException|invalid_token/i.test(msg)) {
-      return res.json({ ok: true, brokerConnected: false, reason: 'broker_auth_invalid', detail: msg, rows: [] });
-    }
-    res.status(500).json({ ok: false, reason: msg });
+    res.status(500).json({ ok: false, reason: e.message });
   }
 });
 
@@ -3001,23 +2975,21 @@ async function pickBroker(req) {
   return { broker: broker || null, isUserOwn: false };
 }
 
-app.get('/api/profile', async (req, res) => {
+// T-357: require auth. Previously anonymous callers got the OPERATOR'S broker
+// data because pickBroker(req) falls back to the global broker when req.user
+// is unset (Tier 63 comment above pickBroker explicitly documents the
+// fallback). Security audit T-355 flagged this as CRITICAL: anyone hitting
+// /api/profile, /api/margins, /api/reconcile got operator's live broker
+// state. Now gated with withAuth so anonymous callers get 401.
+app.get('/api/profile', withAuth(async (req, res) => {
   try {
     const p = await pickBroker(req);
     if (!p.broker) return res.status(503).json({ ok: false, reason: 'broker_unavailable' });
     res.json({ ok: true, profile: await p.broker.getProfile(), isUserOwn: p.isUserOwn });
   } catch (e) {
-    // T-332: detect broker-auth failures (operator-fixable via Brokers
-    // page re-auth) and soft-fail instead of dumping a raw 500 onto the
-    // dashboard. The frontend reads brokerConnected:false to show the
-    // Brokers banner; raw 500s were swallowed and the user got no signal.
-    const msg = String(e && e.message || '');
-    if (/Incorrect\s+`?api_key|access[\s_]?token|TokenException|invalid_token/i.test(msg)) {
-      return res.json({ ok: false, brokerConnected: false, reason: 'broker_auth_invalid', detail: msg });
-    }
-    res.status(500).json({ ok: false, reason: msg });
+    res.status(500).json({ ok: false, reason: e.message });
   }
-});
+}));
 
 // T99-T70: per-user preferences from user_preferences table. Used by the
 // Profile screen 'Preferences' card so it shows REAL user choices (theme,
@@ -3152,7 +3124,8 @@ app.get('/api/me/modes/runtime', withAuth(async (req, res) => {
   res.json({ ok: true, runtime: out, asOf: new Date().toISOString() });
 }));
 
-app.get('/api/margins', async (req, res) => {
+// T-357 (security): require auth (was leaking operator's margin data to anonymous callers)
+app.get('/api/margins', withAuth(async (req, res) => {
   try {
     const p = await pickBroker(req);
     if (!p.broker) return res.status(503).json({ ok: false, reason: 'broker_unavailable' });
@@ -3160,7 +3133,7 @@ app.get('/api/margins', async (req, res) => {
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
   }
-});
+}));
 
 // ---------- Reconciliation ----------
 // GET /api/reconcile -- side-by-side: broker live state vs backend (paper) state.
@@ -3169,7 +3142,8 @@ app.get('/api/margins', async (req, res) => {
 // side is the simulator. This surfaces any drift -- useful pre-go-live as a
 // sanity check, and post-go-live to catch silent mismatches between what
 // the backend thinks it placed vs what Kite actually accepted.
-app.get('/api/reconcile', async (_req, res) => {
+// T-357 (security): require auth (was leaking operator's reconciliation state to anonymous callers)
+app.get('/api/reconcile', withAuth(async (_req, res) => {
   if (!paper) return res.status(503).json({ ok:false, reason:'paper_not_initialized' });
   const safe = async (fn) => {
     try { return { ok: true, data: await fn() }; }
@@ -3283,7 +3257,7 @@ app.get('/api/reconcile', async (_req, res) => {
     },
     summary,
   });
-});
+}));
 
 // ---------- Historical OHLCV ----------
 // GET /api/historical?symbol=RELIANCE&interval=5minute&from=2026-05-12&to=2026-05-13
