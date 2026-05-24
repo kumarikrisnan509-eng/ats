@@ -110,6 +110,11 @@ function mountOrdersRoutes(app, deps) {
     const symbol     = String(body.symbol).trim();
     const exchange   = String(body.exchange || 'NSE').toUpperCase();
 
+    // T-374: symbol whitelist regex. Defense-in-depth -- the broker adapter
+    // ultimately validates symbols, but rejecting obvious junk pre-broker
+    // saves a round-trip and blocks any future injection-via-symbol vector.
+    if (!/^[A-Z0-9.\-_ &]{1,50}$/.test(symbol))
+      return res.status(400).json({ ok:false, reason:`invalid symbol format: ${symbol.slice(0,30)}` });
     if (!VALID_SIDES.has(side))             return res.status(400).json({ ok:false, reason:`invalid side: ${side}` });
     if (!VALID_PRODUCTS.has(product))       return res.status(400).json({ ok:false, reason:`invalid product: ${product}` });
     if (!VALID_ORDER_TYPES.has(orderType))  return res.status(400).json({ ok:false, reason:`invalid orderType: ${orderType}` });

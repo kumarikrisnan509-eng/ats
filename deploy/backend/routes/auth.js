@@ -18,6 +18,25 @@
 
 'use strict';
 
+// T-374: in-memory signup rate-limiter. Caps signups at 5/hr/IP to block
+// mass-signup spam. Same pattern as T-358's password-reset limiter in users.js
+// (rolling window, NODE_ENV=test bypass for unit tests).
+const _signupTimes = new Map();   // ip -> array of Date.now() timestamps
+const SIGNUP_WINDOW_MS  = 60 * 60_000;
+const SIGNUP_MAX_PER_WINDOW = 5;
+function _signupRateOk(ip) {
+  if (process.env.NODE_ENV === 'test') return true;
+  const cutoff = Date.now() - SIGNUP_WINDOW_MS;
+  const arr = (_signupTimes.get(ip) || []).filter(t => t > cutoff);
+  if (arr.length >= SIGNUP_MAX_PER_WINDOW) {
+    _signupTimes.set(ip, arr);
+    return false;
+  }
+  arr.push(Date.now());
+  _signupTimes.set(ip, arr);
+  return true;
+}
+
 function mountAuthRoutes(app, deps) {
   const { getAuth, getEmailAlerts } = deps;
 
@@ -25,6 +44,12 @@ function mountAuthRoutes(app, deps) {
     const auth = getAuth();
     const emailAlerts = getEmailAlerts();
     if (!auth) return res.status(503).json({ ok:false, reason:'auth_not_initialized' });
+    // T-374: per-IP signup rate-limit (5/hr). Blocks mass-signup spam without
+    // affecting legitimate users (single sign-up is rare per IP).
+    const ip = req.headers['x-real-ip'] || (req.socket && req.socket.remoteAddress) || 'unknown';
+    if (!_signupRateOk(ip)) {
+      return res.status(429).json({ ok:false, reason:'rate_limit', detail:'Too many signup attempts. Try again later.' });
+    }
     try {
       const { email, password, name } = req.body || {};
       const r = await auth.signup({ email, password, name });

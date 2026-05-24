@@ -20,7 +20,7 @@
 'use strict';
 
 const MAX_CACHE = 256;                       // upper bound on simultaneously-cached user brokers
-const TTL_MS    = 60 * 60 * 1000;            // 1 hour -- forces a re-unseal after that to pick up rotations
+const TTL_MS    = 15 * 60 * 1000;            // T-374: 15 min (was 1h). Reduces window where stale unsealed creds sit in memory after a token rotation. Per-credential-update invalidate() in me-broker.js handles intentional rotations; TTL bounds accidental staleness.
 
 /** @type {Map<number, {broker: object, createdAt: number, lastUsedAt: number}>} */
 const cache = new Map();
