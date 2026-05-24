@@ -480,8 +480,17 @@ async function runAutoReauth({ db, vault, userId, brokerRow }) {
     const sealed = await vault.seal(accessToken);
     const issuedAt = new Date().toISOString();
     const expiresAt = nextTokenExpiry(issuedAt).toISOString();
-    db.brokers.updateTokens(brokerRow.id, userId, sealed, issuedAt, expiresAt);
-    db.brokers.recordTest(userId, brokerRow.id, true, null);
+    // T-376: wrap token update + test record in a single SQLite transaction.
+    // Without this, if updateTokens succeeds but recordTest throws (DB locked,
+    // disk full, etc.) the token IS persisted but the function returns
+    // 'persist_failed' to the caller. Operator manually re-runs reauth,
+    // Zerodha rejects with TokenException ('token already exchanged') because
+    // the persisted-but-not-acknowledged token is still valid. Atomicity
+    // ensures both succeed or both rollback -- no half-state.
+    db.transaction(() => {
+      db.brokers.updateTokens(brokerRow.id, userId, sealed, issuedAt, expiresAt);
+      db.brokers.recordTest(userId, brokerRow.id, true, null);
+    });
     try { require('./broker-resolver').invalidate(userId); } catch (e) { console.warn('[me-broker] swallowed:', e && e.message); }
     timings.persist_ms = Date.now() - tPersist;
     return { ok: true, issuedAt, expiresAt, timings };
