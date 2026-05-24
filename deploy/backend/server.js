@@ -154,20 +154,49 @@ const DEFAULT_SYMBOLS = (process.env.DEFAULT_SYMBOLS || 'NIFTY 50,BANKNIFTY,RELI
 
 // ---------- Audit ----------
 let auditSeq = 0;
+// T-380 (security audit #9 HIGH): track call-site swallow attempts that
+// would have hidden audit degradation. Call sites in users.js etc. wrap
+// audit() in try/catch to defend against rare failures (circular-ref data
+// crashing JSON.stringify before the appendFileSync). Without this counter
+// those failures were silent. Now they're surfaced via /api/health so an
+// operator can see if audit() is dropping events even though the file
+// itself is healthy.
+let auditDegradedCount = 0;
+let auditLastDegradedError = null;
+let auditLastDegradedAt    = null;
+function recordAuditSwallow(source, msg) {
+  auditDegradedCount += 1;
+  auditLastDegradedError = String(source || 'unknown') + ': ' + String(msg || 'unknown');
+  auditLastDegradedAt    = new Date().toISOString();
+}
 // Tier 15: rolling-window order rate counter (in-memory, per-process).
 // On restart this resets, which is fine -- the cap is per-minute, not per-day.
 
 
 function audit(event, data) {
   auditSeq += 1;
+  // T-380: serialize defensively. A circular-ref or BigInt in `data` would
+  // make JSON.stringify throw -- previously this propagated to call sites
+  // and got swallowed. Now we degrade to an _error stub line so the audit
+  // chain stays continuous and the degraded counter ticks.
+  let line;
+  try {
+    line = JSON.stringify({
+      seq: auditSeq, ts: new Date().toISOString(), env: ENV_NAME, event, data,
+    });
+  } catch (jsonErr) {
+    recordAuditSwallow('audit/serialize', jsonErr && jsonErr.message);
+    line = JSON.stringify({
+      seq: auditSeq, ts: new Date().toISOString(), env: ENV_NAME, event,
+      _error: 'data_serialize_failed', _msg: String(jsonErr && jsonErr.message),
+    });
+  }
   // Tier 32: mirror into the WORM (tamper-evident) log if initialized.
   // Failure here never breaks the primary audit.log stream below.
   try { if (wormAudit && wormAudit._initialized) wormAudit.append(event, data); } catch (_e) {}
   try {
     fs.mkdirSync(path.dirname(AUDIT_LOG), { recursive: true });
-    fs.appendFileSync(AUDIT_LOG, JSON.stringify({
-      seq: auditSeq, ts: new Date().toISOString(), env: ENV_NAME, event, data,
-    }) + '\n');
+    fs.appendFileSync(AUDIT_LOG, line + '\n');
   } catch (err) {
     console.error('FATAL: audit log write failed:', err);
     process.exit(1);
@@ -1844,6 +1873,15 @@ app.get('/api/health', (_req, res) => {
     alerts: alerts ? alerts.stats() : null,
     watchlist: watchlist ? watchlist.stats() : null,
     scanner: scanner ? scanner.stats() : null,
+    // T-380 (security audit #9): surface audit-degraded state so operators
+    // can detect serialization failures that would have been silently
+    // swallowed by the call-site try/catch pattern in users.js + others.
+    audit: {
+      seq: auditSeq,
+      degradedCount: auditDegradedCount,
+      lastError: auditLastDegradedError,
+      lastAt: auditLastDegradedAt,
+    },
   });
 });
 
