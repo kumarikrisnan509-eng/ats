@@ -792,23 +792,20 @@ app.get('/api/market/holidays', (_req, res) => {
   res.json({ ok: true, ...r });
 });
 
-app.post('/api/admin/market/refresh-holidays', async (req, res) => {
-  if (!req.user || !req.user.is_admin) return res.status(403).json({ ok: false, reason: 'admin_only' });
-  if (!_marketMeta) return res.status(503).json({ ok: false, reason: 'market_meta_unavailable' });
-  const r = await _marketMeta.refreshFromBroker();
-  res.json(r);
-});
-
 // ---------- Tier 80: daily auto-reauth cron (per-user headless Kite login) ----------
 // _cronReauth is initialised inside init() once db + vault are ready.
 let _cronReauth = null;
 
-// Tier 80: admin-only manual trigger (for testing the cron without waiting until 05:45 IST)
-app.post('/api/admin/cron-reauth/run', async (req, res) => {
-  if (!req.user || !req.user.is_admin) return res.status(403).json({ ok: false, reason: 'admin_only' });
-  if (!_cronReauth) return res.status(503).json({ ok: false, reason: 'cron_unavailable' });
-  const r = await _cronReauth.runNow();
-  res.json(r);
+// T-388 (architecture audit #1, god-object split #5): 3 admin singleton
+// routes (market/refresh-holidays, cron-reauth/run, observability) extracted
+// to routes/admin-misc.js. The underlying singletons (_marketMeta /
+// _cronReauth / _obs) stay in server.js because other code paths still
+// reference them directly; getters pass through the latest value.
+const { mountAdminMiscRoutes } = require('./routes/admin-misc');
+mountAdminMiscRoutes(app, {
+  getMarketMeta: () => _marketMeta,
+  getCronReauth: () => _cronReauth,
+  getObs,
 });
 
 // ---------- Tier 70: observability (request-id, latency, error capture) ----------
@@ -827,19 +824,6 @@ function getObs() {
     return null;
   }
 }
-
-// Tier 70: admin-only observability snapshots (latency + recent errors)
-app.get('/api/admin/observability', (req, res) => {
-  const obs = getObs();
-  if (!obs) return res.status(503).json({ ok: false, reason: 'observability_unavailable' });
-  // Admin gate: require authenticated + is_admin
-  if (!req.user || !req.user.is_admin) return res.status(403).json({ ok: false, reason: 'admin_only' });
-  res.json({
-    ok: true,
-    latency: obs.snapshot(),
-    recentErrors: obs.recentErrors(50),
-  });
-});
 
 // T-387 (architecture audit #1, god-object split #4): 3 AI admin routes
 // (ai-trace, ai-replay, ai-compare) extracted to routes/ai-admin.js.
