@@ -307,12 +307,12 @@ const PipelineFlow = () => {
     const t = setInterval(load, 30000);
     return () => { cancelled = true; clearInterval(t); };
   }, []);
-  const fmtINR = (n) => {
-    if (n == null) return '—';
-    if (n >= 100000) return '₹' + (n/100000).toFixed(2) + 'L';
-    if (n >= 1000) return '₹' + (n/1000).toFixed(1) + 'k';
-    return '₹' + n;
-  };
+  // T-383 (audit, formatINR consolidation): was an ad-hoc 6-line helper
+  // duplicating compact-mode formatting that already lives in
+  // window.formatINR (src/r11-additions.jsx). Kept the local name to
+  // minimise call-site churn. Note: canonical uses uppercase 'K' (vs
+  // ad-hoc's 'k') -- minor tonal change, not a bug.
+  const fmtINR = (n) => window.formatINR(n, 'compact');
 
   const activeModes = window.MODE_IDS.filter(id => window.isModeActive(id));
   const inactiveCount = 4 - activeModes.length;

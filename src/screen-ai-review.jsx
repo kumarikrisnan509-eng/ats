@@ -105,13 +105,13 @@ const AIReviewScreen = () => {
       ];
   // Find the live row for the selected month (or null if user has none)
   const liveRow = liveMonthRows.find(r => r.month === month) || null;
-  // Helper: format ₹ value with +/- sign
-  function _fmtINR(n) {
-    if (n == null || !Number.isFinite(n)) return '—';
-    const abs = Math.abs(n);
-    const s = abs >= 100000 ? `₹${(abs/100000).toFixed(2)}L` : `₹${abs.toLocaleString('en-IN')}`;
-    return (n >= 0 ? '+' : '-') + s;
-  }
+  // T-383 (audit, formatINR consolidation): was an ad-hoc 6-line helper
+  // duplicating logic that already lives in window.formatINR
+  // (src/r11-additions.jsx). Kept the local name to minimise call-site
+  // churn; behavior is `{ sign: true }` (returns +/- prefix). The
+  // canonical helper also handles full Indian grouping and ₹/Cr/L/K
+  // compact mode -- both are improvements over the ad-hoc version.
+  const _fmtINR = (n) => window.formatINR(n, { sign: true });
 
   const strategies = [
     { name: "Momentum AI (Intraday)", mode: "Intraday", trades: 142, win: 58, pnl: 48200, sharpe: 1.84, drift: "stable", verdict: "keep", reason: "Consistent with last 3mo baseline. Confidence calibration within 4% of expected." },
