@@ -2078,58 +2078,10 @@ mountAutorunRoutes(app, { getAutorun: () => autorun });
 const { mountNewsRoutes } = require('./routes/news');
 mountNewsRoutes(app, { getNews: () => news });
 
-// ---------- Tax planning ----------
-app.get('/api/tax/goals', (_req, res) => {
-  if (!tax) return res.status(503).json({ ok:false, reason:'tax_not_initialized' });
-  res.json({ ok:true, goals: tax.getGoals() });
-});
-app.put('/api/tax/goals', (req, res) => {
-  if (!tax) return res.status(503).json({ ok:false, reason:'tax_not_initialized' });
-  try {
-    const goals = tax.setGoals((req.body && req.body.goals) || []);
-    res.json({ ok:true, goals });
-  } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
-});
-app.get('/api/tax/harvest', (_req, res) => {
-  if (!tax) return res.status(503).json({ ok:false, reason:'tax_not_initialized' });
-  res.json({ ok:true, rules: tax.getHarvestRules(), opportunities: tax.findHarvestOpportunities() });
-});
-app.put('/api/tax/harvest', (req, res) => {
-  if (!tax) return res.status(503).json({ ok:false, reason:'tax_not_initialized' });
-  try {
-    const rules = tax.setHarvestRules((req.body && req.body.rules) || {});
-    res.json({ ok:true, rules });
-  } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
-});
-app.post('/api/tax/realize', (req, res) => {
-  if (!tax) return res.status(503).json({ ok:false, reason:'tax_not_initialized' });
-  try {
-    const entry = tax.realizeHarvest((req.body && req.body.tradeIds) || [], req.body && req.body.note);
-    res.json({ ok:true, entry });
-  } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
-});
-
-// ---------- Sweep (profit -> long-term) ----------
-app.get('/api/sweep', (_req, res) => {
-  if (!sweep) return res.status(503).json({ ok:false, reason:'sweep_not_initialized' });
-  res.json({ ok:true, rules: sweep.getRules(), history: sweep.history(50), stats: sweep.stats() });
-});
-app.put('/api/sweep', (req, res) => {
-  if (!sweep) return res.status(503).json({ ok:false, reason:'sweep_not_initialized' });
-  try {
-    const rules = sweep.setRules((req.body && req.body.rules) || []);
-    res.json({ ok:true, rules });
-  } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
-});
-app.get('/api/sweep/evaluate', (_req, res) => {
-  if (!sweep) return res.status(503).json({ ok:false, reason:'sweep_not_initialized' });
-  res.json({ ok:true, ...sweep.evaluate() });
-});
-app.post('/api/sweep/execute', (_req, res) => {
-  if (!sweep) return res.status(503).json({ ok:false, reason:'sweep_not_initialized' });
-  const r = sweep.execute();
-  res.json({ ok:true, ...r });
-});
+// ---------- Tax planning + Sweep (profit -> long-term) ----------
+// T-394 (god-object split #11): 9 tax + sweep routes extracted to routes/tax-sweep.js.
+const { mountTaxSweepRoutes } = require('./routes/tax-sweep');
+mountTaxSweepRoutes(app, { getTax: () => tax, getSweep: () => sweep });
 
 // ---------- AI features (no-op if ANTHROPIC_API_KEY not set) ----------
 app.post('/api/ai/news-sentiment', async (req, res) => {
