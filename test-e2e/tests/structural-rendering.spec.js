@@ -161,16 +161,20 @@ test.describe('structural rendering -- auth-gated', () => {
       // covers the slowest screen's load() round-trip on typical CI latency.
       // The proper long-term fix is to render labels eagerly (not gated by
       // loading), but that's a per-screen refactor across many files.
-      await page.waitForTimeout(3500);
+      // T-373: switched from snapshot-based label check (page.evaluate +
+      // sleep) to Playwright's auto-retrying locator. The previous snapshot
+      // fired before React had mounted the app shell in slow CI runs,
+      // yielding `.content` === null -> label=null errors on #riskcockpit
+      // and #calibration. Auto-retry polls until the assertion passes OR
+      // the timeout expires.
 
-      // 1. data-screen-label matches.
-      const label = await page.evaluate(() => {
-        const el = document.querySelector('.content');
-        return el ? el.getAttribute('data-screen-label') : null;
-      });
+      // 1. data-screen-label matches. 15s timeout covers worst-case CI mount.
       if (contract.label) {
-        expect(label, `${route} expected label "${contract.label}" but got "${label}"`)
-          .toBe(contract.label);
+        await expect(page.locator('.content'), `${route} expected label "${contract.label}"`)
+          .toHaveAttribute('data-screen-label', contract.label, { timeout: 15000 });
+      } else {
+        await expect(page.locator('.content'), `${route} .content not present`)
+          .toBeAttached({ timeout: 15000 });
       }
 
       // Read visible text from #root (innerText respects display:none).
@@ -192,10 +196,12 @@ test.describe('structural rendering -- auth-gated', () => {
       expect(text.trim().length, `${route} rendered an empty or tiny page (${text.trim().length} chars)`)
         .toBeGreaterThan(80);
 
-      // 5. Per-route required text contract.
+      // 5. Per-route required text contract. T-373: locator.toContainText
+      // auto-retries each needle individually, handling screens that render
+      // static structure first then fill in dynamic text later.
       for (const needle of (contract.required || [])) {
-        expect(text, `${route} missing required text: "${needle}"`)
-          .toContain(needle);
+        await expect(page.locator('#root'), `${route} missing required text: "${needle}"`)
+          .toContainText(needle, { timeout: 10000 });
       }
     });
   }
