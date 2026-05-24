@@ -4212,15 +4212,12 @@ app.post('/api/email/send', async (req, res) => {
 const { mountEmailAdminRoutes } = require('./routes/email-admin');
 mountEmailAdminRoutes(app, { getEmailAlerts: () => emailAlerts, audit, requireInternal, express });
 
-// ---------- Tier 28: WhatsApp alerts (Twilio HTTP) ----------
-app.get('/api/whatsapp/status', (_req, res) => {
-  if (!whatsAppAlerts) return res.status(503).json({ ok:false, reason:'whatsapp_not_initialized' });
-  res.json({ ok:true, ...whatsAppAlerts.status() });
-});
+// ---------- Tier 28 (WhatsApp) + Tier 47 (email digest) ----------
+// T-397 (god-object split #14): 4 notification routes (whatsapp/status,
+// whatsapp/send, digest/preview, digest/send) extracted to routes/notifications.js.
+const { mountNotificationRoutes } = require('./routes/notifications');
+mountNotificationRoutes(app, { getWhatsApp: () => whatsAppAlerts, getDigest: () => digest });
 
-// Tier 47: daily / weekly digest. Build + send via Tier 27 EmailAlerts.
-//   POST /api/digest/send  body: { kind?: 'daily'|'weekly', to?: '...' }
-//   GET  /api/digest/preview?kind=...  -> returns the rendered HTML (no send)
 // Tier 46: parse uploaded CAS (Consolidated Account Statement) PDF text.
 // Caller does `pdftotext your-cas.pdf -` and POSTs the stdout here. Returns
 // PAN, period, total value, folio + scheme breakdown.
@@ -4234,29 +4231,6 @@ app.post('/api/cas/parse', express.json({ limit: '8mb' }), (req, res) => {
     res.json({ ok: true, ...out });
   } catch (e) { res.status(500).json({ ok:false, reason: e.message }); }
 });
-
-app.post('/api/digest/send', async (req, res) => {
-  if (!digest) return res.status(503).json({ ok:false, reason:'digest_not_initialized' });
-  const { kind, to } = req.body || {};
-  const r = await digest.send({ kind: kind || 'daily', to });
-  res.json(r);
-});
-app.get('/api/digest/preview', (req, res) => {
-  if (!digest) return res.status(503).json({ ok:false, reason:'digest_not_initialized' });
-  try {
-    const { subject, html } = digest.build({ kind: req.query.kind || 'daily' });
-    res.set('Content-Type', 'text/html; charset=utf-8');
-    res.send(html);
-  } catch (e) { res.status(500).json({ ok:false, reason: e.message }); }
-});
-
-app.post('/api/whatsapp/send', async (req, res) => {
-  if (!whatsAppAlerts) return res.status(503).json({ ok:false, reason:'whatsapp_not_initialized' });
-  const { to, body } = req.body || {};
-  const r = await whatsAppAlerts.send({ to, body });
-  res.json(r);
-});
-
 
 // @deprecated T-186 (SCREENS-AUDIT F-11): use POST /api/me/ai-workflows/monthly-review
 // instead. The new endpoint:
