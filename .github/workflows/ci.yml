@@ -164,6 +164,26 @@ jobs:
           rm -rf .ci-tmp-tsc
           echo "JSDoc typecheck OK"
 
+      - name: ESLint backend (T-381 -- catch ReferenceError class pre-deploy)
+        run: |
+          set -e
+          # T-381 (architecture audit MED, high signal): ESLint with no-undef +
+          # no-redeclare catches the bug class that bit T-377 (verifyTokenForUrl
+          # ReferenceError -- undefined identifier inside a function body that
+          # node --check cannot detect). Same .ci-tmp pattern as the @babel/parser
+          # and tsc steps -- no package-lock mutation, throwaway install.
+          # On the initial sweep this caught an undeclared `nseMacroFetcher`
+          # in server.js (implicit global from CommonJS non-strict-mode), now
+          # fixed. Going forward this gate prevents the same class from
+          # re-shipping.
+          mkdir -p .ci-tmp-eslint && cd .ci-tmp-eslint
+          echo '{"name":"ci-tmp-eslint","version":"0.0.0","private":true,"type":"module"}' > package.json
+          npm install --silent --no-save --no-package-lock eslint@9 >/dev/null
+          cd ..
+          ./.ci-tmp-eslint/node_modules/.bin/eslint --max-warnings=1000 deploy/backend/
+          rm -rf .ci-tmp-eslint
+          echo "ESLint backend OK"
+
       - name: Backend unit tests (node:test)
         working-directory: deploy/backend
         env:
