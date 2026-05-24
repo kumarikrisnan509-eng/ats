@@ -53,9 +53,10 @@ function mountAuthRoutes(app, deps) {
     try {
       const { email, password, name } = req.body || {};
       const r = await auth.signup({ email, password, name });
-      // If a non-first user, send verification email (Tier 51)
+      // T-377: pass the PLAINTEXT verifyToken (DB has only the hash now).
+      // Without this, sendVerificationEmail can't build a working link.
       if (r.verifyToken && emailAlerts) {
-        try { await auth.sendVerificationEmail({ user: r.user, baseUrl: req.protocol + '://' + req.headers.host }); }
+        try { await auth.sendVerificationEmail({ user: r.user, baseUrl: req.protocol + '://' + req.headers.host, verifyTokenPlain: r.verifyToken }); }
         catch (_) {}
       }
       res.status(201).json({ ok:true, user: { id: r.user.id, email: r.user.email, name: r.user.name, is_verified: !!r.user.is_verified, is_admin: !!r.user.is_admin } });

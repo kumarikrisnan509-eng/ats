@@ -30,6 +30,34 @@
 
 const crypto = require('crypto');
 
+// T-377: per-process clientOrderId idempotency cache (60s TTL). Returns cached
+// response if same clientOrderId seen within window -- mitigates double-click
+// races. Pure in-memory; process-restart clears state (duplicates that survive
+// a restart are vanishingly rare). Cleanup runs piggybacked on each insertion
+// to bound the map's size.
+const _orderIdempotency = new Map();   // clientOrderId -> { ts, status, body }
+const _ORDER_IDEMP_TTL_MS = 60_000;
+function _idempotencyGet(cid) {
+  if (!cid) return null;
+  const rec = _orderIdempotency.get(cid);
+  if (!rec) return null;
+  if (Date.now() - rec.ts > _ORDER_IDEMP_TTL_MS) {
+    _orderIdempotency.delete(cid);
+    return null;
+  }
+  return rec;
+}
+function _idempotencySet(cid, status, body) {
+  if (!cid) return;
+  _orderIdempotency.set(cid, { ts: Date.now(), status, body });
+  if (_orderIdempotency.size > 500) {
+    const cutoff = Date.now() - _ORDER_IDEMP_TTL_MS;
+    for (const [k, v] of _orderIdempotency) {
+      if (v.ts < cutoff) _orderIdempotency.delete(k);
+    }
+  }
+}
+
 function mountOrdersRoutes(app, deps) {
   const {
     // Env-derived numeric caps + flags (constants, safe to pass by value)
@@ -132,6 +160,17 @@ function mountOrdersRoutes(app, deps) {
       return res.status(400).json({ ok:false, reason:`${orderType} order requires triggerPrice > 0` });
 
     const clientOrderId = body.clientOrderId || crypto.randomUUID();
+
+    // T-377: idempotency -- if this clientOrderId was placed in the last 60s,
+    // return the cached response instead of placing again. Mitigates browser
+    // double-click and network retry races.
+    {
+      const cached = _idempotencyGet(clientOrderId);
+      if (cached) {
+        audit('order.dedup', { clientOrderId });
+        return res.status(cached.status).json(cached.body);
+      }
+    }
 
     const normalizedPayload = {
       strategyTag: String(body.strategyTag),
@@ -416,11 +455,15 @@ function mountOrdersRoutes(app, deps) {
     _p.broker.placeOrder(normalizedPayload)
       .then((result) => {
         audit('order.placed', { clientOrderId, result, isUserOwn: _p.isUserOwn });
-        res.json({ ok: true, clientOrderId, isUserOwn: _p.isUserOwn, ...result });
+        const body = { ok: true, clientOrderId, isUserOwn: _p.isUserOwn, ...result };
+        _idempotencySet(clientOrderId, 200, body);
+        res.json(body);
       })
       .catch((err) => {
         audit('order.placeError', { clientOrderId, msg: err.message, isUserOwn: _p.isUserOwn });
-        res.status(502).json({ ok: false, reason: err.message, clientOrderId });
+        const body = { ok: false, reason: err.message, clientOrderId };
+        _idempotencySet(clientOrderId, 502, body);
+        res.status(502).json(body);
       });
   }));
 
