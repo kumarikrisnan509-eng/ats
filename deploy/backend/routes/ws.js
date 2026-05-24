@@ -80,7 +80,13 @@ function mountWs(server, deps) {
     const broker = getBroker();
     const watchlist = getWatchlist();
     if (wsClients.size > MAX_WS_CLIENTS) { ws.close(1013, 'too many clients'); return; }
-    wsClients.add(ws);
+
+    // T-379 (security audit #5): do NOT add to wsClients yet -- run auth
+    // FIRST. If an exception fires before reaching the welcome packet,
+    // having the socket already in the broadcast set would expose them to
+    // ticks meant for authed users (today: market-data ticks are public,
+    // future: per-user ticks). Adding AFTER auth keeps the broadcast set
+    // a known-quantity set.
 
     // T-130 (Tier 75 Phase 1): WebSocket auth-on-connect.
     //
@@ -101,9 +107,21 @@ function mountWs(server, deps) {
       if (sid && db && db.sessions && typeof db.sessions.get === 'function') {
         const row = db.sessions.get(sid);
         if (row && row.user_id) {
-          const now = Date.now();
-          const exp = row.expires_at ? Number(row.expires_at) : 0;
-          if (!exp || exp > now) {
+          // T-379 (security audit #16): expires_at may be a number (epoch ms)
+          // OR an ISO/datetime string from SQLite. The previous
+          // `Number(row.expires_at)` returned NaN for ISO strings, and
+          // `!exp || exp > now` treated NaN as "no expiry" -- stale sessions
+          // would ride forever. Mirror users.js getSession() robust parse.
+          let valid = true;
+          if (row.expires_at) {
+            const exp = (typeof row.expires_at === 'number')
+              ? row.expires_at
+              : new Date(row.expires_at).getTime();
+            if (!Number.isFinite(exp) || exp <= 0 || exp <= Date.now()) {
+              valid = false;
+            }
+          }
+          if (valid) {
             ws.userId = row.user_id;
             // Try to enrich with email — best-effort, the welcome packet can
             // still go out if this fails.
@@ -119,6 +137,11 @@ function mountWs(server, deps) {
     } catch (e) {
       console.warn('[ws] auth lookup error (continuing anonymous):', e && e.message);
     }
+
+    // T-379: now safe to add. We know who this socket is (or that it's
+    // explicitly anonymous). Future per-user broadcast filtering can rely
+    // on ws.userId being set BEFORE the socket lands in the broadcast set.
+    wsClients.add(ws);
 
     audit('ws.connect', {
       ip: req.socket.remoteAddress,

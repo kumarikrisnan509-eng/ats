@@ -106,7 +106,13 @@ function createUsers({ db, emailAlerts, audit, secureCookie }) {
 
     if (!bcrypt) throw new Error('bcrypt not installed on server');
     const password_hash = await bcrypt.hash(password, BCRYPT_COST);
-    const verification_token = _hex(32);
+    // T-379 (security audit, completes T-377): hash the verification token
+    // before storing. Same rationale as reset-token: 32 bytes high-entropy
+    // -> SHA-256 sufficient + deterministic for lookup. DB compromise no
+    // longer leaks usable verification tokens that could be replayed by an
+    // attacker to verify other people's accounts.
+    const verification_token_plain = _hex(32);
+    const verification_token = _hashToken(verification_token_plain);
     const first = isFirstUser();
 
     const r = db.users.create({
@@ -125,7 +131,10 @@ function createUsers({ db, emailAlerts, audit, secureCookie }) {
 
     return {
       user: db.users.byId(userId),
-      verifyToken: first ? null : verification_token,   // first user doesn't need verify
+      // T-379: callers must use the PLAIN token (for email URL) -- DB now
+      // stores only the hash so user.verification_token is no longer usable
+      // for the email-sender path.
+      verifyToken: first ? null : verification_token_plain,   // first user doesn't need verify
     };
   }
 
@@ -216,7 +225,9 @@ function createUsers({ db, emailAlerts, audit, secureCookie }) {
 
   async function verifyEmail(token) {
     if (!token) throw new Error('verification token required');
-    const u = db.users.byVerifyToken(token);
+    // T-379: URL carries plain token, DB stores hash. Hash input + lookup
+    // by hash. Mirrors the reset-token pattern.
+    const u = db.users.byVerifyToken(_hashToken(token));
     if (!u) throw new Error('invalid or expired verification token');
     if (u.is_verified) return { user: u, alreadyVerified: true };
     db.users.markVerified(u.id);
@@ -274,10 +285,16 @@ function createUsers({ db, emailAlerts, audit, secureCookie }) {
     return { ok: true, user: db.users.byId(u.id) };
   }
 
-  async function sendVerificationEmail({ user, baseUrl }) {
-    if (!user || !user.verification_token) return { ok: false, reason: 'no_token' };
+  async function sendVerificationEmail({ user, baseUrl, verifyTokenPlain }) {
+    // T-379: callers MUST pass the PLAIN token (returned by signup() as
+    // `verifyToken`). user.verification_token is now the HASH (T-379 edit 1)
+    // and cannot be embedded in a URL. Without verifyTokenPlain we have no
+    // usable token -- return early instead of crashing with ReferenceError
+    // (the old code referenced an undefined `verifyTokenForUrl` symbol).
+    if (!user) return { ok: false, reason: 'no_user' };
+    if (!verifyTokenPlain) return { ok: false, reason: 'no_plain_token' };
     if (!emailAlerts || typeof emailAlerts.send !== 'function') return { ok: false, reason: 'email_not_configured' };
-    const verifyUrl = `${(baseUrl || 'https://ats.rajasekarselvam.com').replace(/\/$/, '')}/verify-email?token=${verifyTokenForUrl}`;
+    const verifyUrl = `${(baseUrl || 'https://ats.rajasekarselvam.com').replace(/\/$/, '')}/verify-email?token=${verifyTokenPlain}`;
     try {
       const r = await emailAlerts.send({
         to: user.email,
