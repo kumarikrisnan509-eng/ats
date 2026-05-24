@@ -2069,33 +2069,9 @@ app.post('/api/pnl/snapshot', (_req, res) => {
 });
 
 // ---------- Strategy auto-runner ----------
-// GET /api/autorun -- current config + last 25 runs + stats
-app.get('/api/autorun', (_req, res) => {
-  if (!autorun) return res.status(503).json({ ok:false, reason:'autorun_not_initialized' });
-  res.json({ ok:true, config: autorun.config(), stats: autorun.stats(), history: autorun.history(25) });
-});
-// PUT /api/autorun  body: { enabled, strategy, symbol, params, qty, interval, intervalMinutes, candleLookbackDays }
-app.put('/api/autorun', (req, res) => {
-  if (!autorun) return res.status(503).json({ ok:false, reason:'autorun_not_initialized' });
-  try {
-    const cfg = autorun.setConfig(req.body || {});
-    res.json({ ok:true, config: cfg, stats: autorun.stats() });
-  } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
-});
-// POST /api/autorun/run -- manual evaluation trigger
-app.post('/api/autorun/run', async (_req, res) => {
-  if (!autorun) return res.status(503).json({ ok:false, reason:'autorun_not_initialized' });
-  try {
-    const run = await autorun.runOnce({ source: 'manual' });
-    res.json({ ok:true, run });
-  } catch (e) { res.status(500).json({ ok:false, reason:e.message }); }
-});
-// DELETE /api/autorun -- clear config + stop timer
-app.delete('/api/autorun', (_req, res) => {
-  if (!autorun) return res.status(503).json({ ok:false, reason:'autorun_not_initialized' });
-  autorun.clearConfig();
-  res.json({ ok:true, stats: autorun.stats() });
-});
+// T-393 (god-object split #10): 4 autorun routes extracted to routes/autorun.js.
+const { mountAutorunRoutes } = require('./routes/autorun');
+mountAutorunRoutes(app, { getAutorun: () => autorun });
 
 // ---------- News feed ----------
 // T-392 (god-object split #9): 3 news routes extracted to routes/news.js.
