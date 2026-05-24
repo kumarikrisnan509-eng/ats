@@ -2030,41 +2030,11 @@ const { mountTaxSweepRoutes } = require('./routes/tax-sweep');
 mountTaxSweepRoutes(app, { getTax: () => tax, getSweep: () => sweep });
 
 // ---------- AI features (no-op if ANTHROPIC_API_KEY not set) ----------
-app.post('/api/ai/news-sentiment', async (req, res) => {
-  if (!ai || !ai.enabled()) return res.status(503).json({ ok:false, reason:'ai_disabled', detail:'set ANTHROPIC_API_KEY env to enable' });
-  try {
-    const items = Array.isArray(req.body && req.body.items) ? req.body.items : (news ? news.list({ limit: 10 }) : []);
-    const out = await ai.newsSentiment(items);
-    res.json({ ok:true, sentiments: out, stats: ai.stats() });
-  } catch (e) { res.status(500).json({ ok:false, reason:e.message }); }
-});
-app.post('/api/ai/position-review', async (_req, res) => {
-  if (!ai || !ai.enabled()) return res.status(503).json({ ok:false, reason:'ai_disabled' });
-  try {
-    const positions = paper ? paper.positions() : [];
-    const out = await ai.positionReview(positions);
-    res.json({ ok:true, review: out, stats: ai.stats() });
-  } catch (e) { res.status(500).json({ ok:false, reason:e.message }); }
-});
-// @deprecated T-186 (SCREENS-AUDIT F-11): use POST /api/me/ai-workflows/explain
-// instead. The new endpoint:
-//   - is auth-required and BYOK (per-user API key via vault), so spend is
-//     attributed and capped per user instead of charged to the single legacy
-//     ANTHROPIC_API_KEY this route reads.
-//   - takes { strategy_id, mode? } (strategy_id must exist in STRATEGIES)
-//     instead of arbitrary { strategy, symbol, params, stats } here.
-//   - returns structured { what_it_does, how_it_decides, when_it_works,
-//     when_it_fails, example } instead of free-form { summary, stats }.
-// This handler stays for backward compatibility with screen-ai-review.jsx and
-// any external clients that still call it. A future commit will migrate the
-// screen and remove this route; do not add new callers.
-app.post('/api/ai/strategy-explain', async (req, res) => {
-  if (!ai || !ai.enabled()) return res.status(503).json({ ok:false, reason:'ai_disabled' });
-  try {
-    const out = await ai.strategyExplain(req.body || {});
-    res.json({ ok:true, ...out, stats: ai.stats() });
-  } catch (e) { res.status(500).json({ ok:false, reason:e.message }); }
-});
+// T-396 (god-object split #13): 3 legacy AI POST routes extracted to
+// routes/ai-features.js. /api/me/ai-workflows/* (BYOK, per-user) lives
+// separately in ai-workflows-routes.js.
+const { mountAiFeatureRoutes } = require('./routes/ai-features');
+mountAiFeatureRoutes(app, { getAi: () => ai, getNews: () => news, getPaper: () => paper });
 
 // ---------- Settlement CSV reconcile ----------
 app.post('/api/reconcile/import-csv', (req, res) => {
