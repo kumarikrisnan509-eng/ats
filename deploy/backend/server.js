@@ -2552,26 +2552,10 @@ app.get('/api/benchmark', async (req, res) => {
 });
 
 // ---------- Scanner ----------
-app.get('/api/scanner', (_req, res) => {
-  if (!scanner) return res.status(503).json({ ok: false, reason: 'scanner_not_initialized' });
-  res.json({ ok: true, ...scanner.stats() });
-});
-
-app.get('/api/scanner/history', (req, res) => {
-  if (!scanner) return res.status(503).json({ ok: false, reason: 'scanner_not_initialized' });
-  const limit = parseInt(req.query.limit || '25', 10);
-  res.json({ ok: true, history: scanner.history(limit) });
-});
-
-app.post('/api/scanner/run', async (req, res) => {
-  if (!scanner) return res.status(503).json({ ok: false, reason: 'scanner_not_initialized' });
-  // Async: kick it off and return immediately so the HTTP request doesn't hold open
-  // for 15+ seconds across the watchlist.
-  scanner.runOnce({ manual: true, limit: req.body && req.body.limit })
-    .then((r) => audit('scanner.runOnce', r))
-    .catch((e) => audit('scanner.runOnce.error', { msg: e.message }));
-  res.status(202).json({ ok: true, accepted: true, note: 'scanning in background — poll /api/scanner/history' });
-});
+// T-390 (architecture audit #1, god-object split #7): 3 scanner routes
+// (status, history, run) extracted to routes/scanner.js.
+const { mountScannerRoutes } = require('./routes/scanner');
+mountScannerRoutes(app, { getScanner: () => scanner, audit });
 
 // ---------- Watchlist ----------
 app.get('/api/watchlist', withDeprecation('/api/me/watchlist', (_req, res) => {
