@@ -2396,25 +2396,11 @@ app.get('/api/me/bulk-deals/symbol/:sym', async (req, res) => {
   }
 });
 
-// ============ T-248: ALL /api/me/mf/* endpoints retired ============
-// 6 endpoints were serving MF data: 2 inline (search + nav) using AMFI scheme
-// master (G8 MfData), 4 in routes/mf.js (holdings/sips/orders/instruments)
-// wrapping Kite Connect's MF API. All retired because Kite's MF API is
-// GET-only by Zerodha/SEBI bank-mandate design -- the platform never had
-// MF placement and the surface was a misleading affordance. Long-term
-// passive investing pivots to ETF baskets at #longterm via /api/orders/place.
-// Compat: 410 Gone for ~30 days. Drop the stubs on or after 2026-06-19.
-const _mfGone = (which) => (_req, res) => res.status(410).json({
-  ok: false, reason: 'gone', endpoint: which,
-  detail: 'MF endpoints retired in T-248. Kite Connect MF API is read-only by Zerodha/SEBI design; platform never had MF placement. Long-term investing moved to ETF baskets at #longterm. Refresh the page for the new UI.',
-});
-app.get('/api/me/mf/search',      _mfGone('search'));
-app.get('/api/me/mf/nav/:code',   _mfGone('nav'));
-app.get('/api/me/mf/holdings',    _mfGone('holdings'));
-app.get('/api/me/mf/sips',        _mfGone('sips'));
-app.get('/api/me/mf/orders',      _mfGone('orders'));
-app.get('/api/me/mf/instruments', _mfGone('instruments'));
-app.get('/api/me/portfolio/mf',   _mfGone('portfolio_mf'));   // T-243 alias retired with the rest
+// T-382 (architecture audit #9): /api/me/mf/* 410 Gone stubs extracted to
+// routes/legacy-gone.js. See that module's header for T-248 history and
+// the planned drop date (2026-06-19+).
+const { mountLegacyGoneRoutes } = require('./routes/legacy-gone');
+mountLegacyGoneRoutes(app);
 
 // ---------- P&L Attribution ----------
 // GET /api/pnl/daily?days=30 -- equity time series
