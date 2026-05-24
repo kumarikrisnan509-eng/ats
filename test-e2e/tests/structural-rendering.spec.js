@@ -154,17 +154,23 @@ test.describe('structural rendering -- auth-gated', () => {
       await page.goto(`/${route}`, { waitUntil: 'networkidle' });
       // 1200ms covers our typical fetch-then-render path against prod with
       // cold caches. Same value visual-rendering uses.
-      await page.waitForTimeout(1200);
+      // T-368c: bumped from 1200 to 3500ms. Multi-fetch screens (options-opps,
+      // calibration, riskcockpit -- each does 2+ parallel fetches on mount)
+      // intermittently failed under CI network latency because their static
+      // labels (e.g. "Scanner") only render after `loading=false`. 3500ms
+      // covers the slowest screen's load() round-trip on typical CI latency.
+      // The proper long-term fix is to render labels eagerly (not gated by
+      // loading), but that's a per-screen refactor across many files.
+      await page.waitForTimeout(3500);
 
       // 1. data-screen-label matches.
-      // T-349 followup: when the wider prod-readiness suite runs in parallel,
-      // the .content element can be queried before React has populated the
-      // attribute. Use Playwright's auto-retrying locator assertion instead
-      // of a one-shot page.evaluate(getAttribute) so the check waits up to
-      // 5s for the attribute to materialise.
+      const label = await page.evaluate(() => {
+        const el = document.querySelector('.content');
+        return el ? el.getAttribute('data-screen-label') : null;
+      });
       if (contract.label) {
-        await expect(page.locator('.content'))
-          .toHaveAttribute('data-screen-label', contract.label, { timeout: 5000 });
+        expect(label, `${route} expected label "${contract.label}" but got "${label}"`)
+          .toBe(contract.label);
       }
 
       // Read visible text from #root (innerText respects display:none).
