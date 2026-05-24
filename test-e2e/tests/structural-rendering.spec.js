@@ -196,12 +196,18 @@ test.describe('structural rendering -- auth-gated', () => {
       expect(text.trim().length, `${route} rendered an empty or tiny page (${text.trim().length} chars)`)
         .toBeGreaterThan(80);
 
-      // 5. Per-route required text contract. T-373: locator.toContainText
-      // auto-retries each needle individually, handling screens that render
-      // static structure first then fill in dynamic text later.
+      // 5. Per-route required text contract.
+      // NOTE: must use page.evaluate(innerText) snapshot, NOT
+      // expect(locator).toContainText() -- innerText returns CSS-styled
+      // text (honors textTransform:uppercase, so "Today's plan" appears
+      // as "TODAY'S PLAN"), while Playwright's toContainText reads raw
+      // textContent which would miss CSS-uppercased needles like
+      // "TODAY'S PLAN", "AVG SLIPPAGE", etc. We give the page extra time
+      // to settle via the auto-retrying label check above, so by the time
+      // we snapshot text the dynamic content has rendered.
       for (const needle of (contract.required || [])) {
-        await expect(page.locator('#root'), `${route} missing required text: "${needle}"`)
-          .toContainText(needle, { timeout: 10000 });
+        expect(text, `${route} missing required text: "${needle}"`)
+          .toContain(needle);
       }
     });
   }
