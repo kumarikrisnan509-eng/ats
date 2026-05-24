@@ -117,30 +117,31 @@ window.RiskCockpitScreen = function RiskCockpitScreen() {
     if (data) fetchStress(shockPct);
   }, [shockPct, data && data.positionCount]);
 
-  if (loading && !data) {
-    return <div style={{ padding: 24, color: 'var(--text-3)' }}>Loading risk cockpit...</div>;
-  }
-  if (error && !data) {
-    return (
-      <div style={{ padding: 24 }}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--down, #b91c1c)', marginBottom: 8 }}>
-          Couldn't load aggregates
-        </div>
-        <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{error}</div>
-        <button onClick={fetchAggregates} style={_btnStyle}>Retry</button>
-      </div>
-    );
-  }
-  if (!data) return null;
-
-  const positions = Array.isArray(data.positions) ? data.positions : [];
-  const sectors   = data.bySector || {};
-  const strategies = data.byStrategy || {};
-  const conc = data.topConcentration || {};
-  const concAlert = Number.isFinite(conc.pct) && conc.pct > 30;
+  // T-378: do NOT return early on loading/error. The page's static structure
+  // (h2 'Risk Cockpit', REGIME banner, KPI labels TOTAL VALUE / CASH / MTM P&L
+  // / GROSS EXPOSURE / LEVERAGE) MUST render so prod-readiness.spec sees the
+  // expected text contract even when one of the 4 parallel fetches gets
+  // rate-limited (429). Loading/error state is now an inline banner at the
+  // top of the page; structure renders against safe-defaulted data.
+  const safeData = data || {};
+  const positions = Array.isArray(safeData.positions) ? safeData.positions : [];
+  const sectors    = safeData.bySector || {};
+  const strategies = safeData.byStrategy || {};
+  const conc       = safeData.topConcentration || {};
+  const concAlert  = Number.isFinite(conc.pct) && conc.pct > 30;
 
   return (
     <div style={{ padding: '0 24px 24px 24px' }}>
+      {loading && !data && (
+        <div style={{ padding: '6px 10px', marginBottom: 8, background: 'var(--bg-soft)', borderRadius: 6, fontSize: 12, color: 'var(--text-2)' }}>
+          Loading risk cockpit…
+        </div>
+      )}
+      {error && !data && (
+        <div style={{ padding: '6px 10px', marginBottom: 8, background: 'rgba(185,28,28,0.08)', borderRadius: 6, fontSize: 12, color: 'var(--down, #b91c1c)' }}>
+          Could not load aggregates: {String(error)}
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: 20, color: 'var(--text-1)' }}>Risk Cockpit</h2>
@@ -177,12 +178,12 @@ window.RiskCockpitScreen = function RiskCockpitScreen() {
 
       {/* KPI row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 20 }}>
-        <KPI label="Total value"    value={_inrRC(data.totalValue)} sub="cash + market value" />
-        <KPI label="Cash"           value={_inrRC(data.cash)} />
-        <KPI label="MTM P&L"        value={_inrRC(data.totalMtmPnl)} color={_pnlColorRC(data.totalMtmPnl)} />
-        <KPI label="Gross exposure" value={_inrRC(data.grossExposure)} sub="|long| + |short|" />
-        <KPI label="Net exposure"   value={_inrRC(data.netExposure)} sub="long − short" color={_pnlColorRC(data.netExposure)} />
-        <KPI label="Leverage"       value={data.leverage != null ? `${data.leverage.toFixed(2)}x` : '-'} sub="gross / cash" color={data.leverage > 2 ? 'var(--down, #b91c1c)' : 'var(--text-1)'} />
+        <KPI label="Total value"    value={_inrRC(safeData.totalValue)} sub="cash + market value" />
+        <KPI label="Cash"           value={_inrRC(safeData.cash)} />
+        <KPI label="MTM P&L"        value={_inrRC(safeData.totalMtmPnl)} color={_pnlColorRC(safeData.totalMtmPnl)} />
+        <KPI label="Gross exposure" value={_inrRC(safeData.grossExposure)} sub="|long| + |short|" />
+        <KPI label="Net exposure"   value={_inrRC(safeData.netExposure)} sub="long − short" color={_pnlColorRC(safeData.netExposure)} />
+        <KPI label="Leverage"       value={safeData.leverage != null ? `${safeData.leverage.toFixed(2)}x` : '-'} sub="gross / cash" color={safeData.leverage > 2 ? 'var(--down, #b91c1c)' : 'var(--text-1)'} />
       </div>
 
       {/* Concentration alert */}
@@ -420,7 +421,7 @@ window.RiskCockpitScreen = function RiskCockpitScreen() {
       )}
 
       <div style={{ marginTop: 16, padding: 12, fontSize: 11, color: 'var(--text-4)', textAlign: 'center' }}>
-        T-272 + T-274 + T-275 + T-280 (Phase 2 + Phase 3 partial). Schema: <code>{data._schema}</code>. Equity-only -- option Greeks (delta/vega/theta) come in Phase 4.
+        T-272 + T-274 + T-275 + T-280 (Phase 2 + Phase 3 partial). Schema: <code>{safeData._schema || '—'}</code>. Equity-only -- option Greeks (delta/vega/theta) come in Phase 4.
       </div>
     </div>
   );

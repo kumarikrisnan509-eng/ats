@@ -94,8 +94,11 @@ window.OptionsOpportunitiesScreen = function OptionsOpportunitiesScreen() {
     } catch (e) { setErr(e.message); }
   };
 
-  if (loading) return <div style={{padding:24, color:'var(--text-2)'}}>Loading...</div>;
-  if (err) return <div style={{padding:24, color:'var(--down, #b91c1c)'}}>Error: {String(err)}</div>;
+  // T-378: do NOT return early on loading/err. Render the static page
+  // structure (h2, Scanner/Fetcher/Total opportunities labels) always so
+  // CI prod-readiness tests (and users) see the page frame even when one
+  // of the two parallel fetches is rate-limited (429). Loading/error
+  // state is shown inline at the top of the page instead.
 
   const reviewedCount = opps.filter(o => o.reviewed).length;
   const unreviewedCount = opps.length - reviewedCount;
@@ -103,11 +106,13 @@ window.OptionsOpportunitiesScreen = function OptionsOpportunitiesScreen() {
   return (
     <div style={{padding:'16px 24px', maxWidth:1200}}>
       <h2 style={{margin:'4px 0 12px', fontSize:20}}>Options opportunities (SHADOW)</h2>
+      {loading && <div style={{padding:'6px 10px', marginBottom:8, background:'var(--bg-soft)', borderRadius:6, fontSize:12, color:'var(--text-2)'}}>Loading scanner status…</div>}
+      {err && <div style={{padding:'6px 10px', marginBottom:8, background:'rgba(185,28,28,0.08)', borderRadius:6, fontSize:12, color:'var(--down, #b91c1c)'}}>Could not load latest data: {String(err)}</div>}
 
       {/* Status banner */}
       <div style={{
         padding:'10px 14px', marginBottom:16, borderRadius:8,
-        background:'var(--surface)', border:'1px solid var(--border)',
+        background:'var(--panel, #1a1f2e)', border:'1px solid var(--border, #2a3142)',
         display:'flex', flexWrap:'wrap', gap:24, alignItems:'center',
       }}>
         <div>
@@ -145,7 +150,7 @@ window.OptionsOpportunitiesScreen = function OptionsOpportunitiesScreen() {
       ) : (
         <table style={{width:'100%', borderCollapse:'collapse', fontSize:13}}>
           <thead>
-            <tr style={{borderBottom:'1px solid var(--border)', color:'var(--text-2)', textAlign:'left'}}>
+            <tr style={{borderBottom:'1px solid var(--border, #2a3142)', color:'var(--text-2)', textAlign:'left'}}>
               <th style={{padding:'8px 6px'}}>Scanned</th>
               <th style={{padding:'8px 6px'}}>Regime</th>
               <th style={{padding:'8px 6px'}}>Underlying</th>
@@ -162,7 +167,7 @@ window.OptionsOpportunitiesScreen = function OptionsOpportunitiesScreen() {
               try { opp = JSON.parse(o.opportunityJson); } catch {}
               return (
                 <React.Fragment key={o.id}>
-                  <tr style={{borderBottom:'1px solid var(--border)', opacity: o.reviewed ? 0.55 : 1}}>
+                  <tr style={{borderBottom:'1px solid var(--border, #2a3142)', opacity: o.reviewed ? 0.55 : 1}}>
                     <td style={{padding:'8px 6px', whiteSpace:'nowrap'}}>{_fmtTimeOpt(o.scannedAt)}</td>
                     <td style={{padding:'8px 6px'}}>
                       <span style={{
@@ -190,22 +195,22 @@ window.OptionsOpportunitiesScreen = function OptionsOpportunitiesScreen() {
                     <td style={{padding:'8px 6px'}}>
                       <button
                         onClick={() => setExpanded(e => ({...e, [o.id]: !e[o.id]}))}
-                        style={{background:'transparent', border:'1px solid var(--border)', color:'var(--text-1)', borderRadius:4, padding:'2px 8px', cursor:'pointer', fontSize:11}}
+                        style={{background:'transparent', border:'1px solid var(--border, #2a3142)', color:'var(--text-1)', borderRadius:4, padding:'2px 8px', cursor:'pointer', fontSize:11}}
                       >{isOpen ? 'hide' : 'view'}</button>
                     </td>
                   </tr>
                   {isOpen && (
                     <tr>
-                      <td colSpan={7} style={{padding:'12px 16px', background:'var(--surface-2)', fontFamily:'monospace', fontSize:11, whiteSpace:'pre-wrap'}}>
+                      <td colSpan={7} style={{padding:'12px 16px', background:'var(--panel-2, #11151f)', fontFamily:'monospace', fontSize:11, whiteSpace:'pre-wrap'}}>
                         {opp ? JSON.stringify(opp, null, 2) : '(failed to parse)'}
                         {!o.reviewed && (
-                          <div style={{marginTop:12, paddingTop:12, borderTop:'1px solid var(--border)'}}>
+                          <div style={{marginTop:12, paddingTop:12, borderTop:'1px solid var(--border, #2a3142)'}}>
                             {reviewing === o.id ? (
                               <div style={{display:'flex', gap:8, alignItems:'center'}}>
                                 <input
                                   type="text" placeholder="Review note (optional)"
                                   value={reviewNote} onChange={e => setReviewNote(e.target.value)}
-                                  style={{flex:1, padding:'4px 8px', background:'var(--surface)', border:'1px solid var(--border)', color:'var(--text-1)', borderRadius:4}}
+                                  style={{flex:1, padding:'4px 8px', background:'var(--panel, #1a1f2e)', border:'1px solid var(--border, #2a3142)', color:'var(--text-1)', borderRadius:4}}
                                 />
                                 <button onClick={() => review(o.id)} style={{padding:'4px 12px', cursor:'pointer'}}>Mark reviewed</button>
                                 <button onClick={() => { setReviewing(null); setReviewNote(''); }} style={{padding:'4px 12px', cursor:'pointer'}}>Cancel</button>
