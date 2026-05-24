@@ -2326,26 +2326,6 @@ app.post('/api/reconcile/import-csv', (req, res) => {
 });
 
 // ---------- Going-live preflight ----------
-app.get('/api/preflight', async (req, res) => {
-  try {
-    const result = await runPreflight({
-      broker, paper, pnl,
-      env: process.env,
-      getReconcile: async () => {
-        // Build a minimal reconcile snapshot inline (don't recurse through HTTP)
-        if (!paper) return null;
-        const stats = paper.stats();
-        const list = paper.list();
-        const paperPending = list.filter(o => o.status === 'PENDING').length;
-        let brokerPending = 0;
-        try { const _p = await pickBroker(req); if (_p.broker) { const o = await _p.broker.getOrders(); brokerPending = (o || []).filter(x => String(x.status||'').toUpperCase() === 'OPEN').length; } } catch (e) { console.warn('[server] swallowed:', e && e.message); }
-        return { summary: { cashDrift: 0, brokerPendingCnt: brokerPending, paperPendingCnt: paperPending } };
-      },
-    });
-    res.json({ ok:true, ...result });
-  } catch (e) { res.status(500).json({ ok:false, reason:e.message }); }
-});
-
 // ---------- Hyperparameter tuner ----------
 // POST /api/tune  body: { symbol, strategy, paramGrid, from, to, qty?, interval?, top? }
 //   paramGrid: object mapping param-name -> array of values.
@@ -2419,35 +2399,19 @@ app.post('/api/tune', async (req, res) => {
   }
 });
 
-// GET /api/regime?symbol=NIFTY+50&interval=day&lookback=365
-// Classifies current market state into one of:
-//   trending_up | trending_down | range | high_vol | low_vol
-// Uses ATR (volatility), ADX (trend strength), SMA50/200 (trend direction).
-app.get('/api/regime', async (req, res) => {
-  try {
-    const symbol = req.query.symbol || 'NIFTY 50';
-    const interval = req.query.interval || 'day';
-    const lookback = Math.max(60, Math.min(800, parseInt(req.query.lookback || '365', 10) || 365));
-    const to = new Date();
-    const from = new Date(to.getTime() - lookback * 86400000);
-    const fromStr = from.toISOString().slice(0, 10);
-    const toStr   = to.toISOString().slice(0, 10);
-
-    const candles = await broker.getHistorical({ symbol, interval, from: fromStr, to: toStr });
-    if (!Array.isArray(candles) || candles.length < 50) {
-      return res.status(400).json({ ok:false, reason:`need >= 50 candles, got ${candles ? candles.length : 0}` });
-    }
-    const r = classifyRegime(candles);
-    res.json({
-      ok: true,
-      symbol, interval, from: fromStr, to: toStr,
-      candles: candles.length,
-      ...r,
-      asOf: candles[candles.length - 1].date,
-    });
-  } catch (e) {
-    res.status(500).json({ ok:false, reason: e.message });
-  }
+// T-389 (architecture audit #1, god-object split #6): /api/preflight +
+// /api/regime extracted to routes/diagnostic.js. /api/benchmark stays here
+// for now -- its handler embeds 135 lines of inline alpha/beta/Sharpe/
+// drawdown math that needs to be factored into its own analytics module
+// before the route can move cleanly. Own ticket.
+const { mountDiagnosticRoutes } = require('./routes/diagnostic');
+mountDiagnosticRoutes(app, {
+  getBroker: () => broker,
+  getPaper:  () => paper,
+  getPnl:    () => pnl,
+  runPreflight,
+  pickBroker,
+  classifyRegime,
 });
 
 // GET /api/benchmark?strategy=rsi_mean_revert&symbol=RELIANCE&from=...&to=...&qty=10&benchmark=NIFTY+50
