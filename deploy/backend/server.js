@@ -2098,23 +2098,9 @@ app.delete('/api/autorun', (_req, res) => {
 });
 
 // ---------- News feed ----------
-// GET /api/news?limit=50&symbol=RELIANCE&source=Moneycontrol
-app.get('/api/news', (req, res) => {
-  if (!news) return res.status(503).json({ ok:false, reason:'news_not_initialized' });
-  const items = news.list({ limit: req.query.limit, symbol: req.query.symbol, source: req.query.source });
-  res.json({ ok:true, items, stats: news.stats() });
-});
-// POST /api/news/refresh -- manual fetch trigger (returns summary)
-app.post('/api/news/refresh', async (_req, res) => {
-  if (!news) return res.status(503).json({ ok:false, reason:'news_not_initialized' });
-  const summary = await news.refresh();
-  res.json({ ok:true, summary, stats: news.stats() });
-});
-// GET /api/news/sources -- configured sources + last-fetch counts
-app.get('/api/news/sources', (_req, res) => {
-  if (!news) return res.status(503).json({ ok:false, reason:'news_not_initialized' });
-  res.json({ ok:true, sources: news.stats().sources, lastSummary: news.stats().lastSummary });
-});
+// T-392 (god-object split #9): 3 news routes extracted to routes/news.js.
+const { mountNewsRoutes } = require('./routes/news');
+mountNewsRoutes(app, { getNews: () => news });
 
 // ---------- Tax planning ----------
 app.get('/api/tax/goals', (_req, res) => {
