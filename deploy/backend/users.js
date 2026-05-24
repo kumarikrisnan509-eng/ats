@@ -277,7 +277,7 @@ function createUsers({ db, emailAlerts, audit, secureCookie }) {
   async function sendVerificationEmail({ user, baseUrl }) {
     if (!user || !user.verification_token) return { ok: false, reason: 'no_token' };
     if (!emailAlerts || typeof emailAlerts.send !== 'function') return { ok: false, reason: 'email_not_configured' };
-    const verifyUrl = `${(baseUrl || 'https://ats.rajasekarselvam.com').replace(/\/$/, '')}/verify-email?token=${user.verification_token}`;
+    const verifyUrl = `${(baseUrl || 'https://ats.rajasekarselvam.com').replace(/\/$/, '')}/verify-email?token=${verifyTokenForUrl}`;
     try {
       const r = await emailAlerts.send({
         to: user.email,
