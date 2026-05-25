@@ -227,7 +227,7 @@ const ReconScreen = () => {
         <Card>
           <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Trades matched</div>
           <div className="mono" style={{ fontSize: 28, fontWeight: 700, marginTop: 6, color: "var(--up)" }}>{summary.matched}<span style={{ fontSize: 14, color: "var(--text-3)", fontWeight: 500 }}> / {summary.ours.trades}</span></div>
-          <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>{Math.round(summary.matched / summary.ours.trades * 100)}% match rate</div>
+          <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>{summary.ours.trades > 0 ? Math.round(summary.matched / summary.ours.trades * 100) : 0}% match rate</div>
         </Card>
         <Card>
           <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Mismatched</div>
@@ -325,17 +325,20 @@ const ReconScreen = () => {
             <div className="mono">Today</div>
           </div>
           <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+            {/* T-420d: was 3 hardcoded fake summary stats (98.4%, 14/14, 18 min)
+                rendered as if they were real 30-day rollups. Gated to em-dash
+                outside demo until a real /api/reconcile/history rollup exists. */}
             <div style={{ padding: 10, background: "var(--bg-soft)", borderRadius: "var(--r-sm)" }}>
               <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>30-day avg match</div>
-              <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: "var(--up)" }}>98.4%</div>
+              <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: _reconIsDemo ? "var(--up)" : "var(--text-3)" }}>{_reconIsDemo ? "98.4%" : "—"}</div>
             </div>
             <div style={{ padding: 10, background: "var(--bg-soft)", borderRadius: "var(--r-sm)" }}>
               <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Issues resolved</div>
-              <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>14 / 14</div>
+              <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>{_reconIsDemo ? "14 / 14" : "—"}</div>
             </div>
             <div style={{ padding: 10, background: "var(--bg-soft)", borderRadius: "var(--r-sm)" }}>
               <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Avg resolution time</div>
-              <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>18 min</div>
+              <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>{_reconIsDemo ? "18 min" : "—"}</div>
             </div>
           </div>
         </Card>
