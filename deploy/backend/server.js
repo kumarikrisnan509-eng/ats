@@ -1134,7 +1134,12 @@ function getClientIp(req) {
 // expose user data; they're already public, so excluding them from rate-limit
 // has no security cost. (Cost-of-compute is also negligible: they read from
 // in-memory state, not the DB or broker.)
-const RATE_LIMIT_BYPASS = new Set(['/api/health', '/api/health-deep', '/api/status']);
+// T-413: paths matched against req.path which, inside app.use('/api', ...) is
+// RELATIVE to the mount prefix -- /api/health arrives as req.path === '/health'.
+// T-411 stored '/api/health' and the check always returned false, leaving the
+// rate-limit firing. CI proof (T-412d diagnostic): runner saw HTTP 429 with
+// body {"reason":"rate_limit"}. Fix: store paths WITHOUT /api prefix.
+const RATE_LIMIT_BYPASS = new Set(['/health', '/health-deep', '/status']);
 
 app.use('/api', (req, res, next) => {
   if (RATE_LIMIT_BYPASS.has(req.path)) return next();

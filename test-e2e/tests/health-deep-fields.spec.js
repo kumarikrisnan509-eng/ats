@@ -56,20 +56,6 @@ test('/api/health-deep returns DR backup status fields (T-36)', async ({ request
 
 test('/api/health exposes broker.stalledOnToken + tickStale (T-42)', async ({ request }) => {
   const r = await request.get('/api/health');
-  // T-412d diagnostic: nginx access log shows 200 for runner IP, but Playwright
-  // reports r.ok()===false. Log the actual client-side status + headers so the
-  // next CI run captures what's happening between Azure egress and Oracle Cloud
-  // (suspected TLS handshake / HTTP/2 frame issue). Remove once diagnosed.
-  if (!r.ok()) {
-    const hdr = r.headers();
-    console.error(`[T-412d] /api/health failed: status=${r.status()} statusText=${r.statusText()} headers=${JSON.stringify(hdr)}`);
-    try {
-      const body = await r.text();
-      console.error(`[T-412d] body (first 500 chars): ${body.slice(0, 500)}`);
-    } catch (e) {
-      console.error(`[T-412d] body read failed: ${e.message}`);
-    }
-  }
   expect(r.ok()).toBeTruthy();
   const j = await r.json();
   // /api/health returns the broker block when a broker is configured. Skip the
