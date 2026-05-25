@@ -79,10 +79,50 @@ log "step: rclone copy audit -> stage"
 if ! /usr/bin/rclone copy "$REMOTE" "$DR_STAGE/audit" --include "audit.log-*.gz" --max-age 14d 2>&1 | tee -a "$DR_LOG"; then
   fail "rclone copy audit failed" 2
 fi
-# If we ever start backing up the SQLite db + sealed tokens, those go here too:
-# rclone copy "$REMOTE/db" "$DR_STAGE/db" 2>&1 | tee -a "$DR_LOG" || true
-# rclone copy "$REMOTE/tokens" "$DR_STAGE/tokens" 2>&1 | tee -a "$DR_LOG" || true
 R[t_rclone_sec]="$(( $(date +%s) - T1 ))"
+
+# === 2b. T-421: pull latest off-site DB+tokens snapshot (warn-only). ===
+# This is the back-half of the T-421 fix: backup-db-tokens.sh pushes a
+# gpg-encrypted tarball to $REMOTE/db-snapshots. We try to restore + verify
+# it here, but we DON'T fail the DR test if it's missing — that lets
+# existing setups keep passing health-deep while operators roll out the
+# new backup. See deploy/scripts/README-DR.md.
+T1b=$(date +%s)
+PASSPHRASE_PATH="${PASSPHRASE_PATH:-/etc/ats/.backup-passphrase}"
+log "step: T-421 -- check off-site DB snapshot"
+if ! rclone copy "${REMOTE}/db-snapshots" "$DR_STAGE/db-remote" --include "ats-backup-*.tar.gz" --max-age 7d 2>&1 | tee -a "$DR_LOG"; then
+    R[db_remote_check]="rclone-failed"
+    log "  WARN: rclone db-snapshots pull failed (non-fatal)"
+elif ! ls "$DR_STAGE/db-remote/"ats-backup-*.gpg "$DR_STAGE/db-remote/"ats-backup-*.tar.gz 2>/dev/null | head -1 | grep -q .; then
+    R[db_remote_check]="no-remote-backup-found"
+    log "  WARN: no off-site DB snapshot present yet (T-421 not enabled? see README-DR.md)"
+else
+    LATEST_ENC=$(ls -t "$DR_STAGE/db-remote/"ats-backup-*.gpg 2>/dev/null | head -1)
+    if [[ -z "$LATEST_ENC" ]]; then
+        R[db_remote_check]="no-gpg-found"
+    elif [[ ! -s "$PASSPHRASE_PATH" ]]; then
+        R[db_remote_check]="no-passphrase-on-vm"
+        log "  WARN: $PASSPHRASE_PATH missing -- cannot decrypt to verify"
+    else
+        log "  decrypting + extracting $(basename "$LATEST_ENC")"
+        if gpg --batch --yes --no-symkey-cache --decrypt                 --passphrase-file "$PASSPHRASE_PATH"                 --output "$DR_STAGE/db-remote/ats-backup.tar"                 "$LATEST_ENC" 2>>"$DR_LOG"             && tar -xf "$DR_STAGE/db-remote/ats-backup.tar" -C "$DR_STAGE/db-remote/" 2>>"$DR_LOG"             && [[ -f "$DR_STAGE/db-remote/ats.db" ]]; then
+            REMOTE_DB_BYTES=$(stat -c%s "$DR_STAGE/db-remote/ats.db")
+            REMOTE_SCHEMA=$(sqlite3 "$DR_STAGE/db-remote/ats.db" "SELECT version FROM _schema_version ORDER BY version DESC LIMIT 1;" 2>>"$DR_LOG" || echo "ERR")
+            REMOTE_USERS=$(sqlite3 "$DR_STAGE/db-remote/ats.db" "SELECT COUNT(*) FROM users;" 2>>"$DR_LOG" || echo "ERR")
+            R[db_remote_check]=ok
+            R[db_remote_bytes]="$REMOTE_DB_BYTES"
+            R[db_remote_schema]="$REMOTE_SCHEMA"
+            R[db_remote_users]="$REMOTE_USERS"
+            log "  off-site DB OK: $REMOTE_DB_BYTES bytes, schema=$REMOTE_SCHEMA, users=$REMOTE_USERS"
+        else
+            R[db_remote_check]="decrypt-or-extract-failed"
+            log "  WARN: decrypt/extract/sqlite check failed (see log)"
+        fi
+        # Wipe the decrypted plaintext immediately.
+        shred -u "$DR_STAGE/db-remote/ats-backup.tar" "$DR_STAGE/db-remote/ats.db" 2>/dev/null ||             rm -f "$DR_STAGE/db-remote/ats-backup.tar" "$DR_STAGE/db-remote/ats.db"
+    fi
+fi
+R[t_db_remote_sec]="$(( $(date +%s) - T1b ))"
 
 AUDIT_COUNT=$(ls -1 "$DR_STAGE/audit" 2>/dev/null | wc -l | tr -d ' ')
 R[restored_audit_files]="$AUDIT_COUNT"

@@ -54,6 +54,22 @@ else
   install -m 0755 -o root -g root "$SRC" "$DEST"
 fi
 
+# T-421: also install backup-db-tokens.sh (gated on operator creating
+# /etc/ats/.backup-passphrase + manually adding the cron entry).
+BACKUP_SRC="${SCRIPT_DIR_SRC}/backup-db-tokens.sh"
+BACKUP_DEST="${DEST_DIR}/backup-db-tokens.sh"
+if [[ -f "$BACKUP_SRC" ]]; then
+  BSRC_REAL="$(readlink -f "$BACKUP_SRC" 2>/dev/null || echo "$BACKUP_SRC")"
+  BDEST_REAL="$(readlink -f "$BACKUP_DEST" 2>/dev/null || echo "$BACKUP_DEST")"
+  if [[ "$BSRC_REAL" == "$BDEST_REAL" ]]; then
+    chmod 0755 "$BACKUP_DEST"
+    chown root:root "$BACKUP_DEST"
+  else
+    install -m 0755 -o root -g root "$BACKUP_SRC" "$BACKUP_DEST"
+  fi
+  echo "    also installed backup-db-tokens.sh (T-421, opt-in -- see README-DR.md)"
+fi
+
 echo "==> [2/4] ensure DR auth token at $TOKEN_PATH"
 if [[ ! -s "$TOKEN_PATH" ]] || [[ "$(cat "$TOKEN_PATH" 2>/dev/null)" == "unset" ]]; then
   head -c 32 /dev/urandom | xxd -p | tr -d '\n' > "$TOKEN_PATH"
