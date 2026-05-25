@@ -119,8 +119,24 @@ fi
 
 if [[ ${ok} -ne 1 ]]; then
     echo "!! Health check failed after 20 s. Rolling back."
-    if [[ -f "${PREV_FILE}" ]]; then
+    # T-418 (production-readiness audit, infra fix #1):
+    # Prefer .last-good-tags (only written on SUCCESS, capped at 5 entries)
+    # over .previous-tag (overwritten EVERY deploy, including bad ones).
+    # Failure scenario: deploy script crashes mid-health-check AFTER
+    # .previous-tag was overwritten with the bad new tag -- next deploy
+    # would then "roll back" to the broken tag. .last-good-tags is
+    # append-only on success, so head -n1 is always the most-recent
+    # KNOWN-good tag.
+    PREV_TAG=""
+    HISTORY_FILE="${COMPOSE_DIR}/.last-good-tags"
+    if [[ -s "${HISTORY_FILE}" ]]; then
+        PREV_TAG="$(head -n1 "${HISTORY_FILE}")"
+        echo "==> rollback source: .last-good-tags top entry"
+    elif [[ -f "${PREV_FILE}" ]]; then
         PREV_TAG="$(cat "${PREV_FILE}")"
+        echo "==> rollback source: .previous-tag fallback (no .last-good-tags yet)"
+    fi
+    if [[ -n "${PREV_TAG}" ]]; then
         echo "==> Rolling back to ${PREV_TAG}"
         # T-177: rollback also has to update .env, not just shell env.
         upsert_env_var ATS_IMAGE_TAG "${PREV_TAG}"
@@ -133,8 +149,31 @@ if [[ ${ok} -ne 1 ]]; then
             sudo nginx -t && sudo systemctl reload nginx
         fi
         echo "${PREV_TAG}" > "${TAG_FILE}"
+    else
+        echo "!! No rollback target available (no .last-good-tags, no .previous-tag)"
     fi
     exit 1
+fi
+
+# T-418 (production-readiness audit, infra fix #3):
+# Post-success deeper smoke probe. /api/health is the "is the process up?"
+# check (always returns ok:true unconditionally, used by the auto-rollback
+# loop above so init() race conditions don't cause false failures).
+# /api/health-deep validates db + vault + brokerResolver + broker + every
+# data-feeder singleton. We probe it AFTER the rollback gate -- a non-2xx
+# here doesn't roll back (false-positive risk during init settling) but
+# DOES surface a warning so the operator can investigate.
+if curl -sf "http://127.0.0.1:8080/api/health-deep" -o /tmp/health-deep.$$.json; then
+    DEEP_OK=$(python3 -c "import json; print(json.load(open('/tmp/health-deep.$$.json')).get('ok'))" 2>/dev/null || echo "?")
+    if [[ "${DEEP_OK}" != "True" ]]; then
+        echo "!! warn: /api/health-deep returned ok=${DEEP_OK} (deploy NOT rolled back -- /api/health is the rollback gate)"
+        python3 -c "import json; d=json.load(open('/tmp/health-deep.$$.json'));  [print('   FAIL: '+k+'='+repr(v)) for k,v in d.get('checks',{}).items() if v is False]" 2>/dev/null || true
+    else
+        echo "==> /api/health-deep ok"
+    fi
+    rm -f /tmp/health-deep.$$.json
+else
+    echo "!! warn: /api/health-deep probe failed (curl error). Container is still up per /api/health."
 fi
 
 echo "==> Cleanup old static dir"
