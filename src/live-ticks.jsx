@@ -92,12 +92,15 @@
         gotData = true;
         clearTimeout(fallbackTimer);
 
-        // Merge backend's effective symbol set (defaults + persisted watchlist)
-        // into the in-memory SYMBOLS map so the rest of the app sees them.
+        // Merge backend's effective symbol set (defaults + persisted watchlist).
+        // T-420c HOTFIX: previously initialised each symbol to { ltp: 0, prev: 0 },
+        // which made every downstream % calc compute (0-0)/0*100 = NaN until the
+        // first real tick arrived for that symbol. This was masked before T-420
+        // because SYMBOLS was pre-seeded with realistic LTPs. Now we don't pre-
+        // populate at all -- the tick handler below initialises an entry on first
+        // sighting using msg.ltp for BOTH ltp and prev, so the first chg% is
+        // exactly 0 (not NaN).
         const backendSymbols = Array.isArray(msg.symbols) ? msg.symbols : [];
-        for (const s of backendSymbols) {
-          if (!SYMBOLS[s]) SYMBOLS[s] = { ltp: 0, prev: 0 };
-        }
 
         // Subscribe to the union of backend symbols + symbols this client already
         // tracks locally, so any extra symbols get resolved to Kite tokens.
