@@ -2935,37 +2935,13 @@ app.post('/api/portfolio/factor-tilt', (req, res) => {
 // Returns total/SPAN/exposure margin, per-leg breakdown, detected spread structures.
 // Accurate to within ~10-15% of real broker margin (uses public NSE formulas; real
 // SPAN files are exchange-distributed and proprietary).
-app.post('/api/risk/span', (req, res) => {
-  if (!spanSim) return res.status(503).json({ ok:false, reason:'span_sim_not_initialized' });
-  try {
-    const out = spanSim.estimate(req.body || {});
-    audit('risk.span.estimate', { legs: (req.body && req.body.legs && req.body.legs.length) || 0, total: out.totalMargin });
-    res.json(out);
-  } catch (e) {
-    res.status(400).json({ ok:false, reason:e.message });
-  }
-});
-
-// ---------- Tier 32: WORM tamper-evident audit log ----------
-// GET /api/audit/root    -- chain head hash, head seq, merkle root, entry count.
-//                          fast: O(file size) once per call; cache-friendly.
-// GET /api/audit/verify  -- walks the entire chain, recomputes every hash.
-//                          slower; for periodic integrity audits.
-// GET /api/audit/tail?n  -- last N entries (read-only, default 100, max 10000).
-app.get('/api/audit/root', (_req, res) => {
-  if (!wormAudit) return res.status(503).json({ ok:false, reason:'worm_not_initialized' });
-  try { res.json({ ok:true, ...wormAudit.root() }); }
-  catch (e) { res.status(500).json({ ok:false, reason:e.message }); }
-});
-app.get('/api/audit/verify', (_req, res) => {
-  if (!wormAudit) return res.status(503).json({ ok:false, reason:'worm_not_initialized' });
-  try { res.json(wormAudit.verify()); }
-  catch (e) { res.status(500).json({ ok:false, reason:e.message }); }
-});
-app.get('/api/audit/tail', (req, res) => {
-  if (!wormAudit) return res.status(503).json({ ok:false, reason:'worm_not_initialized' });
-  try { res.json({ ok:true, entries: wormAudit.tail(Number(req.query.n) || 100) }); }
-  catch (e) { res.status(500).json({ ok:false, reason:e.message }); }
+// T-399 (god-object split #16): SPAN estimator + 3 WORM audit-chain routes
+// extracted to routes/risk-audit.js.
+const { mountRiskAuditRoutes } = require('./routes/risk-audit');
+mountRiskAuditRoutes(app, {
+  getSpanSim:   () => spanSim,
+  getWormAudit: () => wormAudit,
+  audit,
 });
 
 // ---------- Tier 35: IP allowlist state (for the Brokers/Compliance UI) ----------
