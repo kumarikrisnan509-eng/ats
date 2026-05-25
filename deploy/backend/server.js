@@ -948,121 +948,9 @@ async function _buildStatus() {
   return out;
 }
 
-app.get('/api/status', async (_req, res) => {
-  res.set('Cache-Control', 'public, max-age=30');
-  res.set('Access-Control-Allow-Origin', '*');
-  const now = Date.now();
-  if (_statusCache.payload && (now - _statusCache.ts) < STATUS_CACHE_MS) {
-    return res.json({ ..._statusCache.payload, cached: true, cache_age_sec: Math.round((now - _statusCache.ts) / 1000) });
-  }
-  try {
-    const payload = await _buildStatus();
-    _statusCache = { ts: now, payload };
-    res.json({ ...payload, cached: false });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
+// T-414 (god-object split #40): /api/status moved to routes/boot-wiring.js.
 
-// Tier 70: deeper health check (db, vault, broker resolver, market hours)
-app.get('/api/health-deep', async (_req, res) => {
-  const checks = {};
-  try { checks.db = !!(db && db._conn && db._conn.prepare('SELECT 1').get()); } catch (e) { checks.db = false; checks.dbErr = e.message; }
-  try { checks.vault = !!vault; } catch (e) { checks.vault = false; }
-  try { checks.brokerResolver = !!_brokerResolver; } catch (e) { checks.brokerResolver = false; }
-  try { checks.broker = !!(broker && broker.name); } catch (e) { checks.broker = false; }
-  try {
-    if (_surveillance) {
-      const st = _surveillance.status();
-      checks.surveillance = st.ready;
-      checks.surveillanceCounts = st.counts;
-      checks.surveillanceAgeMin = st.ageMs != null ? Math.round(st.ageMs / 60000) : null;
-    } else {
-      checks.surveillance = false;
-    }
-  } catch (e) { checks.surveillance = false; }
-  // E4 earnings calendar staleness
-  try {
-    if (_earningsCal) {
-      const st = _earningsCal.status();
-      checks.earningsCal = st.ready;
-      checks.earningsCalCount = st.eventCount;
-      checks.earningsCalAgeMin = st.ageMs != null ? Math.round(st.ageMs / 60000) : null;
-    } else { checks.earningsCal = false; }
-  } catch (e) { checks.earningsCal = false; }
-  // E7 FII/DII staleness
-  try {
-    if (_fiidii) {
-      const st = _fiidii.status();
-      checks.fiidii = st.ready;
-      checks.fiidiiDate = st.lastDate;
-      checks.fiidiiAgeMin = st.ageMs != null ? Math.round(st.ageMs / 60000) : null;
-    } else { checks.fiidii = false; }
-  } catch (e) { checks.fiidii = false; }
-  // E8 bulk/block deals staleness
-  try {
-    if (_bulkDeals) {
-      const st = _bulkDeals.status();
-      checks.bulkDeals = st.ready;
-      checks.bulkDealsDate = st.asOn;
-      checks.bulkDealsCounts = { bulk: st.bulk, block: st.block, short: st.short };
-    } else { checks.bulkDeals = false; }
-  } catch (e) { checks.bulkDeals = false; }
-  // T-248: G8 MF data staleness check removed (MfData retired).
-
-  // T-I1: surface last DR test status (warns when >30 days old)
-  try {
-    if (_ensureDrTable() && db && db._conn) {
-      const row = db._conn.prepare("SELECT ts, payload FROM dr_test_history ORDER BY id DESC LIMIT 1").get();
-      if (row) {
-        const ageMs = Date.now() - new Date(row.ts).getTime();
-        const ageDays = Math.round(ageMs / 86400000);
-        let lastOk = false;
-        try { const p = JSON.parse(row.payload || '{}'); lastOk = p.ok === true; } catch (e) { console.debug('[server] swallowed:', e && e.message); }
-        checks.drLastTestAgo = ageDays + 'd';
-        checks.drLastTestOk = lastOk;
-        checks.drStale = ageDays > 30;
-      } else {
-        checks.drLastTestAgo = 'never';
-        checks.drLastTestOk = false;
-        checks.drStale = true;
-      }
-    } else {
-      checks.drLastTestAgo = 'unavailable';
-    }
-  } catch (e) { checks.drLastTestAgo = 'error:' + (e.message || 'unknown').slice(0, 40); }
-
-  // T99-T34: surface ticker WS state. brokerWsStalled flips true when the daily
-  // access_token has expired and we've stopped reconnecting until next auth refresh.
-  try {
-    if (broker) {
-      checks.brokerWsConnected = broker._connected === true;
-      checks.brokerWsStalled = broker._stalledOnToken === true;
-      if (typeof broker._reconnectAttempts === 'number') {
-        checks.brokerWsReconnectAttempts = broker._reconnectAttempts;
-      }
-      // T99-T37: heartbeat / frozen-feed detection
-      checks.brokerTickStale = broker._tickStale === true;
-      if (typeof broker._lastTickAt === 'number' && broker._lastTickAt > 0) {
-        checks.brokerTickLagSec = Math.round((Date.now() - broker._lastTickAt) / 1000);
-      }
-      // T99-T55: how long since the last setAccessToken? Helps operators tell
-      // whether the morning cron successfully refreshed today's token.
-      if (typeof broker._lastAccessTokenSetAt === 'number' && broker._lastAccessTokenSetAt > 0) {
-        const ageMs = Date.now() - broker._lastAccessTokenSetAt;
-        checks.brokerAccessTokenAgeMin = Math.round(ageMs / 60000);
-      } else {
-        checks.brokerAccessTokenAgeMin = null;
-      }
-    }
-  } catch (_e) { /* don't fail health on introspection */ }
-
-  checks.uptimeSec = Math.round(process.uptime());
-  checks.memMB = Math.round(process.memoryUsage().rss / 1024 / 1024);
-  // Surveillance + DR are "soft" — they don't block the top-level ok flag.
-  const hardChecks = ['db', 'vault', 'brokerResolver'];
-  res.json({ ok: hardChecks.every(k => checks[k] !== false), checks });
-});
+// T-414 (god-object split #40): /api/health-deep moved to routes/boot-wiring.js.
 
 // T-I1: DR test history table (lazy-created on first admin call; same goes for
 // the health-deep DR section). db may not be ready at module load.
@@ -1247,15 +1135,7 @@ function _csrfToken(sid) {
   return crypto.createHmac('sha256', SESSION_SECRET).update('csrf:' + sid).digest('base64url');
 }
 
-// GET /api/csrf-token: auth-gated route that returns the token derived from
-// the caller's session. Frontend reads this on app boot, caches in memory,
-// includes in X-CSRF-Token header on every mutating fetch.
-app.get('/api/csrf-token', (req, res) => {
-  const sid = readSessionCookie(req);
-  if (!sid) return res.status(401).json({ ok: false, reason: 'auth_required' });
-  const token = _csrfToken(sid);
-  return res.json({ ok: true, csrfToken: token });
-});
+// T-414 (god-object split #40): /api/csrf-token moved to routes/boot-wiring.js.
 
 // Middleware: audit (don't reject) on mutating requests whose X-CSRF-Token
 // doesn't match the expected HMAC. Applied to /api/* after the Origin gate.
@@ -1385,171 +1265,11 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-// T-406 (god-object split #32): /api/auth-mode moved to routes/misc.js.
+// T-414 (god-object split #40): /api/summary moved to routes/boot-wiring.js.
 
-// ---------- Dashboard summary ----------
-// One call returns everything the cockpit's home view needs.
-// Failures of any single broker call degrade gracefully — partial responses
-// are tagged with an `errors` map so the UI can render whatever succeeded.
-app.get('/api/summary', async (_req, res) => {
-  const errors = {};
-  const safe = async (name, p) => {
-    try { return await p; }
-    catch (e) { errors[name] = e.message; return null; }
-  };
+// T-414 (god-object split #40): /api/system/info moved to routes/boot-wiring.js.
 
-  const [holdings, positions, orders, profile, margins] = await Promise.all([
-    safe('holdings', broker.getHoldings()),
-    safe('positions', broker.getPositions()),
-    safe('orders', broker.getOrders()),
-    safe('profile', broker.getProfile()),
-    safe('margins', broker.getMargins()),
-  ]);
-
-  // Compact aggregates so a tiny dashboard card has everything pre-computed.
-  const aggregates = {
-    holdingsCount: Array.isArray(holdings) ? holdings.length : 0,
-    holdingsValue: Array.isArray(holdings)
-      ? +holdings.reduce((s, h) => s + (h.quantity || 0) * (h.ltp || 0), 0).toFixed(2)
-      : 0,
-    holdingsPnl: Array.isArray(holdings)
-      ? +holdings.reduce((s, h) => s + (h.pnl || 0), 0).toFixed(2)
-      : 0,
-    positionsNetCount: positions && Array.isArray(positions.net) ? positions.net.length : 0,
-    positionsDayCount: positions && Array.isArray(positions.day) ? positions.day.length : 0,
-    ordersTotal: Array.isArray(orders) ? orders.length : 0,
-    ordersOpen: Array.isArray(orders)
-      ? orders.filter(o => ['OPEN', 'TRIGGER PENDING', 'PENDING'].includes(String(o.status).toUpperCase())).length
-      : 0,
-  };
-
-  res.json({
-    ok: true,
-    time: new Date().toISOString(),
-    env: ENV_NAME,
-    killSwitch: KILL_SWITCH,
-    liveTrading: LIVE_TRADING,
-    broker: broker.health(),
-    profile,
-    aggregates,
-    holdings,
-    positions,
-    orders,
-    margins,
-    watchlist: watchlist ? watchlist.list() : [],
-    alerts: alerts ? alerts.list() : [],
-    errors: Object.keys(errors).length ? errors : null,
-  });
-});
-
-// ---------- System info (ops dashboard aggregator) ----------
-// One call returns everything an "Infrastructure" panel needs.
-app.get('/api/system/info', (_req, res) => {
-  const fs = require('fs');
-  let auditSize = 0, auditLastTs = null;
-  try {
-    if (fs.existsSync(AUDIT_LOG)) {
-      const stat = fs.statSync(AUDIT_LOG);
-      auditSize = stat.size;
-      auditLastTs = new Date(stat.mtimeMs).toISOString();
-    }
-  } catch (e) { console.warn('[server] swallowed:', e && e.message); }
-
-  res.json({
-    ok: true,
-    time: new Date().toISOString(),
-    env: ENV_NAME,
-    killSwitch: KILL_SWITCH,
-    liveTrading: LIVE_TRADING,
-    process: {
-      uptimeSec: Math.floor(process.uptime()),
-      nodeVersion: process.version,
-      memMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
-      pid: process.pid,
-    },
-    broker: broker.health(),
-    components: {
-      alerts:    alerts    ? alerts.stats()    : null,
-      watchlist: watchlist ? watchlist.stats() : null,
-      scanner:   scanner   ? scanner.stats()   : null,
-      paper:     paper     ? paper.stats()     : null,
-      pnl:       pnl       ? pnl.stats()       : null,
-      autorun:   autorun   ? autorun.stats()   : null,
-      news:      news      ? news.stats()      : null,
-      tax:       tax       ? tax.stats()       : null,
-      ai:        ai        ? ai.stats()        : null,
-      sweep:     sweep     ? sweep.stats()     : null,
-      longterm:  longterm  ? longterm.stats()  : null,
-      riskCaps: {
-        killSwitch: KILL_SWITCH,
-        liveTrading: LIVE_TRADING,
-        maxDailyLossINR: MAX_DAILY_LOSS_INR,
-        maxOrdersPerMin: MAX_ORDERS_PER_MIN,
-        maxPositionSizeINR: MAX_POSITION_SIZE_INR,
-        maxAggregateExposureINR: MAX_AGGREGATE_EXPOSURE,
-        ordersInWindow: _orderTimes.length,
-      },
-    },
-    auditLog: { path: AUDIT_LOG, sizeBytes: auditSize, lastWriteTs: auditLastTs, seq: auditSeq },
-    config: {
-      maxWsClients: MAX_WS_CLIENTS,
-      defaultSymbols: DEFAULT_SYMBOLS,
-      brokerName: broker.name,
-    },
-  });
-});
-
-// ---------- Prometheus /metrics ----------
-// Plain text exposition format (no client lib). Scrapeable by Prometheus / Datadog / VictoriaMetrics.
-// Loopback or internal IPs only -- public exposure of internal counters is a small info leak.
-app.get('/metrics', (req, res) => {
-  const ra = getClientIp(req).replace('::ffff:', '');
-  if (!isInternalIp(ra)) {
-    // Allow GH Actions + monitoring tools that pass a shared metrics token if configured.
-    const tok = process.env.ATS_METRICS_TOKEN || '';
-    if (!tok || req.headers['x-metrics-token'] !== tok) {
-      return res.status(403).type('text/plain').send('forbidden');
-    }
-  }
-  const lines = [];
-  const push = (help, type, name, value, labels) => {
-    lines.push(`# HELP ${name} ${help}`);
-    lines.push(`# TYPE ${name} ${type}`);
-    const lbl = labels ? '{' + Object.entries(labels).map(([k,v]) => `${k}="${String(v).replace(/"/g,'')}"`).join(',') + '}' : '';
-    lines.push(`${name}${lbl} ${value}`);
-  };
-  const b = broker.health();
-  push('Broker connection (1=connected)',        'gauge', 'ats_broker_connected',              b.connected ? 1 : 0);
-  push('Subscribed Kite instrument tokens',      'gauge', 'ats_broker_subscribed_instruments', b.subscribedInstruments || 0);
-  push('Active /ws subscribers',                 'gauge', 'ats_broker_ws_subscribers',         b.subscribers || 0);
-  push('Ticker reconnect attempts (cumulative)', 'gauge', 'ats_broker_reconnect_attempts',     b.reconnectAttempts || 0);
-  push('Has access token cached',                'gauge', 'ats_broker_has_access_token',       b.hasAccessToken ? 1 : 0);
-  push('Last tick epoch (ms)',                   'gauge', 'ats_broker_last_tick_ms',           b.lastTickAt || 0);
-  push('Tick lag in ms',                         'gauge', 'ats_broker_lag_ms',                 b.lagMs || 0);
-  push('Instruments master size',                'gauge', 'ats_instruments_count',             (b.instruments && b.instruments.size) || 0);
-  if (alerts) {
-    const a = alerts.stats();
-    push('Total alerts',     'gauge',   'ats_alerts_total',     a.total || 0);
-    push('Active alerts',    'gauge',   'ats_alerts_active',    a.active || 0);
-    push('Triggered alerts', 'gauge',   'ats_alerts_triggered', a.triggered || 0);
-    push('Alert eval count', 'counter', 'ats_alerts_evals_total', a.evals || 0);
-    push('Alert fire count', 'counter', 'ats_alerts_fires_total', a.fires || 0);
-  }
-  if (watchlist) {
-    push('Watchlist symbol count', 'gauge', 'ats_watchlist_count', watchlist.stats().count || 0);
-  }
-  if (scanner) {
-    const s = scanner.stats();
-    push('Scanner history count',  'gauge', 'ats_scanner_history_count',   s.historyCount || 0);
-    push('Scanner debounce keys',  'gauge', 'ats_scanner_debounce_keys',   s.debounceKeys || 0);
-  }
-  push('Audit log seq number',           'counter', 'ats_audit_seq_total',     auditSeq);
-  push('Active /ws client connections',  'gauge',   'ats_ws_clients',          wsClients.size);
-  push('Process uptime seconds',         'counter', 'ats_process_uptime_seconds', Math.floor(process.uptime()));
-  push('Process RSS bytes',              'gauge',   'ats_process_rss_bytes',   process.memoryUsage().rss);
-  push('KILL_SWITCH active (1=killed)',  'gauge',   'ats_kill_switch',         KILL_SWITCH ? 1 : 0);
-  res.type('text/plain; version=0.0.4').send(lines.join('\n') + '\n');
-});
+// T-414 (god-object split #40): /metrics moved to routes/boot-wiring.js.
 
 // ---------- Kite order postback webhook ----------
 // Kite calls this URL when order events fire (FILLED, REJECTED, CANCELLED, MODIFIED, etc).
@@ -1621,29 +1341,47 @@ app.post('/api/brokers/zerodha/postback', (req, res) => {
   res.json({ ok: true, received: true });
 });
 
-// Health
-app.get('/api/health', (_req, res) => {
-  res.json({
-    ok: true,
-    env: ENV_NAME,
-    killSwitch: KILL_SWITCH,
-    liveTrading: LIVE_TRADING,
-    uptimeSec: Math.floor(process.uptime()),
-    time: new Date().toISOString(),
-    broker: broker.health(),
-    alerts: alerts ? alerts.stats() : null,
-    watchlist: watchlist ? watchlist.stats() : null,
-    scanner: scanner ? scanner.stats() : null,
-    // T-380 (security audit #9): surface audit-degraded state so operators
-    // can detect serialization failures that would have been silently
-    // swallowed by the call-site try/catch pattern in users.js + others.
-    audit: {
-      seq: auditSeq,
-      degradedCount: auditDegradedCount,
-      lastError: auditLastDegradedError,
-      lastAt: auditLastDegradedAt,
-    },
-  });
+// T-414 (architecture audit #1, god-object split #40): 7 boot-wiring routes
+// (/api/health, /api/health-deep, /api/status, /api/csrf-token, /api/summary,
+// /api/system/info, /metrics) extracted to routes/boot-wiring.js. Mounted
+// HERE so all singletons (db, broker, alerts, ...) have been declared.
+// Singletons are passed as getters so the mount call can run before init()
+// completes -- the actual reads happen at request-time.
+const { mountBootWiringRoutes } = require('./routes/boot-wiring');
+mountBootWiringRoutes(app, {
+  ENV_NAME, KILL_SWITCH, LIVE_TRADING, SESSION_SECRET,
+  MAX_DAILY_LOSS_INR, MAX_ORDERS_PER_MIN, MAX_POSITION_SIZE_INR, MAX_AGGREGATE_EXPOSURE,
+  MAX_WS_CLIENTS, DEFAULT_SYMBOLS, AUDIT_LOG,
+  getDb:              () => db,
+  getVault:           () => vault,
+  getBroker:          () => broker,
+  getAlerts:          () => alerts,
+  getWatchlist:       () => watchlist,
+  getScanner:         () => scanner,
+  getPaper:           () => paper,
+  getPnl:             () => pnl,
+  getAutorun:         () => autorun,
+  getNews:            () => news,
+  getTax:             () => tax,
+  getAi:              () => ai,
+  getSweep:           () => sweep,
+  getLongterm:        () => longterm,
+  getBrokerResolver:  () => _brokerResolver,
+  getSurveillance:    () => _surveillance,
+  getEarningsCal:     () => _earningsCal,
+  getFiidii:          () => _fiidii,
+  getBulkDeals:       () => _bulkDeals,
+  getWsClients:       () => wsClients,
+  getAuditState:      () => ({ seq: auditSeq, degradedCount: auditDegradedCount, lastError: auditLastDegradedError, lastAt: auditLastDegradedAt }),
+  getOrderTimesLength: () => _orderTimes.length,
+  readSessionCookie,
+  isInternalIp,
+  getClientIp,
+  ensureDrTable: _ensureDrTableImpl,
+  getStatusCache:     () => _statusCache,
+  setStatusCache:     (v) => { _statusCache = v; },
+  STATUS_CACHE_MS,
+  buildStatus:        _buildStatus,
 });
 
 // ---------- Watchlist snapshot ----------
