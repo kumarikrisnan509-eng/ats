@@ -1444,79 +1444,7 @@ mountBacktestToolsRoutes(app, {
 const { mountLegacyPaperRoutes } = require('./routes/legacy-paper');
 mountLegacyPaperRoutes(app, { getPaper: () => paper, withDeprecation });
 
-// ============ E5: paper-to-live promotion gates (require auth) ============
-// Decides whether a {strategy, symbol} pair has earned the right to fire on the
-// live broker. Pure read-only — does NOT change any state. The Trading page calls
-// this when the user clicks "promote to live"; if any gate is red, the live route
-// stays blocked and the UI explains which gate needs to pass first.
-app.post('/api/me/paper/promote-check', (req, res) => {
-  if (!db || !db._conn) return res.status(503).json({ ok: false, reason: 'db_not_ready' });
-  if (!req.user || !req.user.id) return res.status(401).json({ ok: false, reason: 'auth_required' });
-  const b = req.body || {};
-  const strategy = (b.strategy || '').toString().trim();
-  const symbol = (b.symbol || '').toString().toUpperCase().trim();
-  const minTrades = Math.max(5, Math.min(200, parseInt(b.min_trades || '20', 10)));
-  const minWinRate = Math.max(0.3, Math.min(0.9, parseFloat(b.min_win_rate) || 0.55));
-
-  if (!strategy) return res.status(400).json({ ok: false, reason: 'bad_request', detail: 'strategy required' });
-
-  try {
-    // === Gate 1: win-rate over last 30 days, optionally filtered to this symbol ===
-    const cutoff = new Date(Date.now() - 30 * 86400_000).toISOString();
-    const params = [req.user.id, strategy, cutoff];
-    let where = "user_id = ? AND strategy_tag = ? AND exited_at > ?";
-    if (symbol) { where += " AND symbol = ?"; params.push(symbol); }
-    const rows = db._conn.prepare(`SELECT pnl FROM paper_closed_trades WHERE ${where}`).all(...params);
-    const trades = rows.length;
-    const wins = rows.filter(r => Number(r.pnl) > 0).length;
-    const winRate = trades > 0 ? +(wins / trades).toFixed(4) : 0;
-    const grossPnl = rows.reduce((s, r) => s + Number(r.pnl || 0), 0);
-    const winRateGate = { pass: trades >= minTrades && winRate >= minWinRate, trades, wins, win_rate: winRate, gross_pnl_inr: +grossPnl.toFixed(2), min_trades: minTrades, min_win_rate: minWinRate };
-
-    // === Gate 2: surveillance — symbol must be clean ===
-    let surveillanceGate = { pass: true, reason: 'no_symbol_check' };
-    if (symbol && _surveillance) {
-      const v = _surveillance.classifySync(symbol);
-      surveillanceGate = v
-        ? { pass: false, reason: v.reason, list: v.list, stage: v.stage }
-        : { pass: true, reason: 'clean' };
-    }
-
-    // === Gate 3: 2FA reachable (Telegram configured) so confirm-before-trade can fire ===
-    let twofaGate = { pass: false, reason: 'no_notif_row' };
-    try {
-      const n = db.notif.get(req.user.id);
-      const ready = !!(n && n.telegram_enabled && n.telegram_bot_token && n.telegram_chat_id);
-      twofaGate = ready
-        ? { pass: true, reason: 'telegram_ready' }
-        : { pass: false, reason: 'telegram_not_configured', detail: 'Enable Telegram alerts in Settings so the 2FA confirm-before-trade challenge can reach you.' };
-    } catch (e) { console.warn('[server] swallowed:', e && e.message); }
-
-    // === Gate 4 (T99-T126 / v11-E5): fundamental blackout — no live promote
-    // if the symbol has a quarterly/annual results announcement within ±3 days.
-    // Mirrors the E3 scanner gate (T-125). Skipped if no symbol given (strategy-
-    // wide promote applies to many symbols — caller should re-run per symbol).
-    let earningsGate = { pass: true, reason: 'no_symbol_check' };
-    if (symbol && _earningsCal && typeof _earningsCal.inResultsBlackout === 'function') {
-      const v = _earningsCal.inResultsBlackout(symbol, { windowDays: 3 });
-      earningsGate = v
-        ? { pass: false, reason: 'results_blackout', days_until: v.daysUntil, event_date: v.eventDate, detail: `${symbol} has results in ${v.daysUntil}d (${v.eventDate}). Promote after the announcement to avoid IV-crush + gap risk.` }
-        : { pass: true, reason: 'no_event_in_window' };
-    }
-
-    const can_promote = winRateGate.pass && surveillanceGate.pass && twofaGate.pass && earningsGate.pass;
-    res.json({
-      ok: true,
-      can_promote,
-      strategy, symbol: symbol || null,
-      gates: { win_rate: winRateGate, surveillance: surveillanceGate, twofa: twofaGate, earnings: earningsGate },
-      window: '30d',
-      ts: new Date().toISOString(),
-    });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: 'promote_check_failed', detail: e.message });
-  }
-});
+// T-416: /api/me/paper/promote-check moved to routes/paper-trading.js or routes/admin-internal.js.
 
 // ============ E4 / E7 / E8 user-scoped market data ============
 // T-395 (god-object split #12): 5 routes (earnings + fiidii + bulk-deals)
@@ -1851,154 +1779,11 @@ mountMeWatchlistAlertsRoutes(app, {
   notifyWatchlistChange: _notifyWatchlistChange,
 });
 
-// Paper
-app.get('/api/me/paper', withAuth((req, res) => {
-  res.json({ ok:true,
-    state: db.paper.getState(req.user.id),
-    orders: db.paper.listOrders(req.user.id),
-    positions: db.paper.listPositions(req.user.id),
-  });
-}));
+// T-416: /api/me/paper moved to routes/paper-trading.js or routes/admin-internal.js.
 
-// Tier 72: paper-trade order placement using live LTP from the global ticker.
-// Body: { symbol, side: 'BUY'|'SELL', qty, slippageBps?, strategy? }
-// The fill price = current WS LTP +/- slippage. Records to paper_orders + paper_positions.
-app.post('/api/me/paper/order', withAuth(async (req, res) => {
-  try {
-    const b = req.body || {};
-    const symbol = String(b.symbol || '').toUpperCase().trim();
-    const side = String(b.side || '').toUpperCase();
-    const qty = Math.floor(Number(b.qty || 0));
-    const slip = Number.isFinite(b.slippageBps) ? Number(b.slippageBps) : 5;
-    if (!symbol || !['BUY','SELL'].includes(side) || qty <= 0) {
-      return res.status(400).json({ ok:false, reason:'bad_input', detail:'symbol/side/qty required' });
-    }
-    // T99-T42: reject paper orders when LTPs are known stale. Otherwise the
-    // fill would be at yesterday's price (or worse, a price from before the
-    // last Kite outage), which is misleading for the user and pollutes their
-    // paper-trade stats. Without this check we'd silently accept the order.
-    try {
-      if (broker && typeof broker.health === 'function') {
-        const bh = broker.health();
-        if (bh && bh.stalledOnToken) {
-          return res.status(503).json({
-            ok: false, reason: 'broker_stalled_on_token',
-            detail: 'Live data feed is stalled — Zerodha access token expired. Reconnect from the Brokers screen first.',
-          });
-        }
-        if (bh && bh.tickStale) {
-          return res.status(503).json({
-            ok: false, reason: 'tick_stale',
-            detail: 'Live data feed is frozen — no ticks received for >90s while market is open. Wait for recovery or check Brokers screen.',
-          });
-        }
-      }
-    } catch (_) { /* health check failures shouldn't block orders */ }
-    // Get current LTP from the global ticker (market data, not user-specific).
-    let ltp = null;
-    try {
-      // Try the in-memory tick cache on the global broker (zerodha-broker uses _lastLtp Map)
-      if (broker && broker._lastLtp && typeof broker._lastLtp.get === 'function') {
-        const last = broker._lastLtp.get(symbol);
-        if (last && Number(last) > 0) ltp = Number(last);
-      }
-      // Fallback: hit /quote (sync via getQuote)
-      if ((ltp == null || !(ltp > 0)) && broker && typeof broker.getQuote === 'function') {
-        try {
-          const q = await broker.getQuote(symbol);
-          if (q && q.ltp) ltp = Number(q.ltp);
-        } catch (e) { console.warn('[server] swallowed:', e && e.message); }
-      }
-    } catch (e) { console.warn('[server] swallowed:', e && e.message); }
-    // Fallback: use most recent quote
-    if (ltp == null && broker && typeof broker.getQuote === 'function') {
-      // Note: this is sync-ish approximation; for true async we'd await. Skip on cold start.
-    }
-    if (ltp == null || !(ltp > 0)) {
-      return res.status(503).json({ ok:false, reason:'no_live_price', detail:'No live tick yet for this symbol. Try again shortly or pick a watchlist symbol.' });
-    }
-    const slippage = ltp * (slip / 10000);
-    const fillPrice = side === 'BUY' ? ltp + slippage : ltp - slippage;
-    const notional = fillPrice * qty;
-    const uid = req.user.id;
-    const state = db.paper.getState(uid);
-    if (side === 'BUY' && state.cash < notional) {
-      return res.status(400).json({ ok:false, reason:'insufficient_cash', cash: state.cash, needed: notional });
-    }
-    const orderId = 'PO-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
-    db.paper.placeOrder({
-      user_id: uid,
-      client_order_id: orderId,
-      strategy_tag: b.strategy || null,
-      symbol, side, qty,
-      order_type: 'MARKET', product: 'CNC',
-      req_price: ltp, fill_price: fillPrice, slippage,
-      status: 'filled', filled_at: new Date().toISOString(),
-    });
-    // Update position (FIFO weighted-avg). For BUY: increase qty + average price. For SELL: decrease.
-    const positions = db.paper.listPositions(uid) || [];
-    const existing = positions.find(p => p.symbol === symbol);
-    if (side === 'BUY') {
-      if (existing) {
-        const newQty = existing.qty + qty;
-        const newAvg = ((existing.qty * existing.avg_price) + (qty * fillPrice)) / newQty;
-        db._conn.prepare('UPDATE paper_positions SET qty = ?, avg_price = ? WHERE user_id = ? AND symbol = ?').run(newQty, newAvg, uid, symbol);
-      } else {
-        db._conn.prepare('INSERT INTO paper_positions (user_id, symbol, qty, avg_price) VALUES (?, ?, ?, ?)').run(uid, symbol, qty, fillPrice);
-      }
-      db.paper.setState({ ...state, cash: state.cash - notional, user_id: uid });
-    } else {
-      // SELL
-      if (!existing || existing.qty < qty) {
-        return res.status(400).json({ ok:false, reason:'insufficient_qty', have: existing ? existing.qty : 0, need: qty });
-      }
-      const realized = (fillPrice - existing.avg_price) * qty;
-      const remaining = existing.qty - qty;
-      if (remaining === 0) {
-        db._conn.prepare('DELETE FROM paper_positions WHERE user_id = ? AND symbol = ?').run(uid, symbol);
-      } else {
-        db._conn.prepare('UPDATE paper_positions SET qty = ? WHERE user_id = ? AND symbol = ?').run(remaining, uid, symbol);
-      }
-      // Record closed trade
-      db._conn.prepare('INSERT INTO paper_closed_trades (user_id, symbol, side, qty, entry_price, exit_price, pnl, strategy_tag, entered_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(uid, symbol, 'BUY', qty, existing.avg_price, fillPrice, realized, b.strategy || null, existing.opened_at || new Date().toISOString());
-      db.paper.setState({ ...state, cash: state.cash + notional, realized_pnl: (state.realized_pnl || 0) + realized, user_id: uid });
-    }
-    res.status(201).json({ ok:true, orderId, fillPrice, slippage, ltp, notional });
-  } catch (e) {
-    res.status(500).json({ ok:false, reason:'place_failed', detail: e.message });
-  }
-}));
+// T-416: /api/me/paper/order moved to routes/paper-trading.js or routes/admin-internal.js.
 
-// Tier 66: user sets their own paper-trading initial capital. This wipes the
-// existing paper state for the user (orders/positions/closed-trades) so they
-// start fresh with the new capital.
-app.put('/api/me/paper/capital', withAuth((req, res) => {
-  try {
-    const cap = Number(req.body && req.body.initialCapital);
-    if (!Number.isFinite(cap) || cap < 1000 || cap > 10000000000) {
-      return res.status(400).json({ ok:false, reason:'initial_capital_out_of_range', detail:'Pick a value between INR 1,000 and INR 1,000 Cr.' });
-    }
-    const tier = (req.body && String(req.body.tier || '').slice(0,16)) || 'CUSTOM';
-    const reset = !!(req.body && req.body.reset);
-    const uid = req.user.id;
-    if (reset) {
-      // Wipe historical paper data so the new capital is a true starting point.
-      db._conn.prepare('DELETE FROM paper_orders WHERE user_id = ?').run(uid);
-      db._conn.prepare('DELETE FROM paper_positions WHERE user_id = ?').run(uid);
-      db._conn.prepare('DELETE FROM paper_closed_trades WHERE user_id = ?').run(uid);
-    }
-    db.paper.setState({
-      user_id: uid,
-      tier: tier,
-      cash: cap,
-      initial_capital: cap,
-      realized_pnl: reset ? 0 : Number(db.paper.getState(uid).realized_pnl || 0),
-    });
-    res.json({ ok:true, state: db.paper.getState(uid) });
-  } catch (e) {
-    res.status(500).json({ ok:false, reason:'capital_set_failed', detail: e.message });
-  }
-}));
+// T-416: /api/me/paper/capital moved to routes/paper-trading.js or routes/admin-internal.js.
 
 // Autorun config (per user)
 // T-404 (god-object split #28): 3 /api/me/autorun routes extracted to routes/me-autorun.js.
@@ -2338,36 +2123,22 @@ mountOptionChainRoutes(app, {
   opsKey: process.env.ATS_OPS_KEY || '',
 });
 
-// T-403 (split #24): options routes moved to routes/me-options.js (mount call below).
-// T-302a/T-303a: signal calibration + auto-retire recommendation read endpoints
-// T-301a: walk-forward parameter optimization (advisory).
-// POST body: { strategy, symbol, paramGrid?, opts? }
-// Fetches 1-year daily candles from broker, runs walk-forward sweep,
-// returns ranked + summary + recommendation. CPU-bound but bounded by
-// paramGrid size; combos > 200 rejected.
-app.post('/api/me/walk-forward', async (req, res) => {
-  if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
-  try {
-    const { strategy, symbol, paramGrid, opts } = req.body || {};
-    if (!strategy || typeof strategy !== 'string') return res.status(400).json({ ok: false, reason: 'strategy required' });
-    if (!symbol || typeof symbol !== 'string')     return res.status(400).json({ ok: false, reason: 'symbol required' });
-    const grid = paramGrid && typeof paramGrid === 'object' ? paramGrid : {};
-    let comboCount = 1;
-    for (const v of Object.values(grid)) comboCount *= Array.isArray(v) ? Math.max(1, v.length) : 1;
-    if (comboCount > 200) return res.status(400).json({ ok: false, reason: `paramGrid too large (${comboCount} combos > 200 cap)` });
-    if (!broker || typeof broker.getHistorical !== 'function') {
-      return res.status(503).json({ ok: false, reason: 'broker_not_initialized' });
-    }
-    const candles = await broker.getHistorical(symbol, { interval: 'day', days: 365 });
-    if (!Array.isArray(candles) || candles.length < 90) {
-      return res.status(400).json({ ok: false, reason: `not enough historical candles for ${symbol} (got ${candles ? candles.length : 0})` });
-    }
-    const wf = createWalkForward({ runBacktest: _wfRunBacktest });
-    const result = wf.run({ candles, strategy, paramGrid: grid, opts: opts || {} });
-    res.json({ ok: true, symbol, ...result });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: e.message });
-  }
+// T-416 (architecture audit #1, god-object split #43): 5 paper-trading +
+// walk-forward routes extracted to routes/paper-trading.js.
+//   - GET  /api/me/paper
+//   - POST /api/me/paper/order
+//   - PUT  /api/me/paper/capital
+//   - POST /api/me/paper/promote-check
+//   - POST /api/me/walk-forward
+const { mountPaperTradingRoutes } = require('./routes/paper-trading');
+mountPaperTradingRoutes(app, {
+  withAuth,
+  getDb:             () => db,
+  getBroker:         () => broker,
+  getSurveillance:   () => _surveillance,
+  getEarningsCal:    () => _earningsCal,
+  createWalkForward,
+  runBacktest:       _wfRunBacktest,
 });
 
 // T-403 (split #26): /api/me/calibration moved to routes/me-misc.js.
@@ -2693,103 +2464,15 @@ app.post('/api/brokers/zerodha/auto-login/exchange', express.json(), async (req,
 // columns present (api_key, refresh_token=api_secret, totp_seed, feed_token=password).
 // That filter lives in db.brokers.listEligible (Tier 80).
 
-app.post('/api/admin/internal/bulk-rotate', express.json(), async (req, res) => {
-  if (!requireInternal(req, res)) return;
-  if (!vault) return res.status(503).json({ ok: false, reason: 'vault_not_open' });
-  if (!db || !db.brokers || typeof db.brokers.listEligible !== 'function') {
-    return res.status(503).json({ ok: false, reason: 'db_not_ready' });
-  }
-  try {
-    const rows = db.brokers.listEligible() || [];
-    const out = [];
-    const errors = [];
-    for (const r of rows) {
-      try {
-        // Unseal each credential. If any one fails (corrupted blob, key
-        // mismatch) we skip this row and surface it in errors[] so the host
-        // script can log it without aborting the whole batch.
-        const apiKey    = await vault.open(r.api_key);
-        const apiSecret = await vault.open(r.refresh_token);
-        const totpSeed  = await vault.open(r.totp_seed);
-        const password  = await vault.open(r.feed_token);
-        out.push({
-          id:             r.id,
-          user_id:        r.user_id,
-          broker:         r.broker,
-          broker_user_id: r.broker_user_id,
-          api_key:        apiKey,
-          api_secret:     apiSecret,
-          totp_seed:      totpSeed,
-          password:       password,
-          // Issuing the loginUrl per-user is cheap and keeps the host script simple.
-          login_url:      `https://kite.zerodha.com/connect/login?v=3&api_key=${encodeURIComponent(apiKey)}`,
-        });
-      } catch (e) {
-        errors.push({ id: r.id, user_id: r.user_id, reason: 'unseal_failed', detail: String(e && e.message || e).slice(0, 200) });
-      }
-    }
-    audit('bulkrotate.bundle.served', { count: out.length, errors: errors.length });
-    res.json({ ok: true, count: out.length, accounts: out, errors });
-  } catch (err) {
-    audit('bulkrotate.bundle.error', { msg: err.message });
-    res.status(500).json({ ok: false, error: err.message.slice(0, 200) });
-  }
-});
+// T-416: /api/admin/internal/bulk-rotate moved to routes/paper-trading.js or routes/admin-internal.js.
 
-// Host-side script POSTs the freshly-rotated access_token back here for each
-// user. We seal it and persist via the same updateTokens path that cron-reauth
-// (T-106) uses, so any in-memory broker re-hydration hooks fire identically.
-//
-// Body: { user_id, id?, broker_user_id?, access_token, issued_at?, expires_at? }
-//   - user_id REQUIRED
-//   - id (broker_accounts row id) preferred if known; otherwise we look it up
-//     by (user_id, broker='zerodha')
-//   - access_token REQUIRED (plaintext from Kite)
-//   - issued_at / expires_at default to now / now+24h if omitted
-app.post('/api/admin/internal/seal-token', express.json(), async (req, res) => {
-  if (!requireInternal(req, res)) return;
-  if (!vault) return res.status(503).json({ ok: false, reason: 'vault_not_open' });
-
-  const body = req.body || {};
-  const userId       = body.user_id;
-  const rowId        = body.id;
-  const accessToken  = body.access_token;
-  if (!userId)      return res.status(400).json({ ok: false, reason: 'user_id_required' });
-  if (!accessToken) return res.status(400).json({ ok: false, reason: 'access_token_required' });
-
-  const issuedAt  = body.issued_at  || new Date().toISOString();
-  const expiresAt = body.expires_at || new Date(Date.now() + 24*60*60*1000).toISOString();
-
-  try {
-    // Resolve the broker_accounts row.
-    let row;
-    if (rowId) {
-      row = db.brokers.getFull(userId, rowId);
-    } else {
-      row = db.brokers.getByBroker(userId, 'zerodha');
-    }
-    if (!row) {
-      audit('bulkrotate.seal.miss', { userId, rowId });
-      return res.status(404).json({ ok: false, reason: 'broker_account_not_found' });
-    }
-
-    const sealed = await vault.seal(String(accessToken));
-    db.brokers.updateTokens(row.id, userId, sealed, issuedAt, expiresAt);
-
-    // Mirror the cron-reauth post-update bookkeeping: stamp the test row OK
-    // so the Brokers UI shows a green tick + last-rotate timestamp.
-    try {
-      if (typeof db.brokers.recordTest === 'function') {
-        db.brokers.recordTest(userId, row.id, true, null);
-      }
-    } catch (e) { console.warn('[server] swallowed:', e && e.message); }
-
-    audit('bulkrotate.seal.ok', { userId, rowId: row.id, broker_user_id: row.broker_user_id });
-    res.json({ ok: true, id: row.id, broker_user_id: row.broker_user_id, issued_at: issuedAt, expires_at: expiresAt });
-  } catch (err) {
-    audit('bulkrotate.seal.error', { userId, msg: err && err.message });
-    res.status(500).json({ ok: false, error: String(err && err.message).slice(0, 200) });
-  }
+// T-416 (architecture audit #1, god-object split #42): 2 internal admin
+// routes (bulk-rotate, seal-token) extracted to routes/admin-internal.js.
+const { mountAdminInternalRoutes } = require('./routes/admin-internal');
+mountAdminInternalRoutes(app, {
+  audit, requireInternal, express,
+  getVault: () => vault,
+  getDb:    () => db,
 });
 
 app.post('/api/brokers/disconnect', async (req, res) => {
