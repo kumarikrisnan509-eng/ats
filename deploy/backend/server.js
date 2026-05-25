@@ -3182,4 +3182,33 @@ const _sessionJanitorTimer = setInterval(() => {
 }, 60 * 60 * 1000);   // 1 hour
 if (_sessionJanitorTimer.unref) _sessionJanitorTimer.unref();
 // Also run once at boot so a server that has been down a while doesn't wait
-// an hour before it
+// Also run once at boot so a server that has been down a while doesn't wait
+// an hour before its first cleanup.
+setTimeout(() => {
+  try {
+    if (db && db.sessions && typeof db.sessions.purgeExpired === 'function') {
+      const removed = db.sessions.purgeExpired();
+      console.log(`[sessions] janitor boot-sweep removed ${removed} expired session(s)`);
+    }
+  } catch (e) { console.warn('[sessions] boot janitor error:', e && e.message); }
+}, 30_000);  // wait 30s so db/init has settled
+
+
+// ---------- Boot ----------
+(async () => {
+  try {
+    await init();
+    await startBrokerFanout();
+    // Bind 0.0.0.0 inside the container; host exposure is restricted by docker-compose port mapping to 127.0.0.1.
+    server.listen(PORT, '0.0.0.0', () => {
+      audit('server.start', { port: PORT, env: ENV_NAME, killSwitch: KILL_SWITCH, broker: broker.name });
+      console.log(`ats-backend listening on 127.0.0.1:${PORT} (env=${ENV_NAME}, broker=${broker.name}, killSwitch=${KILL_SWITCH})`);
+    });
+  } catch (err) {
+    console.error('FATAL boot error:', err);
+    audit('server.bootError', { msg: err.message });
+    process.exit(1);
+  }
+})();
+
+// ---------- Shutdow
