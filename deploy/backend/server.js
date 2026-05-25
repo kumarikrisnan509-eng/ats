@@ -1644,101 +1644,10 @@ mountMarketDataRoutes(app, { getBroker: () => broker, getWatchlist: () => watchl
 const { mountAuditLogRoutes } = require('./routes/audit-log');
 mountAuditLogRoutes(app, { AUDIT_LOG });
 
-// GET /api/option-chain?symbol=NIFTY&expiry=2026-05-29&includeQuotes=true&strikes=10&spot=23400
-app.get('/api/option-chain', async (req, res) => {
-  try {
-    const underlying = String(req.query.symbol || req.query.underlying || '').trim();
-    const expiry     = String(req.query.expiry || '').trim();
-    if (!underlying || !expiry) return res.status(400).json({ ok: false, reason: 'symbol and expiry required' });
-    const includeQuotes = req.query.includeQuotes === '1' || req.query.includeQuotes === 'true';
-    const strikesAround = Math.max(1, Math.min(50, parseInt(req.query.strikes || '10', 10) || 10));
-
-    const chain = broker.getOptionChain(underlying, expiry);
-
-    // Spot resolution order: explicit ?spot query > in-memory tick cache > REST quote (indices) > null.
-    let spot = null;
-    if (req.query.spot) {
-      const s = Number(req.query.spot);
-      if (Number.isFinite(s) && s > 0) spot = s;
-    }
-    if (spot == null) {
-      try {
-        const ticks = broker.getLastTicks ? broker.getLastTicks() : [];
-        const indexSymbolMap = { 'NIFTY':'NIFTY 50', 'BANKNIFTY':'NIFTY BANK', 'FINNIFTY':'NIFTY FIN SERVICE' };
-        const want = indexSymbolMap[underlying.toUpperCase()] || underlying;
-        const hit = ticks.find(t => t.symbol === want);
-        if (hit) spot = hit.ltp;
-      } catch (e) { console.warn('[server] swallowed:', e && e.message); }
-    }
-
-    // If still no spot, try REST quote for indices (needs "NSE:NIFTY 50" key).
-    if (spot == null && typeof broker.getQuotes === 'function') {
-      try {
-        const indexSymbolMap = { 'NIFTY':'NIFTY 50', 'BANKNIFTY':'NIFTY BANK', 'FINNIFTY':'NIFTY FIN SERVICE' };
-        const idxSym = indexSymbolMap[underlying.toUpperCase()];
-        if (idxSym) {
-          const q = await broker.getQuotes([idxSym]);
-          const v = q && (q[`NSE:${idxSym}`] || q[idxSym]);
-          if (v && typeof v.last_price === 'number') spot = v.last_price;
-        }
-      } catch (e) { console.warn('[server] swallowed:', e && e.message); }
-    }
-
-    // Quote enrichment for top-N strikes around ATM.
-    let enrichedCount = 0;
-    if (includeQuotes && chain.strikes.length > 0) {
-      let atmIdx = Math.floor(chain.strikes.length / 2);
-      if (spot != null) {
-        let bestDiff = Infinity;
-        for (let i = 0; i < chain.strikes.length; i++) {
-          const diff = Math.abs(chain.strikes[i].strike - spot);
-          if (diff < bestDiff) { bestDiff = diff; atmIdx = i; }
-        }
-      }
-      const lo = Math.max(0, atmIdx - strikesAround);
-      const hi = Math.min(chain.strikes.length - 1, atmIdx + strikesAround);
-
-      const symbols = [];
-      for (let i = lo; i <= hi; i++) {
-        const r = chain.strikes[i];
-        if (r.ce) symbols.push(`NFO:${r.ce.tradingsymbol}`);
-        if (r.pe) symbols.push(`NFO:${r.pe.tradingsymbol}`);
-      }
-      if (symbols.length > 0) {
-        try {
-          const quotes = await broker.getQuotes(symbols);
-          for (let i = lo; i <= hi; i++) {
-            const r = chain.strikes[i];
-            const decorate = (leg) => {
-              if (!leg) return;
-              const k = `NFO:${leg.tradingsymbol}`;
-              const v = quotes[k];
-              if (v) {
-                leg.ltp = v.last_price;
-                leg.oi = v.oi;
-                leg.volume = v.volume;
-                leg.netChange = v.net_change;
-                if (v.ohlc) leg.ohlc = v.ohlc;
-                enrichedCount++;
-              }
-            };
-            decorate(r.ce);
-            decorate(r.pe);
-          }
-        } catch (e) {
-          // Don't fail the whole request -- return the structure without quotes.
-          console.warn('[option-chain] quote enrichment failed:', e.message);
-        }
-      }
-      chain.atmIndex = atmIdx;
-      chain.enriched = { from: lo, to: hi, legsQuoted: enrichedCount };
-    }
-
-    res.json({ ok: true, spot, ...chain });
-  } catch (e) {
-    res.status(400).json({ ok: false, reason: e.message });
-  }
-});
+// T-410 (architecture audit #1, god-object split #39): 5 compute routes
+// (/api/option-chain, /api/backtest, /api/backtest/watchlist, /api/tune,
+// /api/reconcile/import-csv) extracted to routes/backtest-tools.js.
+// Mount call is below, after BACKTEST_MAX_DAYS const declaration.
 
 // ---------- Indices snapshot ----------
 // Returns current LTPs for major indices from the in-memory tick cache (since /quotes
@@ -1754,44 +1663,18 @@ app.get('/api/option-chain', async (req, res) => {
 mountStrategiesRoutes(app); // T-214: was GET /api/strategies inline; see routes/strategies.js
 
 // ---------- Backtest ----------
-// POST /api/backtest  body: { symbol, strategy, from, to, qty?, params? }
+// T-410: 5 compute routes (/api/option-chain, /api/backtest,
+// /api/backtest/watchlist, /api/tune, /api/reconcile/import-csv) extracted
+// to routes/backtest-tools.js. Mount call below.
 const BACKTEST_MAX_DAYS = parseInt(process.env.BACKTEST_MAX_DAYS || '1825', 10); // 5 years
-app.post('/api/backtest', async (req, res) => {
-  try {
-    const { symbol, strategy, from, to, qty, params, interval } = req.body || {};
-    if (!symbol)   return res.status(400).json({ ok:false, reason:'symbol required' });
-    if (!strategy) return res.status(400).json({ ok:false, reason:'strategy required (rsi_mean_revert | ema_cross | macd_cross | bollinger)' });
-    if (!from || !to) return res.status(400).json({ ok:false, reason:'from and to required (YYYY-MM-DD)' });
-    // Bound date range.
-    const dFrom = new Date(String(from));
-    const dTo   = new Date(String(to));
-    if (!isFinite(dFrom.getTime()) || !isFinite(dTo.getTime())) {
-      return res.status(400).json({ ok: false, reason: 'from/to must be valid dates' });
-    }
-    const days = Math.floor((dTo.getTime() - dFrom.getTime()) / (86400 * 1000));
-    if (days < 0) return res.status(400).json({ ok: false, reason: 'to must be after from' });
-    if (days > BACKTEST_MAX_DAYS) {
-      return res.status(400).json({ ok: false, reason: `range too wide: ${days}d > ${BACKTEST_MAX_DAYS}d max (set BACKTEST_MAX_DAYS env to override)` });
-    }
-
-    const candles = await broker.getHistorical({
-      symbol, interval: interval || 'day', from, to,
-    });
-    if (!Array.isArray(candles) || candles.length < 30) {
-      return res.status(400).json({ ok:false, reason:`need >= 30 candles, got ${candles ? candles.length : 0}` });
-    }
-
-    const result = runBacktest({
-      candles,
-      strategy,
-      params: params || {},
-      qty: Number(qty) || 1,
-    });
-    audit('backtest.run', { symbol, strategy, bars: result.bars, trades: result.stats.trades, pnl: result.stats.totalPnl });
-    res.json({ ok: true, symbol, from, to, ...result });
-  } catch (e) {
-    res.status(400).json({ ok: false, reason: e.message });
-  }
+const { mountBacktestToolsRoutes } = require('./routes/backtest-tools');
+mountBacktestToolsRoutes(app, {
+  BACKTEST_MAX_DAYS,
+  audit,
+  getBroker:    () => broker,
+  getPaper:     () => paper,
+  getWatchlist: () => watchlist,
+  runBacktest,
 });
 
 // ---------- Paper trading (legacy + stats) ----------
@@ -1917,92 +1800,9 @@ mountTaxSweepRoutes(app, { getTax: () => tax, getSweep: () => sweep });
 const { mountAiFeatureRoutes } = require('./routes/ai-features');
 mountAiFeatureRoutes(app, { getAi: () => ai, getNews: () => news, getPaper: () => paper });
 
-// ---------- Settlement CSV reconcile ----------
-app.post('/api/reconcile/import-csv', (req, res) => {
-  try {
-    const csv = (req.body && (req.body.csv || req.body.text)) || '';
-    if (!csv || typeof csv !== 'string') return res.status(400).json({ ok:false, reason:'csv string required in body' });
-    if (csv.length > 1024 * 1024) return res.status(400).json({ ok:false, reason:'csv too large (>1MB)' });
-    const backendOrders = paper ? paper.list() : [];
-    const result = csvImport.reconcileCsv(csv, backendOrders);
-    audit('reconcile.csv', { parsed: result.parsed, matched: result.matched, onlyInCsv: result.onlyInCsv.length });
-    res.json({ ok:true, ...result });
-  } catch (e) { res.status(500).json({ ok:false, reason:e.message }); }
-});
+// T-410: /api/reconcile/import-csv moved to routes/backtest-tools.js.
 
-// ---------- Going-live preflight ----------
-// ---------- Hyperparameter tuner ----------
-// POST /api/tune  body: { symbol, strategy, paramGrid, from, to, qty?, interval?, top? }
-//   paramGrid: object mapping param-name -> array of values.
-//   e.g. for rsi_mean_revert:
-//     { period:[10,14,20], entryRsi:[25,30,35], exitRsi:[65,70,75] }
-//   Returns top-N (default 10) combinations ranked by totalPnl.
-app.post('/api/tune', async (req, res) => {
-  try {
-    const { symbol, strategy, paramGrid, from, to, qty, interval } = req.body || {};
-    if (!symbol)    return res.status(400).json({ ok:false, reason:'symbol required' });
-    if (!strategy)  return res.status(400).json({ ok:false, reason:'strategy required' });
-    if (!paramGrid || typeof paramGrid !== 'object') {
-      return res.status(400).json({ ok:false, reason:'paramGrid required (object of name -> values[])' });
-    }
-    if (!from || !to) return res.status(400).json({ ok:false, reason:'from and to required' });
-    const top = Math.max(1, Math.min(50, parseInt(req.body.top || '10', 10) || 10));
-
-    // Explode grid into all combinations (cartesian product). Cap at 200 to prevent abuse.
-    const keys = Object.keys(paramGrid);
-    let combos = [{}];
-    for (const k of keys) {
-      const vals = Array.isArray(paramGrid[k]) ? paramGrid[k] : [paramGrid[k]];
-      const next = [];
-      for (const c of combos) for (const v of vals) next.push({ ...c, [k]: v });
-      combos = next;
-      if (combos.length > 200) {
-        return res.status(400).json({ ok:false, reason:`grid too large: ${combos.length} combinations (cap 200)` });
-      }
-    }
-
-    // Fetch candles ONCE; reuse across all combos.
-    const candles = await broker.getHistorical({ symbol, interval: interval || 'day', from, to });
-    if (!Array.isArray(candles) || candles.length < 30) {
-      return res.status(400).json({ ok:false, reason:`need >= 30 candles, got ${candles ? candles.length : 0}` });
-    }
-
-    const results = [];
-    for (const params of combos) {
-      try {
-        const r = runBacktest({ candles, strategy, params, qty: Number(qty) || 1 });
-        results.push({
-          params,
-          trades:        r.stats.trades,
-          winRate:       r.stats.winRate,
-          totalPnl:      r.stats.totalPnl,
-          maxDrawdown:   r.stats.maxDrawdown,
-          buyAndHoldPnl: r.stats.buyAndHoldPnl,
-          vsBuyAndHold:  r.stats.vsBuyAndHold,
-        });
-      } catch (e) {
-        results.push({ params, error: e.message });
-      }
-    }
-    // Sort: prefer totalPnl desc, tiebreak by lower drawdown
-    results.sort((a, b) => {
-      const ap = a.totalPnl || -Infinity;
-      const bp = b.totalPnl || -Infinity;
-      if (bp !== ap) return bp - ap;
-      return (a.maxDrawdown || Infinity) - (b.maxDrawdown || Infinity);
-    });
-    audit('tune.run', { symbol, strategy, combos: combos.length, bestPnl: results[0] && results[0].totalPnl });
-    res.json({
-      ok: true, symbol, strategy, from, to,
-      candlesUsed: candles.length,
-      combinations: combos.length,
-      top: results.slice(0, top),
-      worst: results.slice(-3).reverse(),
-    });
-  } catch (e) {
-    res.status(500).json({ ok:false, reason: e.message });
-  }
-});
+// T-410: /api/tune moved to routes/backtest-tools.js.
 
 // T-389 (architecture audit #1, god-object split #6): /api/preflight +
 // /api/regime extracted to routes/diagnostic.js. /api/benchmark stays here
@@ -2172,74 +1972,7 @@ mountMeHeavyRoutes(app, {
 
 // T-406 (god-object split #32): /api/kill-switch moved to routes/misc.js.
 
-// ---------- Watchlist backtest ----------
-// POST /api/backtest/watchlist  body: { strategy, from, to, qty?, params?, interval? }
-// Runs the strategy across every scannable symbol in the watchlist (skips indices),
-// returns per-symbol stats sorted by totalPnl desc.
-app.post('/api/backtest/watchlist', async (req, res) => {
-  try {
-    if (!watchlist) return res.status(503).json({ ok: false, reason: 'watchlist_not_initialized' });
-    const { strategy, from, to, qty, params, interval } = req.body || {};
-    if (!strategy)    return res.status(400).json({ ok: false, reason: 'strategy required' });
-    if (!from || !to) return res.status(400).json({ ok: false, reason: 'from and to required' });
-
-    const symbols = watchlist.list().filter(s =>
-      !/^(NIFTY|BANKNIFTY|SENSEX|FINNIFTY|MIDCPNIFTY|INDIA VIX)/i.test(s) &&
-      !/(CE|PE|FUT)$/.test(s)
-    );
-    if (symbols.length === 0) return res.json({ ok: true, results: [], note: 'no scannable symbols in watchlist' });
-
-    const results = [];
-    const errors = {};
-    for (const symbol of symbols) {
-      try {
-        const candles = await broker.getHistorical({
-          symbol, interval: interval || 'day', from, to,
-        });
-        if (!Array.isArray(candles) || candles.length < 30) {
-          errors[symbol] = `only ${candles ? candles.length : 0} candles`;
-          continue;
-        }
-        const r = runBacktest({
-          candles,
-          strategy,
-          params: params || {},
-          qty: Number(qty) || 1,
-        });
-        results.push({
-          symbol,
-          trades: r.stats.trades,
-          winRate: r.stats.winRate,
-          totalPnl: r.stats.totalPnl,
-          buyAndHoldPnl: r.stats.buyAndHoldPnl,
-          vsBuyAndHold: r.stats.vsBuyAndHold,
-          maxDrawdown: r.stats.maxDrawdown,
-          avgWin: r.stats.avgWin,
-          avgLoss: r.stats.avgLoss,
-        });
-      } catch (e) {
-        errors[symbol] = e.message;
-      }
-      // Polite pacing for Kite REST.
-      await new Promise(r => setTimeout(r, 250));
-    }
-
-    results.sort((a, b) => b.totalPnl - a.totalPnl);
-
-    const aggregate = {
-      symbolsScanned: results.length,
-      totalPnl: +results.reduce((s, r) => s + r.totalPnl, 0).toFixed(2),
-      profitable: results.filter(r => r.totalPnl > 0).length,
-      losing:     results.filter(r => r.totalPnl < 0).length,
-      avgWinRate: results.length ? +(results.reduce((s, r) => s + r.winRate, 0) / results.length).toFixed(2) : 0,
-    };
-
-    audit('backtest.watchlist', { strategy, ...aggregate });
-    res.json({ ok: true, strategy, from, to, qty: Number(qty) || 1, aggregate, results, errors: Object.keys(errors).length ? errors : null });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: e.message });
-  }
-});
+// T-410: /api/backtest/watchlist moved to routes/backtest-tools.js.
 
 // ---------- Tier 18/21/22/31: Wealth / longterm / MPT / factor-tilt ----------
 // T-401 (god-object split #19): 11 wealth routes (longterm + bonds/reits +
