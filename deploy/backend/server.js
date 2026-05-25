@@ -1278,68 +1278,7 @@ app.use('/api', (req, res, next) => {
 //
 // Kite signs the payload with sha256(order_id + status + api_secret).
 // We verify, audit, fan out to /ws clients, and Telegram-notify on FILLED/REJECTED.
-app.post('/api/brokers/zerodha/postback', (req, res) => {
-  const body = req.body || {};
-  if (!body.order_id || !body.status || !body.checksum) {
-    audit('postback.invalid', { reason: 'missing_required_fields', body });
-    return res.status(400).json({ ok: false, reason: 'missing required fields' });
-  }
-  // HMAC verification
-  const expected = crypto
-    .createHash('sha256')
-    .update(String(body.order_id) + String(body.status) + (process.env.ZERODHA_API_SECRET || process.env.KITE_API_SECRET || ''))
-    .digest('hex');
-  if (expected !== String(body.checksum).toLowerCase()) {
-    audit('postback.invalid', { reason: 'checksum_mismatch', orderId: body.order_id, status: body.status });
-    return res.status(401).json({ ok: false, reason: 'checksum mismatch' });
-  }
-  // Verified — audit it.
-  audit('postback.received', {
-    orderId: body.order_id,
-    status: body.status,
-    symbol: body.tradingsymbol,
-    side: body.transaction_type,
-    qty: body.filled_quantity,
-    avg: body.average_price,
-  });
-
-  // Fan out to /ws clients so the UI can update order tables in real time.
-  const payload = JSON.stringify({
-    type: 'order_update',
-    orderId:     body.order_id,
-    status:      body.status,
-    symbol:      body.tradingsymbol,
-    exchange:    body.exchange,
-    side:        body.transaction_type,
-    quantity:    body.quantity,
-    filledQty:   body.filled_quantity,
-    pendingQty:  body.pending_quantity,
-    price:       body.price,
-    avgPrice:    body.average_price,
-    statusMsg:   body.status_message,
-    ts:          Date.now(),
-  });
-  for (const ws of wsClients) {
-    if (ws.readyState === 1) ws.send(payload);
-  }
-
-  // Telegram notification on terminal states.
-  const terminal = ['COMPLETE', 'REJECTED', 'CANCELLED'];
-  if (terminal.includes(String(body.status).toUpperCase())) {
-    const emoji = body.status === 'COMPLETE' ? 'success' : 'warn';
-    notify(emoji, `Order ${body.status}: ${body.tradingsymbol}`, {
-      body: body.status_message || '',
-      fields: {
-        orderId:  body.order_id,
-        side:     body.transaction_type,
-        qty:      `${body.filled_quantity || 0} / ${body.quantity || 0}`,
-        avgPrice: body.average_price || '-',
-      },
-    }).catch(e => console.warn('[server] promise rejected:', e && e.message));
-  }
-
-  res.json({ ok: true, received: true });
-});
+// T-417: /api/brokers/zerodha/postback moved to routes/broker-oauth.js.
 
 // T-414 (architecture audit #1, god-object split #40): 7 boot-wiring routes
 // (/api/health, /api/health-deep, /api/status, /api/csrf-token, /api/summary,
@@ -1932,175 +1871,19 @@ app.use('/api/v1/me/brokers', (req, res, next) => {
 // POST /api/me/broker-test
 // Uses the requesting user's per-user broker to call Kite /profile.
 // Returns profile name + segments + products on success, or detailed error.
-app.post('/api/me/broker-test', withAuth(async (req, res) => {
-  try {
-    if (!_brokerResolver) return res.status(503).json({ ok: false, reason: 'resolver_unavailable' });
-    const r = await _brokerResolver.resolveForRequest({ db, vault, globalBroker: null, fallbackToGlobal: false }, req);
-    if (!r.broker) return res.status(412).json({ ok: false, reason: 'broker_not_connected', detail: 'Save credentials first.' });
-    const profile = await r.broker.getProfile();
-    res.json({
-      ok: true,
-      profile: {
-        userName: profile && (profile.user_name || profile.userName) || null,
-        userEmail: profile && (profile.email || profile.userEmail) || null,
-        broker: profile && (profile.broker || 'ZERODHA'),
-        userId: profile && (profile.user_id || profile.userId) || null,
-        segments: profile && (profile.exchanges || profile.segments) || [],
-        products: profile && profile.products || [],
-        orderTypes: profile && profile.order_types || profile.orderTypes || [],
-      },
-    });
-  } catch (e) {
-    const msg = e && e.message || 'unknown';
-    // Common: TokenException -> access token expired/missing -> guide user to Reauth
-    const isTokenIssue = /token|access_token|TokenException|InputException/i.test(msg);
-    res.status(isTokenIssue ? 401 : 500).json({
-      ok: false,
-      reason: isTokenIssue ? 'token_invalid' : 'profile_call_failed',
-      detail: msg,
-      hint: isTokenIssue ? 'Click Reauth to refresh your Kite access token.' : null,
-    });
-  }
-}));
+// T-417: /api/me/broker-test moved to routes/broker-oauth.js.
 
 // ---------- Tier 62: per-user Kite OAuth flow ----------
 // HMAC-signed state token so callback can identify the user without trusting URL query.
 // state = base64url(userId).base64url(nonce).hex(HMAC_SHA256(userId|nonce, masterKey))
-app.get('/api/me/broker-oauth-url', withAuth(async (req, res) => {
-  try {
-    const row = db.brokers.getByBroker(req.user.id, 'zerodha');
-    if (!row || !row.api_key) {
-      return res.status(412).json({ ok: false, reason: 'no_credentials', detail: 'Save api_key + api_secret first.' });
-    }
-    const apiKey = await vault.open(row.api_key);
-    const state = _signState(req.user.id);
-    // Kite Connect login URL: append ?api_key=...&v=3 and ?state= (Kite passes state back unchanged)
-    const url = `https://kite.zerodha.com/connect/login?api_key=${encodeURIComponent(apiKey)}&v=3&state=${encodeURIComponent(state)}`;
-    res.json({ ok: true, url, expiresInSec: 300 });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: 'url_build_failed', detail: e.message });
-  }
-}));
+// T-417: /api/me/broker-oauth-url moved to routes/broker-oauth.js.
 
 // Per-user callback. If state is present, prefer per-user flow over legacy global.
 // Kite redirects with ?request_token=...&action=login&status=success&state=...
 // Tier 81: callback handler now lives at both legacy and v1 paths
-const _zerodhaCallback = async (req, res) => {
-  const rt = req.query.request_token;
-  const state = req.query.state;
-  if (!rt) return res.status(400).send('Missing request_token.');
-
-  // T99-T58: when state is absent, this is the GLOBAL-broker auto-login flow
-  // (host-side morning-check.sh → auto-login-host.js → Kite redirects with
-  // no state). Delegate to the same logic as /api/brokers/zerodha/callback's
-  // legacy path so all three callback URLs handle both per-user AND global
-  // flows. Previously this handler unconditionally required state, so if
-  // Kite's dashboard Redirect URL was set to /api/me/broker-callback or
-  // /api/v1/oauth/zerodha/callback, the global broker silently failed to
-  // reauth every morning with 'Invalid or expired state token'.
-  if (!state) {
-    if (BROKER_NAME !== 'zerodha') return res.status(400).send('Not configured for Zerodha.');
-    try {
-      const session = await broker.exchangeRequestToken(rt);
-      broker.setAccessToken(session.accessToken);
-      await sessions.saveTokens(session.userId, {
-        accessToken: session.accessToken,
-        publicToken: session.publicToken,
-        userId: session.userId,
-        issuedAt: new Date().toISOString(),
-      });
-      // T99-T118 + T99-T119: also update broker_accounts so cron-reauth's
-      // _waitForCallbackPath (T-117) can detect this success. Previously the
-      // global-flow callback only wrote to in-memory broker + file, leaving
-      // the DB row stale. cron's exchange then raced the consumed token and
-      // logged exchange_failed even though the broker was healthy.
-      //
-      // T-119: iterate broker_accounts rows directly. T-118 originally used
-      // sessions.listAllUserIds() but those are FILENAME-based ids ("ARS209")
-      // not numeric DB user_ids — parseInt("ARS209") returns NaN and the
-      // loop skipped every row. The fix is to query db.brokers.listEligible()
-      // directly and update each zerodha row whose broker_user_id matches
-      // session.userId (or all zerodha rows in single-tenant mode).
-      try {
-        let rows = [];
-        try { rows = db.brokers.listEligible() || []; } catch (_) { rows = []; }
-        const targetClientId = String(session.userId || '');
-        for (const row of rows) {
-          if (row.broker !== 'zerodha') continue;
-          // Match by broker_user_id (Kite client id like "ARS209"). If the
-          // row has no broker_user_id, fall through and accept the row
-          // anyway in single-row deployments.
-          if (row.broker_user_id && targetClientId && row.broker_user_id !== targetClientId) continue;
-          const sealed = await vault.seal(session.accessToken);
-          const issuedAt = new Date().toISOString();
-          const now = new Date();
-          const expiresAt = new Date(now);
-          expiresAt.setUTCHours(0, 30, 0, 0); // 06:00 IST = 00:30 UTC
-          if (expiresAt < now) expiresAt.setUTCDate(expiresAt.getUTCDate() + 1);
-          db.brokers.updateTokens(row.id, row.user_id, sealed, issuedAt, expiresAt.toISOString());
-          try { db.brokers.recordTest(row.user_id, row.id, true, null); } catch (e) { console.warn('[server] swallowed:', e && e.message); }
-          try { _brokerResolver.invalidate(row.user_id); } catch (e) { console.warn('[server] swallowed:', e && e.message); }
-          audit('zerodha.callback.db-sync', { userId: row.user_id, brokerRowId: row.id, kiteClientId: targetClientId });
-          console.log('[server] global-callback DB sync ok: row=' + row.id + ' user=' + row.user_id + ' kite=' + targetClientId);
-        }
-      } catch (e) {
-        console.error('[server] global-callback DB sync failed:', e && e.message);
-      }
-      const sid = sessions.newSession(session.userId);
-      setSessionCookie(res, sid);
-      audit('zerodha.connected.global-via-stateless-callback', { userId: session.userId });
-      return res.redirect('/?connected=zerodha');
-    } catch (err) {
-      audit('zerodha.callback.global.error', { msg: err.message });
-      return res.status(500).send(`Zerodha exchange failed: ${err.message}`);
-    }
-  }
-
-  const userId = _verifyState(state);
-  if (!userId) return res.status(400).send('Invalid or expired state token. Please retry from the Brokers screen.');
-  try {
-    const row = db.brokers.getByBroker(userId, 'zerodha');
-    if (!row) return res.status(404).send('No Zerodha credentials on file for this user.');
-    const apiKey    = row.api_key      ? await vault.open(row.api_key)      : null;
-    const apiSecret = row.refresh_token ? await vault.open(row.refresh_token) : null;
-    if (!apiKey || !apiSecret) return res.status(412).send('Incomplete credentials.');
-
-    // Build a one-shot KiteConnect for this user to exchange the request_token.
-    const { KiteConnect } = require('kiteconnect');
-    const kc = new KiteConnect({ api_key: apiKey });
-    const session = await kc.generateSession(rt, apiSecret);
-    const sealedAccessToken = await vault.seal(session.access_token);
-    // Tokens issued today expire at ~6:00 AM IST the next morning.
-    const now = new Date();
-    const expiresAt = new Date(now);
-    expiresAt.setUTCHours(0, 30, 0, 0); // 06:00 IST = 00:30 UTC
-    if (expiresAt < now) expiresAt.setUTCDate(expiresAt.getUTCDate() + 1);
-    db.brokers.updateTokens(row.id, userId, sealedAccessToken, now.toISOString(), expiresAt.toISOString());
-    // Also persist client_id (broker_user_id) if Kite gave us one
-    if (session.user_id && !row.broker_user_id) {
-      db._conn.prepare('UPDATE broker_accounts SET broker_user_id = ? WHERE id = ?').run(session.user_id, row.id);
-    }
-    // Invalidate cached per-user broker instance so next request rebuilds with new token.
-    try { _brokerResolver.invalidate(userId); } catch (e) { console.warn('[server] swallowed:', e && e.message); }
-
-    audit('zerodha.connected.per-user', { userId, kiteUserId: session.user_id });
-
-    // Pretty redirect page that closes the popup and pings the opener.
-    res.set('Content-Type', 'text/html');
-    res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Zerodha connected</title>
-<style>body{font-family:-apple-system,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#f8fafc;color:#0f172a}.card{padding:32px;border-radius:12px;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.08);text-align:center}.ok{color:#059669;font-size:48px}h1{font-size:18px;margin:12px 0 4px}.muted{color:#64748b;font-size:13px}</style>
-</head><body><div class="card"><div class="ok">&#10003;</div><h1>Zerodha connected</h1><div class="muted">You can close this window. Returning to ATS...</div></div>
-<script>
-  try { if (window.opener) window.opener.postMessage({ type: 'ats-broker-connected', broker: 'zerodha' }, '*'); } catch (e) { console.debug('[server] error:', e && e.message); }
-  setTimeout(() => { try { window.close(); } catch (e) { console.debug('[server] error:', e && e.message); } window.location.href = '/#brokers?connected=1'; }, 1200);
-</script></body></html>`);
-  } catch (e) {
-    audit('zerodha.callback.per-user.error', { userId, msg: e.message });
-    res.status(500).set('Content-Type', 'text/html').send(`<!DOCTYPE html><html><body style="font-family:sans-serif;padding:24px"><h2>Connection failed</h2><p>${(e.message || 'unknown').replace(/[<>&]/g, '')}</p><p><a href="/#brokers">Back to Brokers</a></p></body></html>`);
-  }
-};
-app.get('/api/me/broker-callback', _zerodhaCallback);          // legacy alias (Tier 62)
-app.get('/api/v1/oauth/zerodha/callback', _zerodhaCallback);   // v1 path (Tier 81)
+// T-417: _zerodhaCallback moved to routes/broker-oauth.js.
+// T-417: /api/me/broker-callback (alias) moved to routes/broker-oauth.js.
+// T-417: /api/v1/oauth/zerodha/callback (alias) moved to routes/broker-oauth.js.
 
 // ---------- Tier 50/51: auth endpoints (signup, login, logout, verify, reset) ----------
 mountAuthRoutes(app, { getAuth: () => auth, getEmailAlerts: () => emailAlerts }); // T-216 + T-228 fix: getter pattern (auth is `let` populated in init, was captured undefined)
@@ -2268,83 +2051,12 @@ mountOrdersRoutes(app, {
 
 // ---------- Broker OAuth: Zerodha ----------
 // Step 1: send the user to Kite to log in
-app.get('/api/brokers/zerodha/login', (_req, res) => {
-  if (BROKER_NAME !== 'zerodha') {
-    return res.status(400).send('BROKER is not "zerodha" on this server.');
-  }
-  const url = broker.buildLoginUrl();
-  audit('zerodha.loginUrl', {});
-  res.redirect(url);
-});
+// T-417: /api/brokers/zerodha/login moved to routes/broker-oauth.js.
 
 // Step 2: Kite redirects back with ?request_token=...
 // Tier 62: If state= is present, this is a per-user OAuth callback. Decode the state,
 // look up the user, and route the exchange through their own broker_accounts row.
-app.get('/api/brokers/zerodha/callback', async (req, res) => {
-  const rt = req.query.request_token;
-  const state = req.query.state;
-  if (!rt) return res.status(400).send('Missing request_token in callback.');
-
-  // Per-user path
-  if (state && typeof state === 'string' && state.split('.').length === 3) {
-    const userId = _verifyState(state);
-    if (!userId) return res.status(400).send('Invalid or expired state token. Please retry from the Brokers screen.');
-    try {
-      const row = db.brokers.getByBroker(userId, 'zerodha');
-      if (!row) return res.status(404).send('No Zerodha credentials on file for this user.');
-      const apiKey    = row.api_key      ? await vault.open(row.api_key)      : null;
-      const apiSecret = row.refresh_token ? await vault.open(row.refresh_token) : null;
-      if (!apiKey || !apiSecret) return res.status(412).send('Incomplete credentials.');
-      const { KiteConnect } = require('kiteconnect');
-      const kc = new KiteConnect({ api_key: apiKey });
-      const session = await kc.generateSession(rt, apiSecret);
-      const sealedAccessToken = await vault.seal(session.access_token);
-      const now = new Date();
-      const expiresAt = new Date(now);
-      expiresAt.setUTCHours(0, 30, 0, 0);
-      if (expiresAt < now) expiresAt.setUTCDate(expiresAt.getUTCDate() + 1);
-      db.brokers.updateTokens(row.id, userId, sealedAccessToken, now.toISOString(), expiresAt.toISOString());
-      if (session.user_id && !row.broker_user_id) {
-        db._conn.prepare('UPDATE broker_accounts SET broker_user_id = ? WHERE id = ?').run(session.user_id, row.id);
-      }
-      try { _brokerResolver.invalidate(userId); } catch (e) { console.warn('[server] swallowed:', e && e.message); }
-      audit('zerodha.connected.per-user', { userId, kiteUserId: session.user_id });
-      res.set('Content-Type', 'text/html');
-      return res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Zerodha connected</title>
-<style>body{font-family:-apple-system,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#f8fafc;color:#0f172a}.card{padding:32px;border-radius:12px;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.08);text-align:center}.ok{color:#059669;font-size:48px}h1{font-size:18px;margin:12px 0 4px}.muted{color:#64748b;font-size:13px}</style>
-</head><body><div class="card"><div class="ok">&#10003;</div><h1>Zerodha connected</h1><div class="muted">You can close this window. Returning to ATS...</div></div>
-<script>
-  try { if (window.opener) window.opener.postMessage({ type: 'ats-broker-connected', broker: 'zerodha' }, '*'); } catch (e) { console.debug('[server] error:', e && e.message); }
-  setTimeout(() => { try { window.close(); } catch (e) { console.debug('[server] error:', e && e.message); } window.location.href = '/#brokers?connected=1'; }, 1200);
-</script></body></html>`);
-    } catch (err) {
-      audit('zerodha.callback.per-user.error', { userId, msg: err.message });
-      return res.status(500).set('Content-Type','text/html').send(`<html><body style="font-family:sans-serif;padding:24px"><h2>Connection failed</h2><p>${(err.message||'unknown').replace(/[<>&]/g,'')}</p><p><a href="/#brokers">Back to Brokers</a></p></body></html>`);
-    }
-  }
-
-  // Legacy global path (no state= -- pre-Tier-62 admin-only flow)
-  if (BROKER_NAME !== 'zerodha') return res.status(400).send('Not configured for Zerodha.');
-  try {
-    const session = await broker.exchangeRequestToken(rt);
-    broker.setAccessToken(session.accessToken);
-    await sessions.saveTokens(session.userId, {
-      accessToken: session.accessToken,
-      publicToken: session.publicToken,
-      userId: session.userId,
-      issuedAt: new Date().toISOString(),
-    });
-    const sid = sessions.newSession(session.userId);
-    setSessionCookie(res, sid);
-    audit('zerodha.connected', { userId: session.userId });
-
-    // Redirect back to the cockpit. The user lands on the dashboard with a live feed.
-    res.redirect('/?connected=zerodha');
-  } catch (err) {
-    audit('zerodha.callback.error', { msg: err.message });
-    res.status(500).send(`Zerodha exchange failed: ${err.message}`);
-  }
-});
+// T-417: /api/brokers/zerodha/callback moved to routes/broker-oauth.js.
 
 // ---------- Auto-login helpers (loopback-only) ----------
 //
@@ -2382,64 +2094,10 @@ function requireInternal(req, res) {
 }
 
 // Host-side script calls this to fetch credentials + loginUrl in one trip.
-app.get('/api/brokers/zerodha/auto-login/bundle', async (req, res) => {
-  if (!requireInternal(req, res)) return;
-  if (BROKER_NAME !== 'zerodha') {
-    return res.status(400).json({ ok: false, reason: 'broker_not_zerodha' });
-  }
-  try {
-    if (!vault) return res.status(503).json({ ok: false, reason: 'vault_not_open' });
-    const lv = new LoginVault(vault);
-    if (!lv.exists()) {
-      return res.status(412).json({ ok: false, reason: 'no_creds_run_install_script' });
-    }
-    const creds = await lv.load();
-    audit('autologin.bundle.served', { userId: creds.userId });
-    res.json({
-      ok: true,
-      loginUrl: broker.buildLoginUrl(),
-      userId:   creds.userId,
-      password: creds.password,
-      totpSeed: creds.totpSeed,
-    });
-  } catch (err) {
-    audit('autologin.bundle.error', { msg: err.message });
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
+// T-417: /api/brokers/zerodha/auto-login/bundle moved to routes/broker-oauth.js.
 
 // Host-side script POSTs the request_token here once Kite redirects.
-app.post('/api/brokers/zerodha/auto-login/exchange', express.json(), async (req, res) => {
-  if (!requireInternal(req, res)) return;
-  if (BROKER_NAME !== 'zerodha') {
-    return res.status(400).json({ ok: false, reason: 'broker_not_zerodha' });
-  }
-  const rt = req.body && req.body.requestToken;
-  if (!rt) return res.status(400).json({ ok: false, reason: 'missing_request_token' });
-  try {
-    const session = await broker.exchangeRequestToken(rt);
-    broker.setAccessToken(session.accessToken);
-    await sessions.saveTokens(session.userId, {
-      accessToken: session.accessToken,
-      publicToken: session.publicToken,
-      userId:      session.userId,
-      issuedAt:    new Date().toISOString(),
-    });
-    audit('autologin.connected', { userId: session.userId });
-    notify('success', 'ATS auto-login OK', {
-      body: 'Kite session established. Ticker connecting.',
-      fields: { userId: session.userId, time: new Date().toISOString() },
-    }).catch(e => console.warn('[server] promise rejected:', e && e.message));
-    res.json({ ok: true, userId: session.userId });
-  } catch (err) {
-    audit('autologin.exchange.error', { msg: err.message });
-    notify('error', 'ATS auto-login exchange FAILED', {
-      body: err.message.slice(0, 200),
-      url: 'https://ats.rajasekarselvam.com/api/brokers/zerodha/login',
-    }).catch(e => console.warn('[server] promise rejected:', e && e.message));
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
+// T-417: /api/brokers/zerodha/auto-login/exchange moved to routes/broker-oauth.js.
 
 // ---------- T-133 (Tier 76 Phase 1): bulk per-user TOTP rotation ----------
 //
@@ -2475,15 +2133,22 @@ mountAdminInternalRoutes(app, {
   getDb:    () => db,
 });
 
-app.post('/api/brokers/disconnect', async (req, res) => {
-  const sid = readSessionCookie(req);
-  if (!sid) return res.status(401).json({ ok: false });
-  const uid = sessions.userIdFor(sid);
-  if (uid) {
-    await sessions.forgetTokens(uid);
-    audit('zerodha.disconnect', { userId: uid });
-  }
-  res.json({ ok: true });
+// T-417 (architecture audit #1, god-object split #44 -- FINAL): all 10 broker
+// OAuth handlers extracted to routes/broker-oauth.js. server.js is now
+// completely free of inline routes -- everything mounts via routes/*.js modules.
+const { mountBrokerOAuthRoutes } = require('./routes/broker-oauth');
+mountBrokerOAuthRoutes(app, {
+  BROKER_NAME,
+  audit, notify, withAuth, requireInternal, setSessionCookie, readSessionCookie,
+  signState:   _signState,
+  verifyState: _verifyState,
+  getBroker:          () => broker,
+  getVault:           () => vault,
+  getDb:              () => db,
+  getSessions:        () => sessions,
+  getBrokerResolver:  () => _brokerResolver,
+  getWsClients:       () => wsClients,
+  express,
 });
 
 // T99-T78: observability error middleware. Catches any thrown error from a
