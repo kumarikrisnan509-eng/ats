@@ -3646,37 +3646,7 @@ mountOptionChainRoutes(app, {
   opsKey: process.env.ATS_OPS_KEY || '',
 });
 
-// T-298a: options scanner status + opportunities log endpoints.
-app.get('/api/options/opportunities', (req, res) => {
-  if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
-  if (!db) return res.status(503).json({ ok: false, reason: 'db_not_initialized' });
-  const limit = Math.max(1, Math.min(200, parseInt(req.query.limit, 10) || 50));
-  try {
-    const rows = db._conn.prepare(`
-      SELECT id, scanned_at AS scannedAt, underlying, regime, regime_confidence AS regimeConfidence,
-             template, score, raw_score AS rawScore, weight, opportunity_json AS opportunityJson,
-             reviewed, reviewed_at AS reviewedAt, reviewed_note AS reviewedNote
-      FROM option_opportunities
-      WHERE (user_id = ? OR user_id IS NULL)
-      ORDER BY scanned_at DESC LIMIT ?
-    `).all(req.user.id, limit);
-    res.json({ ok: true, count: rows.length, opportunities: rows });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: e.message });
-  }
-});
-app.post('/api/options/opportunities/:id/review', (req, res) => {
-  if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
-  if (!db) return res.status(503).json({ ok: false, reason: 'db_not_initialized' });
-  const id = parseInt(req.params.id, 10);
-  const note = (req.body && req.body.note) ? String(req.body.note).slice(0, 500) : null;
-  try {
-    const r = db._conn.prepare(`UPDATE option_opportunities SET reviewed = 1, reviewed_at = datetime('now'), reviewed_note = ? WHERE id = ?`).run(note, id);
-    res.json({ ok: r.changes === 1, changes: r.changes });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: e.message });
-  }
-});
+// T-403 (split #24): options routes moved to routes/me-options.js (mount call below).
 // T-302a/T-303a: signal calibration + auto-retire recommendation read endpoints
 // T-301a: walk-forward parameter optimization (advisory).
 // POST body: { strategy, symbol, paramGrid?, opts? }
@@ -3708,175 +3678,40 @@ app.post('/api/me/walk-forward', async (req, res) => {
   }
 });
 
-app.get('/api/me/calibration', (req, res) => {
-  if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
-  if (!signalCalibration) return res.status(503).json({ ok: false, reason: 'signal_calibration_not_initialized' });
-  const windowDays = Math.max(1, Math.min(365, parseInt(req.query.windowDays, 10) || 30));
-  try {
-    res.json({ ok: true, windowDays, calibration: signalCalibration.calibrate(windowDays) });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: e.message });
-  }
-});
-// T-280c: macro signals (NSE FII/DII + breadth + 52w highs/lows) read + manual refresh
-app.get('/api/me/macro-signals', (req, res) => {
-  if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
-  try {
-    const latest = nseMacroFetcher ? nseMacroFetcher.cachedLatest() : null;
-    res.json({
-      ok: true,
-      fetcherEnabled: typeof (require('./services/nse-macro-fetcher').NseMacroFetcher).isEnabled === 'function'
-        ? require('./services/nse-macro-fetcher').NseMacroFetcher.isEnabled() : false,
-      fetcherInstantiated: !!nseMacroFetcher,
-      latest,
-    });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: e.message });
-  }
-});
-app.post('/api/me/macro-signals/refresh', async (req, res) => {
-  if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
-  if (!nseMacroFetcher) return res.status(503).json({ ok: false, reason: 'fetcher_not_initialized' });
-  try {
-    const result = await nseMacroFetcher.fetchAll();
-    res.json({ ok: true, ...result, latest: nseMacroFetcher.cachedLatest() });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: e.message });
-  }
-});
+// T-403 (split #26): /api/me/calibration moved to routes/me-misc.js.
+// T-403 (split #26): macro-signals routes moved to routes/me-misc.js.
 
-app.get('/api/me/recommend-retire', (req, res) => {
-  if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
-  if (!signalCalibration) return res.status(503).json({ ok: false, reason: 'signal_calibration_not_initialized' });
-  const windowDays = Math.max(1, Math.min(365, parseInt(req.query.windowDays, 10) || 30));
-  try {
-    res.json({ ok: true, ...signalCalibration.recommend(windowDays) });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: e.message });
-  }
-});
+// T-403 (split #26): /api/me/recommend-retire moved to routes/me-misc.js.
 
-app.get('/api/options/scanner/status', (req, res) => {
-  if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
-  res.json({
-    ok: true,
-    fetcherEnabled: OptionChainFetcher.isEnabled(),
-    scannerEnabled: OptionsScanner.isEnabled(),
-    fetcherInstantiated: !!optionChainFetcher,
-    scannerInstantiated: !!optionsScanner,
-    note: 'Scanner is SHADOW MODE -- never places orders. Set OPTIONS_AUTORUN_ENABLED=true on backend.env to start logging proposed opportunities.',
-  });
+// T-403 (split #24/25/26): mount me-options + sip-engine + me-misc + me-portfolio-meta routes.
+const { mountMeOptionsRoutes }        = require('./routes/me-options');
+const { mountSipEngineRoutes }        = require('./routes/sip-engine');
+const { mountMeMiscRoutes }           = require('./routes/me-misc');
+const { mountMePortfolioMetaRoutes }  = require('./routes/me-portfolio-meta');
+mountMeOptionsRoutes(app, {
+  getDb: () => db,
+  getOptionChainFetcher: () => optionChainFetcher,
+  getOptionsScanner: () => optionsScanner,
+});
+mountSipEngineRoutes(app, { getSipRunner: () => sipRunner });
+mountMeMiscRoutes(app, {
+  getSignalCalibration:   () => signalCalibration,
+  getNseMacroFetcher:     () => nseMacroFetcher,
+  getPortfolioAggregates: () => portfolioAggregates,
+  getDb:                  () => db,
+});
+mountMePortfolioMetaRoutes(app, {
+  getRegimeDetector:  () => regimeDetector,
+  getAttribution:     () => attribution,
+  getSlippageTracker: () => slippageTracker,
 });
 
 
-// T-276: SIP runner endpoints. Auth-gated; user_id pinned to 1 (operator) for now.
-app.get('/api/sip/plan', (req, res) => {
-  if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
-  if (!sipRunner) return res.status(503).json({ ok:false, reason:'sip_runner_not_initialized' });
-  res.json({ ok:true, plan: sipRunner.plan(1), stats: sipRunner.stats() });
-});
-app.post('/api/sip/fire', (req, res) => {
-  if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
-  if (!sipRunner) return res.status(503).json({ ok:false, reason:'sip_runner_not_initialized' });
-  const dryRun = req.body && req.body.dryRun !== false; // default to dry-run for safety
-  const result = sipRunner.runOnce(1, { dryRun });
-  res.json({ ok:true, dryRun, result });
-});
-app.get('/api/sip/history', (req, res) => {
-  if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
-  if (!sipRunner) return res.status(503).json({ ok:false, reason:'sip_runner_not_initialized' });
-  const days = Math.max(1, Math.min(365, parseInt(req.query.days, 10) || 30));
-  res.json({ ok:true, history: sipRunner.history(1, days) });
-});
+// T-403 (split #25): /api/sip/* moved to routes/sip-engine.js.
 
-// T-272: unified position view aggregate. Pure read; no side effects.
-app.get('/api/me/portfolio/aggregates', (req, res) => {
-  if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
-  if (!portfolioAggregates) return res.status(503).json({ ok:false, reason:'portfolio_aggregates_not_initialized' });
-  try {
-    const aggregates = portfolioAggregates.compute();
-    // T-294b: optional optionGreeks rollup. Best-effort -- if there are no
-    // option positions or no option_quotes rows, optionGreeks is null.
-    let optionGreeks = null;
-    try {
-      if (db && Array.isArray(aggregates.positions) && aggregates.positions.length > 0) {
-        // Filter positions that look like options (NFO segment or tradingsymbol matches CE/PE pattern)
-        const optPositions = aggregates.positions
-          .map(p => ({ tradingsymbol: p.tradingsymbol || p.symbol, qty: p.qty || p.quantity, lotSize: p.lotSize }))
-          .filter(p => p.tradingsymbol && /(CE|PE)$/.test(p.tradingsymbol));
-        if (optPositions.length > 0) {
-          const symbols = optPositions.map(p => p.tradingsymbol);
-          const placeholders = symbols.map(() => '?').join(',');
-          const quotes = db._conn.prepare(
-            `SELECT tradingsymbol, lot_size, delta, gamma, vega, theta, ltp, spot FROM option_quotes WHERE tradingsymbol IN (${placeholders})`
-          ).all(...symbols);
-          if (quotes.length > 0) {
-            optionGreeks = rollupOptionGreeks(optPositions, quotes);
-          } else {
-            optionGreeks = { note: 'no_matching_option_quotes', positionCount: optPositions.length };
-          }
-        }
-      }
-    } catch (gErr) {
-      optionGreeks = { error: gErr.message };
-    }
-    res.json({ ok:true, aggregates, optionGreeks });
-  } catch (e) {
-    res.status(500).json({ ok:false, reason: e.message });
-  }
-});
+// T-403 (split #26): /api/me/portfolio/aggregates + /api/me/portfolio/stress moved to routes/me-misc.js.
 
-// T-275: scenario stress test. Pass {broadPct, bySector{}, bySymbol{}} in body.
-app.post('/api/me/portfolio/stress', (req, res) => {
-  if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
-  if (!portfolioAggregates) return res.status(503).json({ ok:false, reason:'portfolio_aggregates_not_initialized' });
-  try {
-    const shock = req.body || {};
-    res.json({ ok:true, stress: portfolioAggregates.stress(shock) });
-  } catch (e) {
-    res.status(400).json({ ok:false, reason: e.message });
-  }
-});
-
-// T-280: market regime detector.
-app.get('/api/me/regime', async (req, res) => {
-  if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
-  if (!regimeDetector) return res.status(503).json({ ok:false, reason:'regime_detector_not_initialized' });
-  try {
-    const r = await regimeDetector.cachedDetect();
-    res.json({ ok:true, regime: r });
-  } catch (e) {
-    res.status(500).json({ ok:false, reason: e.message });
-  }
-});
-app.get('/api/me/regime/history', (req, res) => {
-  if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
-  if (!regimeDetector) return res.status(503).json({ ok:false, reason:'regime_detector_not_initialized' });
-  const n = Math.max(1, Math.min(200, parseInt(req.query.n, 10) || 50));
-  res.json({ ok:true, history: regimeDetector.history(n) });
-});
-
-// T-283: daily attribution snapshots
-app.get('/api/me/attribution', (req, res) => {
-  if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
-  if (!attribution) return res.status(503).json({ ok:false, reason:'attribution_not_initialized' });
-  const n = Math.max(1, Math.min(365, parseInt(req.query.n, 10) || 30));
-  res.json({ ok:true, recent: attribution.recent(n), stats: attribution.stats() });
-});
-app.post('/api/me/attribution/snapshot', (req, res) => {
-  if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
-  if (!attribution) return res.status(503).json({ ok:false, reason:'attribution_not_initialized' });
-  try { res.json({ ok:true, row: attribution.snapshot() }); }
-  catch (e) { res.status(500).json({ ok:false, reason: e.message }); }
-});
-
-// T-300: slippage analytics
-app.get('/api/me/slippage', (req, res) => {
-  if (!req.user) return res.status(401).json({ ok:false, reason:'auth_required' });
-  if (!slippageTracker) return res.status(503).json({ ok:false, reason:'slippage_tracker_not_initialized' });
-  try { res.json({ ok:true, slippage: slippageTracker.compute() }); }
-  catch (e) { res.status(500).json({ ok:false, reason: e.message }); }
-});
+// T-403 (split #23): regime + attribution + slippage moved to routes/me-portfolio-meta.js.
 
 // Tier 23: rebalance suggestions. Auto-derives buckets + holdings + paper equity + cash if not in body.
 app.post('/api/rebalance', async (req, res) => {
