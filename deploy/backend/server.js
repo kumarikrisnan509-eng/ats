@@ -2914,38 +2914,14 @@ function _notifyWatchlistChange(userId, op /* 'add' | 'remove' */, symbol) {
   audit('watchlist.notify', { userId, op, symbol, fanout: pushed });
 }
 
-app.get('/api/me/watchlist', withAuth((req, res) => {
-  res.json({ ok:true, items: db.watchlist.list(req.user.id) });
-}));
-app.post('/api/me/watchlist', withAuth((req, res) => {
-  const { symbol, exchange } = req.body || {};
-  if (!symbol) return res.status(400).json({ ok:false, reason:'symbol required' });
-  const sym = String(symbol).toUpperCase();
-  db.watchlist.add(req.user.id, sym, exchange || 'NSE');
-  _notifyWatchlistChange(req.user.id, 'add', sym);
-  res.json({ ok:true });
-}));
-app.delete('/api/me/watchlist/:symbol', withAuth((req, res) => {
-  const sym = req.params.symbol.toUpperCase();
-  db.watchlist.remove(req.user.id, sym);
-  _notifyWatchlistChange(req.user.id, 'remove', sym);
-  res.json({ ok:true });
-}));
-
-// Alerts
-app.get('/api/me/alerts', withAuth((req, res) => {
-  res.json({ ok:true, alerts: db.alerts.list(req.user.id) });
-}));
-app.post('/api/me/alerts', withAuth((req, res) => {
-  const { symbol, operator, triggerPrice, channel } = req.body || {};
-  if (!symbol || !operator || triggerPrice == null) return res.status(400).json({ ok:false, reason:'symbol/operator/triggerPrice required' });
-  db.alerts.add(req.user.id, String(symbol).toUpperCase(), operator, Number(triggerPrice), channel);
-  res.json({ ok:true });
-}));
-app.delete('/api/me/alerts/:id', withAuth((req, res) => {
-  db.alerts.remove(req.user.id, Number(req.params.id));
-  res.json({ ok:true });
-}));
+// T-404 (god-object split #27): /api/me/watchlist + /api/me/alerts (6 routes)
+// extracted to routes/me-watchlist-alerts.js.
+const { mountMeWatchlistAlertsRoutes } = require('./routes/me-watchlist-alerts');
+mountMeWatchlistAlertsRoutes(app, {
+  withAuth,
+  getDb: () => db,
+  notifyWatchlistChange: _notifyWatchlistChange,
+});
 
 // Paper
 app.get('/api/me/paper', withAuth((req, res) => {
@@ -3097,30 +3073,9 @@ app.put('/api/me/paper/capital', withAuth((req, res) => {
 }));
 
 // Autorun config (per user)
-app.get('/api/me/autorun', withAuth((req, res) => {
-  res.json({ ok:true,
-    config: db.autorun.get(req.user.id) || null,
-    history: db.autorun.listHistory(req.user.id),
-  });
-}));
-app.put('/api/me/autorun', withAuth((req, res) => {
-  const b = req.body || {};
-  db.autorun.upsert({
-    user_id: req.user.id,
-    enabled: b.enabled ? 1 : 0,
-    strategy: b.strategy || null,
-    symbol: b.symbol || null,
-    qty: Number(b.qty) || 1,
-    interval: b.interval || 'day',
-    interval_minutes: Number(b.intervalMinutes) || 60,
-    candle_lookback_days: Number(b.candleLookbackDays) || 60,
-  });
-  res.json({ ok:true });
-}));
-app.delete('/api/me/autorun', withAuth((req, res) => {
-  db.autorun.delete(req.user.id);
-  res.json({ ok:true });
-}));
+// T-404 (god-object split #28): 3 /api/me/autorun routes extracted to routes/me-autorun.js.
+const { mountMeAutorunRoutes } = require('./routes/me-autorun');
+mountMeAutorunRoutes(app, { withAuth, getDb: () => db });
 
 // T-402 (god-object split #22): 3 /api/me/pnl* + /api/me/sweep/monthly
 // routes extracted to routes/me-pnl.js.
@@ -3136,33 +3091,9 @@ mountMePnlRoutes(app, {
 // "fraction of paper (symbol, strategy_tag) groups with enough trades to
 // credibly promote to live." A real promotion ledger that tracks paper→live
 // order linking is future work.
-app.get('/api/me/signals/promotion-rate', withAuth((req, res) => {
-  if (!db || !db._conn) return res.status(503).json({ ok: false, reason: 'db_not_ready' });
-  try {
-    const { computePromotionRate } = require('./promotion-rate');
-    const minTrades = Math.max(1, Math.min(100, parseInt(req.query.min_trades || '5', 10)));
-    const days = Math.max(1, Math.min(365, parseInt(req.query.days || '30', 10)));
-
-    const cutoff = new Date(Date.now() - days * 86400_000).toISOString();
-    const rows = db._conn.prepare(`
-      SELECT symbol, strategy_tag, pnl, exited_at
-      FROM paper_closed_trades
-      WHERE user_id = ?
-        AND exited_at >= ?
-    `).all(req.user.id, cutoff);
-
-    const summary = computePromotionRate(rows, { minTrades });
-    res.json({
-      ok: true,
-      window_days: days,
-      min_trades: minTrades,
-      ...summary,
-    });
-  } catch (e) {
-    console.error('[/api/me/signals/promotion-rate] error:', e && e.message);
-    res.status(500).json({ ok: false, reason: 'aggregation_failed', detail: String(e && e.message || e).slice(0, 200) });
-  }
-}));
+// T-404 (god-object split #29): /api/me/signals/promotion-rate extracted to routes/me-promotion-rate.js.
+const { mountMePromotionRateRoutes } = require('./routes/me-promotion-rate');
+mountMePromotionRateRoutes(app, { withAuth, getDb: () => db });
 
 // Tier 69b: per-user factor exposure (momentum / volatility / drawdown / concentration)
 // Uses real Kite historical candles for each holding. Sector mapping comes from the
