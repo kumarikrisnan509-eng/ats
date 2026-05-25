@@ -1624,41 +1624,11 @@ app.get('/api/health', (_req, res) => {
 });
 
 // ---------- Watchlist snapshot ----------
-// GET /api/watchlist/snapshot
-// Returns watchlist symbols + per-symbol LTP + day change (in absolute and %).
-// One round trip for the dashboard's watchlist table.
-app.get('/api/watchlist/snapshot', async (_req, res) => {
-  if (!watchlist) return res.status(503).json({ ok: false, reason: 'watchlist_not_initialized' });
-  const symbols = watchlist.list();
-  if (symbols.length === 0) return res.json({ ok: true, rows: [] });
-  try {
-    // Strip indices from /quotes (Kite uses different keying); we'll still include them but with null prices.
-    const eq = symbols.filter(s => !/^(NIFTY|BANKNIFTY|SENSEX|FINNIFTY|MIDCPNIFTY|INDIA VIX)/i.test(s));
-    const quotes = eq.length ? await broker.getQuotes(eq) : {};
-    const rows = symbols.map((sym) => {
-      const key = `NSE:${sym}`;
-      const q = quotes[key];
-      if (!q || typeof q.last_price !== 'number') {
-        return { symbol: sym, ltp: null, close: null, change: null, changePct: null, volume: null };
-      }
-      const close = q.ohlc && typeof q.ohlc.close === 'number' ? q.ohlc.close : q.last_price;
-      const change = +(q.last_price - close).toFixed(2);
-      const changePct = close ? +(((q.last_price - close) / close) * 100).toFixed(2) : 0;
-      return {
-        symbol: sym,
-        ltp: q.last_price,
-        close,
-        change,
-        changePct,
-        volume: q.volume || null,
-        ohlc: q.ohlc || null,
-      };
-    });
-    res.json({ ok: true, count: rows.length, rows });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: e.message });
-  }
-});
+// T-408 (architecture audit #1, god-object split #36): /api/watchlist/snapshot
+// extracted to routes/watchlist-snapshot.js. One round trip for the dashboard's
+// watchlist table (symbols + per-symbol LTP + day change in abs and %).
+const { mountWatchlistSnapshotRoutes } = require('./routes/watchlist-snapshot');
+mountWatchlistSnapshotRoutes(app, { getWatchlist: () => watchlist, getBroker: () => broker });
 
 // ---------- Top movers ----------
 // T-391 (architecture audit #1, god-object split #8): 5 small market-data
@@ -1668,33 +1638,11 @@ const { mountMarketDataRoutes } = require('./routes/market-data');
 mountMarketDataRoutes(app, { getBroker: () => broker, getWatchlist: () => watchlist });
 
 // ---------- Audit log reader ----------
-// GET /api/audit?since=ISO&event=order.dryRun&limit=50
-// Read-only paginated view of the JSONL audit log.
-app.get('/api/audit', (req, res) => {
-  try {
-    if (!fs.existsSync(AUDIT_LOG)) return res.json({ ok: true, rows: [], note: 'no audit log yet' });
-    const limit  = Math.max(1, Math.min(500, parseInt(req.query.limit || '50', 10) || 50));
-    const sinceQ = req.query.since ? new Date(String(req.query.since)).getTime() : 0;
-    const eventQ = typeof req.query.event === 'string' ? String(req.query.event) : null;
-
-    // Slurp & parse — audit log is rotated daily (logrotate keeps it well under a few MB).
-    const raw = fs.readFileSync(AUDIT_LOG, 'utf8');
-    const lines = raw.split('\n').filter(Boolean);
-    // Walk in reverse to find newest matches first.
-    const rows = [];
-    for (let i = lines.length - 1; i >= 0 && rows.length < limit; i--) {
-      let obj;
-      try { obj = JSON.parse(lines[i]); } catch { continue; }
-      if (!obj || !obj.ts) continue;
-      if (sinceQ && new Date(obj.ts).getTime() < sinceQ) break; // log is roughly chronological
-      if (eventQ && obj.event !== eventQ) continue;
-      rows.push(obj);
-    }
-    res.json({ ok: true, count: rows.length, rows });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: e.message });
-  }
-});
+// T-408 (architecture audit #1, god-object split #37): /api/audit
+// extracted to routes/audit-log.js. Read-only paginated view of the
+// JSONL audit log (rotated daily by logrotate).
+const { mountAuditLogRoutes } = require('./routes/audit-log');
+mountAuditLogRoutes(app, { AUDIT_LOG });
 
 // GET /api/option-chain?symbol=NIFTY&expiry=2026-05-29&includeQuotes=true&strikes=10&spot=23400
 app.get('/api/option-chain', async (req, res) => {
@@ -2331,74 +2279,22 @@ mountHistoricalRoutes(app, { getBroker: () => broker });
 // Shape matches the hardcoded RUNTIME in screen-modes.jsx exactly:
 //   { intraday: { openPositions, utilized, todayPnl, strategiesRunning },
 //     swing:    { ... }, options: { ... }, futures: { ... } }
-app.get('/api/me/modes/runtime', withAuth(async (req, res) => {
-  const uid = req.user.id;
-  const empty = () => ({ openPositions: 0, utilized: 0, todayPnl: 0, strategiesRunning: 0 });
-  const out = { intraday: empty(), swing: empty(), options: empty(), futures: empty() };
-
-  // Classify by symbol the same way the frontend does.
-  const classify = (sym) => {
-    const s = String(sym || '').toUpperCase();
-    if (/\bCE\b|\bPE\b|CALL|PUT/.test(s)) return 'options';
-    if (/\bFUT\b|FUTURES/.test(s))           return 'futures';
-    return 'intraday';
-  };
-
-  try {
-    // Open positions + utilized capital, from paper_positions.
-    const positions = (db && db.paper && typeof db.paper.listPositions === 'function')
-      ? (db.paper.listPositions(uid) || []) : [];
-    for (const p of positions) {
-      const mode = classify(p.symbol);
-      const qty  = Number(p.qty || 0);
-      const avg  = Number(p.avg_price || 0);
-      if (!qty) continue;
-      out[mode].openPositions += 1;
-      out[mode].utilized      += Math.abs(qty) * avg;
-    }
-  } catch (e) { console.warn('[modes-runtime] positions:', e && e.message); }
-
-  try {
-    // Today's PnL, from paper_closed_trades exited today (server local date).
-    if (db && db._conn) {
-      const rows = db._conn.prepare(
-        "SELECT symbol, pnl FROM paper_closed_trades " +
-        "WHERE user_id = ? AND date(exited_at) = date('now')"
-      ).all(uid) || [];
-      for (const r of rows) {
-        const mode = classify(r.symbol);
-        out[mode].todayPnl += Number(r.pnl || 0);
-      }
-    }
-  } catch (e) { console.warn('[modes-runtime] todayPnl:', e && e.message); }
-
-  try {
-    // Strategies running per mode: distinct strategy_tag across paper_orders
-    // in the last 7 days, classified by symbol of the order.
-    if (db && db._conn) {
-      const rows = db._conn.prepare(
-        "SELECT DISTINCT strategy_tag, symbol FROM paper_orders " +
-        "WHERE user_id = ? AND strategy_tag IS NOT NULL AND strategy_tag != '' " +
-        "  AND created_at >= datetime('now','-7 days')"
-      ).all(uid) || [];
-      const perMode = { intraday: new Set(), swing: new Set(), options: new Set(), futures: new Set() };
-      for (const r of rows) {
-        perMode[classify(r.symbol)].add(r.strategy_tag);
-      }
-      for (const k of Object.keys(perMode)) {
-        out[k].strategiesRunning = perMode[k].size;
-      }
-    }
-  } catch (e) { console.warn('[modes-runtime] strategies:', e && e.message); }
-
-  // Round utilized + todayPnl to whole rupees -- frontend treats them as INR.
-  for (const k of Object.keys(out)) {
-    out[k].utilized = Math.round(out[k].utilized);
-    out[k].todayPnl = Math.round(out[k].todayPnl);
-  }
-
-  res.json({ ok: true, runtime: out, asOf: new Date().toISOString() });
-}));
+// T-408 (architecture audit #1, god-object split #35): 5 heavy per-user
+// aggregator routes extracted to routes/me-heavy.js. This single mount call
+// covers:
+//   - /api/me/modes/runtime       (T-185)
+//   - /api/me/factor-exposure     (Tier 69b)
+//   - /api/me/risk-metrics        (Tier 69a)
+//   - /api/me/dashboard-summary   (Tier 60)
+//   - /api/v1/me/orders/by-mode   (Tier 82)
+const { mountMeHeavyRoutes } = require('./routes/me-heavy');
+mountMeHeavyRoutes(app, {
+  withAuth,
+  getDb: () => db,
+  getVault: () => vault,
+  getBroker: () => broker,
+  getBrokerResolver: () => _brokerResolver,
+});
 
 // T-357 (security): require auth (was leaking operator's margin data to anonymous callers)
 app.get('/api/margins', withAuth(async (req, res) => {
@@ -2896,144 +2792,8 @@ mountMePnlRoutes(app, {
 const { mountMePromotionRateRoutes } = require('./routes/me-promotion-rate');
 mountMePromotionRateRoutes(app, { withAuth, getDb: () => db });
 
-// Tier 69b: per-user factor exposure (momentum / volatility / drawdown / concentration)
-// Uses real Kite historical candles for each holding. Sector mapping comes from the
-// instrument master (best-effort -- defaults to 'Unclassified').
-app.get('/api/me/factor-exposure', withAuth(async (req, res) => {
-  try {
-    // Resolve user's broker -> get holdings
-    const r = await _brokerResolver.resolveForRequest({ db, vault, globalBroker: null, fallbackToGlobal: false }, req);
-    if (!r.broker) return res.json({ ok: true, brokerConnected: false, enoughData: false, reason: 'broker_not_connected' });
-    const holdings = await r.broker.getHoldings();
-    if (!Array.isArray(holdings) || holdings.length === 0) {
-      return res.json({ ok: true, brokerConnected: true, enoughData: false, reason: 'no_holdings' });
-    }
-
-    // Pull 252 trading days of candles for each holding (parallel, capped concurrency)
-    const candlesBySymbol = {};
-    const sectorMap = {};
-    const today = new Date();
-    const fromDate = new Date(today.getTime() - 380 * 86400 * 1000);
-    const toStr = today.toISOString().slice(0, 10);
-    const fromStr = fromDate.toISOString().slice(0, 10);
-
-    for (const h of holdings) {
-      const sym = h.tradingsymbol || h.symbol;
-      if (!sym) continue;
-      try {
-        const candles = await r.broker.getHistorical({ symbol: sym, interval: 'day', from: fromStr, to: toStr });
-        candlesBySymbol[sym] = (candles || []).map(c => ({ date: c.date || c.timestamp, close: Number(c.close || 0) }));
-      } catch (e) {
-        candlesBySymbol[sym] = [];
-      }
-      // Sector lookup — try instrument master first, fall back to static
-      // sector-map (T99-T127 / v11-E6).
-      try {
-        if (broker && broker.instruments && typeof broker.instruments.lookup === 'function') {
-          const meta = broker.instruments.lookup(sym);
-          if (meta && meta.sector) sectorMap[sym] = meta.sector;
-        }
-      } catch (e) { console.warn('[server] swallowed:', e && e.message); }
-      if (!sectorMap[sym]) {
-        try {
-          const { sectorOf } = require('./sector-map');
-          const s = sectorOf(sym);
-          if (s) sectorMap[sym] = s;
-        } catch (e) { console.warn('[server] swallowed:', e && e.message); }
-      }
-    }
-
-    const norm = holdings.map(h => ({
-      symbol: h.tradingsymbol || h.symbol,
-      qty: Number(h.quantity || h.qty || 0),
-      ltp: Number(h.ltp || h.last_price || 0),
-    }));
-
-    const { computeFactorExposure } = require('./factor-exposure');
-    const out = computeFactorExposure({ holdings: norm, candlesBySymbol, sectorMap });
-    res.json({ ok: true, brokerConnected: true, ...out });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: 'factor_exposure_failed', detail: e.message });
-  }
-}));
-
-// Tier 69a: per-user portfolio risk metrics derived from pnl_daily snapshots.
-// VaR (historical + parametric), max drawdown, Sharpe, Sortino, Calmar.
-app.get('/api/me/risk-metrics', withAuth((req, res) => {
-  try {
-    const days = Math.min(1095, Math.max(2, Number(req.query.days) || 252));
-    const rows = db.pnl.recent(req.user.id, days);
-    const dailyEquity = (rows || []).map(r => ({ date: r.date, equity: Number(r.equity || 0) })).reverse();
-    const { computeRiskMetrics } = require('./risk-engine');
-    const out = computeRiskMetrics(dailyEquity, { rfAnnual: 0.065 });
-    res.json({ ok: true, ...out });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: 'risk_compute_failed', detail: e.message });
-  }
-}));
-
-// ---------- Tier 60: per-user dashboard summary aggregator ----------
-app.get('/api/me/dashboard-summary', withAuth(async (req, res) => {
-  try {
-    const uid = req.user.id;
-    const out = {
-      brokerConnected: false,
-      portfolioValue: 0, portfolioPnl: 0, portfolioPnlPct: 0, portfolioInvested: 0,
-      holdingsCount: 0,
-      todayPnl: 0, paperRealized: 0, paperUnrealized: 0,
-      deployedCapital: 0, initialCapital: 0,
-      cashPaper: 0,
-      winRate30d: null, totalTrades30d: 0, totalWins30d: 0,
-      asOf: new Date().toISOString(),
-    };
-    try {
-      const r = await _brokerResolver.resolveForRequest({ db, vault, globalBroker: null, fallbackToGlobal: false }, req);
-      if (r.broker) {
-        out.brokerConnected = true;
-        const holdings = await r.broker.getHoldings();
-        const rows = Array.isArray(holdings) ? holdings : [];
-        out.holdingsCount = rows.length;
-        for (const h of rows) {
-          const qty = Number(h.quantity || h.qty || 0);
-          const ltp = Number(h.ltp || h.last_price || h.lastPrice || 0);
-          const avg = Number(h.average_price || h.avgPrice || h.avg_price || 0);
-          const pnl = Number(h.pnl || h.unrealised || 0) || ((ltp - avg) * qty);
-          out.portfolioValue    += qty * ltp;
-          out.portfolioInvested += qty * avg;
-          out.portfolioPnl      += pnl;
-        }
-        if (out.portfolioInvested > 0) {
-          out.portfolioPnlPct = (out.portfolioPnl / out.portfolioInvested) * 100;
-        }
-      }
-    } catch (e) { /* per-user holdings failed; leave zeros */ }
-    const paper = db.paper.getState(uid);
-    if (paper) {
-      out.cashPaper      = Number(paper.cash || 0);
-      out.initialCapital = Number(paper.initial_capital || 0);
-      out.paperRealized  = Number(paper.realized_pnl || 0);
-      const positions   = db.paper.listPositions(uid) || [];
-      out.paperUnrealized = 0;
-      out.todayPnl        = out.paperRealized + out.paperUnrealized;
-      out.deployedCapital = Math.max(0,
-        (out.initialCapital - out.cashPaper) +
-        positions.reduce((s, p) => s + (p.qty * p.avg_price), 0));
-    }
-    try {
-      const rows30 = db._conn.prepare(
-        "SELECT pnl FROM paper_closed_trades WHERE user_id = ? AND exited_at >= datetime('now','-30 days')"
-      ).all(uid);
-      out.totalTrades30d = rows30.length;
-      out.totalWins30d = rows30.filter(r => Number(r.pnl) > 0).length;
-      if (out.totalTrades30d > 0) {
-        out.winRate30d = (out.totalWins30d / out.totalTrades30d) * 100;
-      }
-    } catch (e) { /* empty for new users */ }
-    res.json({ ok: true, ...out });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: 'summary_failed', detail: e.message });
-  }
-}));
+// T-408: Tier 69b/69a/60 routes (/api/me/factor-exposure, /api/me/risk-metrics,
+// /api/me/dashboard-summary) moved to routes/me-heavy.js (mounted above).
 
 // ---------- Tier 69c: BYOK AI keys + advisor routers ----------
 let _aiKeysRouter = null;
@@ -3112,39 +2872,8 @@ app.use('/api/me/broker', (req, res, next) => {
   }
 });
 
-// ---------- Tier 82: GET /api/v1/me/orders/by-mode -- per-user counts grouped by product/mode ----------
-app.get('/api/v1/me/orders/by-mode', withAuth(async (req, res) => {
-  try {
-    const buckets = { intraday: 0, swing: 0, options: 0, futures: 0 };
-    // Paper-trading orders count for this user (synchronous, fast)
-    let paperOrders = [];
-    try { paperOrders = (db && db.paper) ? db.paper.listOrders(req.user.id) : []; } catch (e) { console.warn('[server] swallowed:', e && e.message); }
-    // Live-broker orders if reachable
-    let liveOrders = [];
-    try {
-      const { getBrokerForUser } = require('./broker-resolver');
-      const ub = await getBrokerForUser({ db, vault }, req.user.id);
-      if (ub && ub.kc && typeof ub.kc.getOrders === 'function') {
-        liveOrders = await ub.kc.getOrders().catch(() => []);
-      }
-    } catch (e) { console.warn('[server] swallowed:', e && e.message); }
-    const all = [...paperOrders, ...liveOrders];
-    for (const o of all) {
-      const prod = String(o.product || o.product_type || '').toUpperCase();
-      const sym  = String(o.symbol || o.tradingsymbol || '').toUpperCase();
-      const isOpt = /CE$|PE$/.test(sym) || /OPT/.test(sym);
-      const isFut = /FUT/.test(sym);
-      if (prod === 'MIS') buckets.intraday++;
-      else if (prod === 'CNC') buckets.swing++;
-      else if (prod === 'NRML' && isOpt) buckets.options++;
-      else if (prod === 'NRML' && isFut) buckets.futures++;
-      else if (prod === 'NRML') buckets.options++; // default NRML -> options
-    }
-    res.json({ ok: true, total: all.length, byMode: buckets, source: liveOrders.length ? 'live+paper' : (paperOrders.length ? 'paper' : 'empty') });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: 'orders_by_mode_failed', detail: e.message });
-  }
-}));
+// ---------- Tier 82: GET /api/v1/me/orders/by-mode ----------
+// T-408: extracted to routes/me-heavy.js (mounted above).
 
 // ---------- Tier 84: account / preferences / notifications / export ----------
 let _accountRouter = null;
@@ -4014,4 +3743,3 @@ process.on('uncaughtException', (e) => {
   console.error('uncaughtException:', e);
   process.exit(1);
 });
- 
