@@ -1996,23 +1996,9 @@ const { mountLegacyGoneRoutes } = require('./routes/legacy-gone');
 mountLegacyGoneRoutes(app);
 
 // ---------- P&L Attribution ----------
-// GET /api/pnl/daily?days=30 -- equity time series
-app.get('/api/pnl/daily', (req, res) => {
-  if (!pnl) return res.status(503).json({ ok:false, reason:'pnl_not_initialized' });
-  const days = Math.max(1, Math.min(730, parseInt(req.query.days || '30', 10) || 30));
-  res.json({ ok:true, days, rows: pnl.history(days), stats: pnl.stats() });
-});
-// GET /api/pnl/by-strategy -- aggregated closed-trade ledger
-app.get('/api/pnl/by-strategy', (_req, res) => {
-  if (!pnl) return res.status(503).json({ ok:false, reason:'pnl_not_initialized' });
-  res.json({ ok:true, strategies: pnl.byStrategy() });
-});
-// POST /api/pnl/snapshot -- manual snapshot trigger (ops endpoint)
-app.post('/api/pnl/snapshot', (_req, res) => {
-  if (!pnl) return res.status(503).json({ ok:false, reason:'pnl_not_initialized' });
-  const row = pnl.snapshot();
-  res.json({ ok:true, row });
-});
+// T-401 (god-object split #18): 3 pnl routes extracted to routes/pnl.js.
+const { mountPnlRoutes } = require('./routes/pnl');
+mountPnlRoutes(app, { getPnl: () => pnl });
 
 // ---------- Strategy auto-runner ----------
 // T-393 (god-object split #10): 4 autorun routes extracted to routes/autorun.js.
@@ -2844,88 +2830,15 @@ app.post('/api/backtest/watchlist', async (req, res) => {
   }
 });
 
-// ---------- Tier 18: Long-term wealth endpoints (SIP / buckets / SWP / inflate) ----------
-app.get('/api/sip', (_req, res) => {
-  if (!longterm) return res.status(503).json({ ok:false, reason:'longterm_not_initialized' });
-  res.json({ ok:true, sips: longterm.getSips(), stats: longterm.stats() });
-});
-app.put('/api/sip', (req, res) => {
-  if (!longterm) return res.status(503).json({ ok:false, reason:'longterm_not_initialized' });
-  try {
-    const sips = longterm.setSips((req.body && req.body.sips) || []);
-    res.json({ ok:true, sips });
-  } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
-});
-app.get('/api/buckets', (_req, res) => {
-  if (!longterm) return res.status(503).json({ ok:false, reason:'longterm_not_initialized' });
-  res.json({ ok:true, buckets: longterm.getBuckets() });
-});
-app.put('/api/buckets', (req, res) => {
-  if (!longterm) return res.status(503).json({ ok:false, reason:'longterm_not_initialized' });
-  try {
-    const b = longterm.setBuckets((req.body && req.body.buckets) || {});
-    res.json({ ok:true, buckets: b });
-  } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
-});
-app.post('/api/swp/simulate', (req, res) => {
-  if (!longterm) return res.status(503).json({ ok:false, reason:'longterm_not_initialized' });
-  try {
-    const r = longterm.simulateSwp(req.body || {});
-    res.json({ ok:true, ...r });
-  } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
-});
-app.post('/api/goals/inflate', (req, res) => {
-  if (!longterm) return res.status(503).json({ ok:false, reason:'longterm_not_initialized' });
-  try {
-    const r = longterm.inflateGoal(req.body || {});
-    res.json({ ok:true, ...r });
-  } catch (e) { res.status(400).json({ ok:false, reason:e.message }); }
-});
-
-// ---------- Tier 21: Wealth reference catalogs (bonds / REITs / smallcases / traders) ----------
-app.get('/api/bonds', (_req, res) => {
-  if (!wealth) return res.status(503).json({ ok:false, reason:'wealth_not_initialized' });
-  res.json(wealth.getBonds());
-});
-app.get('/api/reits', (_req, res) => {
-  if (!wealth) return res.status(503).json({ ok:false, reason:'wealth_not_initialized' });
-  res.json(wealth.getReits());
-});
-app.get('/api/smallcase/baskets', (_req, res) => {
-  if (!wealth) return res.status(503).json({ ok:false, reason:'wealth_not_initialized' });
-  res.json(wealth.getSmallcases());
-});
-app.get('/api/copy/traders', (_req, res) => {
-  if (!wealth) return res.status(503).json({ ok:false, reason:'wealth_not_initialized' });
-  res.json(wealth.getTraders());
-});
-
-// ---------- Tier 22: MPT portfolio optimiser ----------
-app.post('/api/portfolio/optimize', (req, res) => {
-  if (!mpt) return res.status(503).json({ ok:false, reason:'mpt_not_initialized' });
-  try {
-    const out = mpt.optimize(req.body || {});
-    res.json(out);
-  } catch (e) {
-    res.status(400).json({ ok:false, reason:e.message });
-  }
-});
-
-// ---------- Tier 31: factor-tilt portfolio construction ----------
-// POST body shape:
-//   { universe:      [{symbol, momentum, value, quality, lowVol, size, marketCap}, ...],
-//     factorWeights: { momentum:0.4, value:0.3, quality:0.2, lowVol:0.1, size:0 },
-//     mode:          'long-only' | 'long-short',         // default 'long-only'
-//     topPct:        0.2,                                 // top quintile to long
-//     bottomPct:     0.2 }                                // bottom quintile to short (long-short only)
-app.post('/api/portfolio/factor-tilt', (req, res) => {
-  if (!factorTilt) return res.status(503).json({ ok:false, reason:'factor_tilt_not_initialized' });
-  try {
-    const out = factorTilt.build(req.body || {});
-    res.json(out);
-  } catch (e) {
-    res.status(400).json({ ok:false, reason:e.message });
-  }
+// ---------- Tier 18/21/22/31: Wealth / longterm / MPT / factor-tilt ----------
+// T-401 (god-object split #19): 11 wealth routes (longterm + bonds/reits +
+// MPT + factor-tilt) extracted to routes/wealth.js.
+const { mountWealthRoutes } = require('./routes/wealth');
+mountWealthRoutes(app, {
+  getLongterm:   () => longterm,
+  getWealth:     () => wealth,
+  getMpt:        () => mpt,
+  getFactorTilt: () => factorTilt,
 });
 
 // ---------- Tier 34: F&O SPAN-style margin simulator (pre-trade estimator) ----------
@@ -4150,16 +4063,9 @@ app.post('/api/paper/replay', async (req, res) => {
 });
 
 // ---------- Tier 27: Email alerts ----------
-app.get('/api/email/status', (_req, res) => {
-  if (!emailAlerts) return res.status(503).json({ ok:false, reason:'email_not_initialized' });
-  res.json({ ok:true, ...emailAlerts.status() });
-});
-app.post('/api/email/send', async (req, res) => {
-  if (!emailAlerts) return res.status(503).json({ ok:false, reason:'email_not_initialized' });
-  const { to, subject, text } = req.body || {};
-  const r = await emailAlerts.send({ to, subject, text });
-  res.json(r);
-});
+// T-401 (god-object split #20): 2 email routes extracted to routes/email.js.
+const { mountEmailRoutes } = require('./routes/email');
+mountEmailRoutes(app, { getEmailAlerts: () => emailAlerts });
 
 // T-166: admin-gated email status + test. Mirrors /api/email/* but locked
 // behind requireInternal() (loopback IP + X-ATS-Internal header) so it can
