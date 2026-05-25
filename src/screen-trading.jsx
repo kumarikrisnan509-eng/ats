@@ -103,26 +103,33 @@ const TradingScreen = () => {
     return arr;
   }, [sym]);
 
-  // Live order book derived from LTP — regenerates each tick
+  // T-420 (production-readiness audit, BLOCKER #3):
+  // Was: synthesized a 5-level L2 order book from the LTP -- bids = mid-tick*i,
+  //      qty = deterministic-pseudo-random from seed. We don't subscribe to
+  //      Zerodha L2 depth, but we rendered the table as if it were live order
+  //      book data, with totals, percent bars, and a spread chip.
+  // Now: L2 is gated behind demo mode. In prod, `bids`/`asks` are empty arrays
+  //      and the depth panel shows an empty state ("Depth not subscribed").
   const liveTick = useLiveTick(sym);
   const mid = liveTick?.ltp || 2948.50;
   const tickSize = sym.includes("NIFTY") || mid > 5000 ? 0.05 : 0.05;
+  const _l2IsDemo = !!(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
   const seed = Math.floor(mid * 100) % 997;
   const rng = (i) => ((seed * (i + 7) * 9301 + 49297) % 233280) / 233280;
-  const bids = [0, 1, 2, 3, 4].map(i => ({
+  const bids = _l2IsDemo ? [0, 1, 2, 3, 4].map(i => ({
     p: +(mid - (i + 1) * tickSize).toFixed(2),
     q: Math.floor(400 + rng(i) * 1800),
     o: Math.floor(4 + rng(i + 10) * 18),
-  }));
-  const asks = [0, 1, 2, 3, 4].map(i => ({
+  })) : [];
+  const asks = _l2IsDemo ? [0, 1, 2, 3, 4].map(i => ({
     p: +(mid + (i + 1) * tickSize).toFixed(2),
     q: Math.floor(400 + rng(i + 5) * 1800),
     o: Math.floor(4 + rng(i + 15) * 18),
-  }));
-  const maxQ = Math.max(...bids.map(b => b.q), ...asks.map(a => a.q));
+  })) : [];
+  const maxQ = bids.length ? Math.max(...bids.map(b => b.q), ...asks.map(a => a.q)) : 1;
   const bidTotal = bids.reduce((s, b) => s + b.q, 0);
   const askTotal = asks.reduce((s, a) => s + a.q, 0);
-  const spread = (asks[0].p - bids[0].p).toFixed(2);
+  const spread = (bids.length && asks.length) ? (asks[0].p - bids[0].p).toFixed(2) : "—";
 
   // Mock orders feed used in demo mode. In production, screens fetch from /api/orders.
   const __mockOrders = [

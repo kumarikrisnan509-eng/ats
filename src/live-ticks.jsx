@@ -12,27 +12,20 @@
     ? `${wsScheme}//${location.host}/ws`
     : null;
 
-  // Seed prices — would come from broker on connect
-  const SYMBOLS = {
-    "NIFTY 50":   { ltp: 24840.50, prev: 24802.10 },
-    "BANKNIFTY":  { ltp: 53412.20, prev: 53180.40 },
-    "SENSEX":     { ltp: 81234.80, prev: 81102.30 },
-    "RELIANCE":   { ltp: 2887.40,  prev: 2871.20 },
-    "HDFCBANK":   { ltp: 1718.90,  prev: 1709.40 },
-    "TCS":        { ltp: 4012.55,  prev: 4001.10 },
-    "INFY":       { ltp: 1876.25,  prev: 1859.30 },
-    "ICICIBANK":  { ltp: 1284.70,  prev: 1276.40 },
-    "BAJFINANCE": { ltp: 7654.30,  prev: 7588.60 },
-    "ITC":        { ltp: 462.80,   prev: 458.20 },
-    "SBIN":       { ltp: 884.40,   prev: 870.90 },
-    "LT":         { ltp: 3784.65,  prev: 3771.80 },
-    "TITAN":      { ltp: 3612.00,  prev: 3625.40 },
-    "BANKNIFTY FUT": { ltp: 53358, prev: 53430 },
-    "NIFTY 22550 CE": { ltp: 97.25, prev: 82.40 },
-  };
+  // T-420 (production-readiness audit, BLOCKER #1):
+  // Was: 15 hardcoded "seed prices" that components rendered before the WS
+  //      connected, making the app show plausible-but-fake numbers for the
+  //      first ~3s of every page load. Demo mode is killed in primitives.jsx
+  //      (T83) so there is no legitimate use for the random-walk simulator.
+  // Now: SYMBOLS starts empty. Real /ws populates it. Components handle the
+  //      empty case (`if (!sym) return null` in useLiveTick, etc.) and show
+  //      an empty state until real ticks arrive.
+  const SYMBOLS = {};
 
-  // Connection state
-  let connected = true;
+  // T-420: was `connected = true` -- lied about connection state until WS
+  // either succeeded or the fallback timer fired. Start false so the LIVE
+  // indicator says RECONNECTING/CLOSED honestly until real data arrives.
+  let connected = false;
   let ticking = true;
   let tickCount = 0;
   let lastTickAt = Date.now();
@@ -238,23 +231,33 @@
   // Kick the real feed attempt without blocking the simulator.
   attachRealFeed();
 
-  // Periodically tick all symbols (simulator). Skipped when the real feed has taken over.
+  // T-420 (production-readiness audit, BLOCKER #1):
+  // Was: an 800ms random-walk simulator that fabricated prices whenever the
+  //      real feed wasn't connected. This is the misleading-fake-data path
+  //      the audit flagged -- users saw plausible LTPs even when the broker
+  //      WS was down. Gated behind demo mode (which is hard-disabled in
+  //      primitives.jsx T83) so this is effectively dead code on prod, but
+  //      kept for any future demo/screenshot mode.
   setInterval(() => {
     if (useRealFeed) return;
     if (!connected || !ticking) return;
+    const demoOn = (typeof window.isDemoMode === 'function') && window.isDemoMode();
+    if (!demoOn) return;
     Object.keys(SYMBOLS).forEach(sym => randomTick(SYMBOLS[sym]));
     tickCount++;
     lastTickAt = Date.now();
     window.dispatchEvent(new CustomEvent("tick", { detail: state() }));
   }, 800);
 
-  // Occasional connection drop simulation (very rare — ~once per 5 minutes)
+  // T-420: was a random connection-drop simulator (Math.random < 0.003 every
+  // 1s). Same fakery problem. Gated behind demo mode.
   setInterval(() => {
+    const demoOn = (typeof window.isDemoMode === 'function') && window.isDemoMode();
+    if (!demoOn) return;
     if (Math.random() < 0.003) {
       connected = false;
       connDropAt = Date.now();
       window.dispatchEvent(new CustomEvent("tick-disconnect", { detail: { at: connDropAt } }));
-      // Auto-reconnect in 2-8 seconds
       setTimeout(() => {
         connected = true;
         reconnects++;

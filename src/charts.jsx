@@ -244,15 +244,18 @@ const Heatmap = ({ rows, cols, values, min, max }) => {
 
 /* ===== LiveSparkline — scrolls left every tick, pulses on the right edge ===== */
 const LiveSparkline = ({ symbol, width = 120, height = 36, samples = 40, color, fill = true, strokeW = 1.5, seed = 0 }) => {
+  // T-420 (production-readiness audit, BLOCKER #2):
+  // Was: seeded the buffer with a plausible sine+random drift so the sparkline
+  //      "rendered something on first paint" even when no real ticks existed.
+  //      Combined with the 1200ms random-drift fallback below, every sparkline
+  //      on the app showed a fake-but-realistic moving line regardless of
+  //      whether the WS was actually delivering data.
+  // Now: seed is a flat line at 100 (renders as a flat horizontal sparkline,
+  //      which is clearly "no data" visually). Random-drift fallback gated
+  //      behind demo mode (hard-disabled in prod via primitives.jsx T83).
   const [buf, setBuf] = useState(() => {
-    // seed buffer with a plausible drift so it renders something on first paint
-    const base = 100;
     const arr = [];
-    let v = base;
-    for (let i = 0; i < samples; i++) {
-      v += (Math.sin((seed + i) * 0.31) + (Math.random() - 0.5)) * 0.8;
-      arr.push(v);
-    }
+    for (let i = 0; i < samples; i++) arr.push(100);
     return arr;
   });
   useEffect(() => {
@@ -269,17 +272,22 @@ const LiveSparkline = ({ symbol, width = 120, height = 36, samples = 40, color, 
       });
     };
     window.addEventListener("tick", handler);
-    // also tick on a slow timer so the line keeps shifting even without ticks
-    const t = setInterval(() => {
-      setBuf(prev => {
-        const last = prev[prev.length - 1];
-        const drift = (Math.random() - 0.5) * Math.abs(last) * 0.0008;
-        const next = prev.slice(1);
-        next.push(last + drift);
-        return next;
-      });
-    }, 1200);
-    return () => { cancelled = true; window.removeEventListener("tick", handler); clearInterval(t); };
+    // T-420: slow-timer random drift was the second fake-data path. Gated
+    // behind demo mode -- effectively dead on prod, kept for screenshots.
+    const demoOn = (typeof window.isDemoMode === 'function') && window.isDemoMode();
+    let t = null;
+    if (demoOn) {
+      t = setInterval(() => {
+        setBuf(prev => {
+          const last = prev[prev.length - 1];
+          const drift = (Math.random() - 0.5) * Math.abs(last) * 0.0008;
+          const next = prev.slice(1);
+          next.push(last + drift);
+          return next;
+        });
+      }, 1200);
+    }
+    return () => { cancelled = true; window.removeEventListener("tick", handler); if (t) clearInterval(t); };
   }, [symbol]);
 
   const data = buf;

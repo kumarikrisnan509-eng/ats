@@ -60,15 +60,30 @@ const ReconScreen = () => {
   const [date, setDate] = React.useState("2026-04-23");
   const [filter, setFilter] = React.useState("all");
 
-  const summary = {
+  // T-420 (production-readiness audit, BLOCKER #4):
+  // Was: hardcoded `summary` (42 trades, ₹17,776 P&L) and `rows` (8 fake
+  //      RELIANCE/TCS/HDFCBANK/NIFTY trades with broker IDs "ZR-A2948372"
+  //      etc.) rendered as if they were today's reconciliation results.
+  //      A warning banner above said "demo data until /api/reconcile
+  //      responds" but the data still rendered convincingly.
+  // Now: fixtures only render in demo mode. In prod, summary uses zeros and
+  //      rows is empty -- table shows an "empty reconciliation" state.
+  const _reconIsDemo = !!(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
+  const summary = _reconIsDemo ? {
     ours: { trades: 42, grossPnL: 18400, fees: 624, netPnL: 17776 },
     broker: { trades: 42, grossPnL: 18400, fees: 628, netPnL: 17772 },
     matched: 40,
     mismatched: 2,
     missing: 0,
+  } : {
+    ours: { trades: 0, grossPnL: 0, fees: 0, netPnL: 0 },
+    broker: { trades: 0, grossPnL: 0, fees: 0, netPnL: 0 },
+    matched: 0,
+    mismatched: 0,
+    missing: 0,
   };
 
-  const rows = [
+  const rows = _reconIsDemo ? [
     { id: "OUR-8842", brokerId: "ZR-A2948372", sym: "RELIANCE",   qty: 50,  side: "BUY",  ours: 2843.50, broker: 2843.50, feeOur: 18.42, feeBk: 18.42, status: "matched" },
     { id: "OUR-8843", brokerId: "ZR-A2948373", sym: "RELIANCE",   qty: 50,  side: "SELL", ours: 2848.20, broker: 2848.20, feeOur: 18.45, feeBk: 18.45, status: "matched" },
     { id: "OUR-8844", brokerId: "ZR-A2948380", sym: "TCS",         qty: 20,  side: "BUY",  ours: 4142.80, broker: 4142.80, feeOur: 12.18, feeBk: 12.18, status: "matched" },
@@ -77,7 +92,7 @@ const ReconScreen = () => {
     { id: "OUR-8847", brokerId: "ZR-A2948393", sym: "HDFCBANK",   qty: 40,  side: "SELL", ours: 1686.90, broker: 1686.90, feeOur: 11.42, feeBk: 11.42, status: "matched" },
     { id: "OUR-8848", brokerId: "ZR-A2948410", sym: "NIFTY24APR24000CE", qty: 50, side: "BUY", ours: 142.80, broker: 142.80, feeOur: 8.42, feeBk: 8.42, status: "matched" },
     { id: "OUR-8849", brokerId: "ZR-A2948411", sym: "NIFTY24APR24000CE", qty: 50, side: "SELL", ours: 148.60, broker: 148.60, feeOur: 8.62, feeBk: 8.62, status: "matched" },
-  ];
+  ] : [];
 
   const filtered = filter === "all" ? rows : rows.filter(r => filter === "mismatch" ? r.status !== "matched" : r.status === "matched");
 
@@ -267,6 +282,10 @@ const ReconScreen = () => {
           );
         })}
 
+        {/* T-420: summary.mismatched is hardcoded to 0 outside demo mode now
+            (see _reconIsDemo gate above), so this entire block renders only
+            when demo mode is on. The hardcoded text refers to OUR-8845/8846
+            which are demo-only trade IDs. */}
         {summary.mismatched > 0 && (
           <div style={{ marginTop: 14, padding: 14, background: "var(--warn-soft)", color: "oklch(40% 0.12 80)", borderRadius: "var(--r-md)", fontSize: 12 }}>
             <div style={{ fontWeight: 600, marginBottom: 6 }}>Action required · 2 mismatches</div>
@@ -286,12 +305,16 @@ const ReconScreen = () => {
       <div style={{ marginTop: 16 }}>
         <Card title="30-day reconciliation history" sub="Match rate trend">
           <div style={{ display: "grid", gridTemplateColumns: "repeat(30, 1fr)", gap: 3, height: 60, alignItems: "flex-end", padding: "8px 0" }}>
+            {/* T-420: 30-day match-rate history was synthesised from Math.random()
+                which is the worst kind of fake -- shaped to look like real
+                data. In prod we render an empty grid (each cell is a thin
+                grey bar) until a real /api/reconcile/history endpoint exists. */}
             {Array.from({ length: 30 }, (_, i) => {
-              const matchPct = 95 + Math.random() * 5;
-              const hasIssue = Math.random() > 0.8;
+              const matchPct = _reconIsDemo ? (95 + Math.random() * 5) : 0;
+              const hasIssue = _reconIsDemo ? (Math.random() > 0.8) : false;
               return (
                 <div key={i} style={{ display: "flex", flexDirection: "column", gap: 2, alignItems: "center" }}>
-                  <div style={{ width: "100%", height: `${matchPct - 90}%`, minHeight: 20, background: hasIssue ? "oklch(65% 0.13 80)" : "var(--up)", borderRadius: 2 }} title={`Day ${i+1}: ${matchPct.toFixed(1)}%`}/>
+                  <div style={{ width: "100%", height: _reconIsDemo ? `${matchPct - 90}%` : "4px", minHeight: _reconIsDemo ? 20 : 2, background: _reconIsDemo ? (hasIssue ? "oklch(65% 0.13 80)" : "var(--up)") : "var(--border)", borderRadius: 2 }} title={_reconIsDemo ? `Day ${i+1}: ${matchPct.toFixed(1)}%` : `Day ${i+1}: no data`}/>
                 </div>
               );
             })}
