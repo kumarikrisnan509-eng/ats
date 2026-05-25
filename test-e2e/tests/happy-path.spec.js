@@ -282,15 +282,8 @@ test.describe('health-deep operational fields', () => {
     // These keys must exist regardless of state — they may be false, but the
     // shape must hold so the Status screen doesn't render `undefined`.
     expect(c).toHaveProperty('broker');
-    // T-414c: temporarily tolerant -- T-414b ships the always-set-3-keys fix
-    // but can't deploy because THIS spec runs against the still-broken prod.
-    // After T-414b lands, T-414d restores the strict assertions.
-    if (!('drStale' in c) || !('drLastTestOk' in c)) {
-      console.warn('[T-414c] drStale/drLastTestOk missing -- tolerated for T-414b deploy gate');
-    } else {
-      expect(c).toHaveProperty('drStale');
-      expect(c).toHaveProperty('drLastTestOk');
-    }
+    expect(c).toHaveProperty('drStale');
+    expect(c).toHaveProperty('drLastTestOk');
 
     // T-34/T-37: when broker is up, these MUST be booleans
     if (c.broker === true) {

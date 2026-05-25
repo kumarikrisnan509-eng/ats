@@ -46,16 +46,12 @@ test('/api/health-deep returns DR backup status fields (T-36)', async ({ request
   // T-36: DR test history surfaced. These should always be present once the
   // dr_test_history table init has run (which happens on first health-deep hit).
   expect(c).toHaveProperty('drLastTestAgo');
+  expect(c).toHaveProperty('drLastTestOk');
+  expect(c).toHaveProperty('drStale');
+  expect(typeof c.drStale).toBe('boolean');
+  // drLastTestAgo is either 'never' / 'unavailable' / 'error:...' / '<N>d'
   expect(typeof c.drLastTestAgo).toBe('string');
-  // T-414c: same temporary tolerance as happy-path -- T-414d restores strict.
-  if (!('drLastTestOk' in c) || !('drStale' in c)) {
-    console.warn('[T-414c] drLastTestOk/drStale missing -- tolerated for T-414b deploy gate');
-  } else {
-    expect(c).toHaveProperty('drLastTestOk');
-    expect(c).toHaveProperty('drStale');
-    expect(typeof c.drStale).toBe('boolean');
-    expect(typeof c.drLastTestOk).toBe('boolean');
-  }
+  expect(typeof c.drLastTestOk).toBe('boolean');
 });
 
 test('/api/health exposes broker.stalledOnToken + tickStale (T-42)', async ({ request }) => {
