@@ -164,8 +164,33 @@ let auditSeq = 0;
 let auditDegradedCount = 0;
 let auditLastDegradedError = null;
 let auditLastDegradedAt    = null;
+// T-419 (production-readiness audit, infra fix #4): business-metric counters
+// declared BEFORE recordAuditSwallow / audit() so neither function hits a TDZ
+// reference at call time. Surfaced via /metrics for Prometheus alerting.
+// Counter semantics: monotonic; reset only on process restart.
+const _metricCounters = {
+  ordersPlaced:        0,   // order.placed + order.confirmed events
+  brokerDisconnects:   0,   // zerodha.disconnect (manual or forced)
+  auditWriteFailures:  0,   // mirrors auditDegradedCount as a counter
+  oauthFailures:       0,   // zerodha.callback.*.error + autologin.*.error + bulkrotate.*.error
+};
+function _bumpMetric(event) {
+  if (!event || typeof event !== 'string') return;
+  if (event === 'order.placed' || event === 'order.confirmed') {
+    _metricCounters.ordersPlaced += 1;
+  } else if (event === 'zerodha.disconnect') {
+    _metricCounters.brokerDisconnects += 1;
+  } else if (event.endsWith('.error') && (
+    event.startsWith('zerodha.callback.') ||
+    event.startsWith('autologin.') ||
+    event.startsWith('bulkrotate.')
+  )) {
+    _metricCounters.oauthFailures += 1;
+  }
+}
 function recordAuditSwallow(source, msg) {
   auditDegradedCount += 1;
+  _metricCounters.auditWriteFailures += 1;
   auditLastDegradedError = String(source || 'unknown') + ': ' + String(msg || 'unknown');
   auditLastDegradedAt    = new Date().toISOString();
 }
@@ -175,6 +200,7 @@ function recordAuditSwallow(source, msg) {
 
 function audit(event, data) {
   auditSeq += 1;
+  _bumpMetric(event);
   // T-380: serialize defensively. A circular-ref or BigInt in `data` would
   // make JSON.stringify throw -- previously this propagated to call sites
   // and got swallowed. Now we degrade to an _error stub line so the audit
@@ -1313,6 +1339,7 @@ mountBootWiringRoutes(app, {
   getWsClients:       () => wsClients,
   getAuditState:      () => ({ seq: auditSeq, degradedCount: auditDegradedCount, lastError: auditLastDegradedError, lastAt: auditLastDegradedAt }),
   getOrderTimesLength: () => _orderTimes.length,
+  getMetricCounters:  () => _metricCounters,
   readSessionCookie,
   isInternalIp,
   getClientIp,

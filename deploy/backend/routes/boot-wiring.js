@@ -62,6 +62,7 @@ function mountBootWiringRoutes(app, deps) {
     // mutable scalars (audit counters change at runtime; getter returns snapshot)
     getAuditState,
     getOrderTimesLength,
+    getMetricCounters,
 
     // helpers (pure functions hoisted -- pass by value)
     readSessionCookie,
@@ -393,6 +394,13 @@ function mountBootWiringRoutes(app, deps) {
     push('Process uptime seconds',         'counter', 'ats_process_uptime_seconds', Math.floor(process.uptime()));
     push('Process RSS bytes',              'gauge',   'ats_process_rss_bytes',   process.memoryUsage().rss);
     push('KILL_SWITCH active (1=killed)',  'gauge',   'ats_kill_switch',         KILL_SWITCH ? 1 : 0);
+    // T-419: business metrics for alerting. All counters; reset on process restart.
+    const metricCounters = (typeof getMetricCounters === 'function')
+      ? (getMetricCounters() || {}) : {};
+    push('Orders placed (paper + live)',           'counter', 'ats_orders_placed_total',         metricCounters.ordersPlaced       || 0);
+    push('Broker disconnects (manual + forced)',   'counter', 'ats_broker_disconnects_total',    metricCounters.brokerDisconnects  || 0);
+    push('Audit-log write failures (degraded)',    'counter', 'ats_audit_write_failures_total',  metricCounters.auditWriteFailures || 0);
+    push('OAuth callback / exchange failures',     'counter', 'ats_oauth_failures_total',        metricCounters.oauthFailures      || 0);
     res.type('text/plain; version=0.0.4').send(lines.join('\n') + '\n');
   });
 
