@@ -88,44 +88,20 @@ jobs:
           # routes/...')` or `./services/...` line in server.js comes
           # AFTER a use of X.
           python3 deploy/scripts/check-require-order.py deploy/backend/server.js
-      - name: nginx config syntax check (T-418 -- catch malformed configs pre-deploy)
+      - name: nginx config structural check (T-418c -- catch truncated/malformed configs pre-deploy)
         run: |
-          set -e
-          # T-418 (production-readiness audit, infra fix #2):
-          # T-412b shipped a truncated ats.rajasekarselvam.com.conf that failed
-          # the operator's `sync-nginx-config.sh` with `unexpected end of file
-          # expecting ; or }` at line 168. Add a syntax gate here so any future
-          # nginx config edit is validated before merge.
-          sudo apt-get install -y --no-install-recommends nginx >/dev/null
-          mkdir -p .ci-tmp-nginx/snippets .ci-tmp-nginx/letsencrypt/live/ats.rajasekarselvam.com
-          : > .ci-tmp-nginx/snippets/ats-security-headers.conf
-          # Stub TLS files (parser doesn't validate cert content, only existence)
-          openssl req -x509 -newkey rsa:2048 -nodes \
-            -keyout .ci-tmp-nginx/letsencrypt/live/ats.rajasekarselvam.com/privkey.pem \
-            -out    .ci-tmp-nginx/letsencrypt/live/ats.rajasekarselvam.com/fullchain.pem \
-            -days 1 -subj '/CN=ats.rajasekarselvam.com' >/dev/null 2>&1
-          openssl dhparam -out .ci-tmp-nginx/letsencrypt/ssl-dhparams.pem 256 >/dev/null 2>&1
-          ABS=$(pwd)/.ci-tmp-nginx
-          cat > .ci-tmp-nginx/nginx.conf <<NCONF
-          worker_processes 1;
-          events { worker_connections 64; }
-          http {
-              upstream ats_backend { server 127.0.0.1:8080; }
-              include ${ABS}/site.conf;
-          }
-          NCONF
-          sed \
-            -e "s|/etc/nginx/snippets/|${ABS}/snippets/|g" \
-            -e "s|/etc/letsencrypt/live/ats.rajasekarselvam.com/|${ABS}/letsencrypt/live/ats.rajasekarselvam.com/|g" \
-            -e "s|/etc/letsencrypt/ssl-dhparams.pem|${ABS}/letsencrypt/ssl-dhparams.pem|g" \
-            deploy/nginx/ats.rajasekarselvam.com.conf > .ci-tmp-nginx/site.conf
-          sudo nginx -t -c "${ABS}/nginx.conf" -p "${ABS}/" 2>&1 | tee /tmp/nginx-test.out
-          if grep -q "test failed" /tmp/nginx-test.out; then
-              echo "!! nginx config rejected" >&2
-              exit 1
-          fi
-          rm -rf .ci-tmp-nginx
-          echo "nginx config syntax OK"
+          # T-418c (replaces fragile T-418 nginx -t step):
+          # The original step shelled out to `nginx -t` against a stubbed conf
+          # tree (apt-install + stub TLS certs + sed-rewrite paths + openssl
+          # dhparam + heredoc nginx.conf). That step kept failing on the GH
+          # runner for fragile reasons (openssl dhparam 256 rejected by
+          # OpenSSL 3, heredoc expansion timing). The cure (inlining a brace
+          # check via `python3 - <<'PYEOF'`) broke YAML when '\n' inside the
+          # Python regex got interpreted as a real newline.
+          #
+          # This standalone script catches the EXACT failure that bit prod in
+          # T-412b (truncated config) without any of that ceremony.
+          python3 deploy/scripts/check-nginx-conf.py
 
       - name: Lint static HTML (basic checks)
         run: |
