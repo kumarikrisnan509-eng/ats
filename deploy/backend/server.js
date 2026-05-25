@@ -2357,13 +2357,13 @@ app.get('/api/config', (_req, res) => {
   });
 });
 
-app.get('/api/symbols', async (_req, res) => {
-  const syms = await broker.listSymbols();
-  res.json({ ok: true, symbols: syms.length ? syms : DEFAULT_SYMBOLS });
-});
+// T-402 (god-object split #21): 3 quote routes (symbols, quote/:sym, quotes)
+// extracted to routes/quote.js. Quotes use the GLOBAL broker (market data
+// is not user-isolated -- user-scoped routes use resolveUserBroker below).
+const { mountQuoteRoutes } = require('./routes/quote');
+mountQuoteRoutes(app, { getBroker: () => broker, DEFAULT_SYMBOLS });
 
 // ---------- Tier 58: per-user broker resolver ----------
-// Quotes can stay on the global broker (market data, not user-specific).
 // Holdings/positions/orders MUST route through the requesting user's broker.
 const _brokerResolver = require('./broker-resolver');
 async function resolveUserBroker(req) {
@@ -2373,29 +2373,6 @@ async function resolveUserBroker(req) {
   if (!r.broker) return { broker: null, isUserOwn: false, reason: 'broker_not_connected' };
   return r;
 }
-
-app.get('/api/quote/:symbol', async (req, res) => {
-  try {
-    // Global broker for quotes is fine -- market data isn't user-isolated.
-    const q = await broker.getQuote(req.params.symbol);
-    res.json({ ok: true, symbol: req.params.symbol, ...q });
-  } catch (e) {
-    res.status(404).json({ ok: false, reason: e.message });
-  }
-});
-
-// Bulk quote — /api/quotes?symbols=RELIANCE,INFY,TCS
-app.get('/api/quotes', async (req, res) => {
-  try {
-    const raw = (req.query.symbols || '').toString();
-    const symbols = raw.split(',').map(s => s.trim()).filter(Boolean);
-    if (symbols.length === 0) return res.status(400).json({ ok: false, reason: 'no_symbols' });
-    const data = await broker.getQuotes(symbols);
-    res.json({ ok: true, quotes: data });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: e.message });
-  }
-});
 
 // ---------- Portfolio / orders REST (read-only, per-user) ----------
 // Tier 58: route through user's own broker. If not connected, return empty + flag.
@@ -3145,100 +3122,14 @@ app.delete('/api/me/autorun', withAuth((req, res) => {
   res.json({ ok:true });
 }));
 
-// Daily P&L (last N days for current user)
-app.get('/api/me/pnl', withAuth((req, res) => {
-  const n = Math.min(365, Math.max(1, Number(req.query.n) || 30));
-  res.json({ ok:true, rows: db.pnl.recent(req.user.id, n) });
-}));
-
-// T-156: per-month historical PnL aggregation. Foundation for ungating the
-// AI Review screen's KPI band (T-136/T-139 gated visible numbers behind
-// MockData.isDemoOn() until this endpoint shipped).
-//
-// Query params:
-//   from   YYYY-MM   inclusive lower bound (default = 12 months ago)
-//   to     YYYY-MM   inclusive upper bound (default = current month)
-//
-// Response shape:
-//   { ok:true, summary:{...}, months:[{month, net_pnl, trades, wins,
-//     losses, win_rate, avg_win_inr, avg_loss_inr, max_drawdown_inr}] }
-app.get('/api/me/pnl/monthly', withAuth((req, res) => {
-  if (!db || !db._conn) return res.status(503).json({ ok: false, reason: 'db_not_ready' });
-  try {
-    const { aggregateMonthly, summarize } = require('./pnl-monthly');
-
-    // Parse from/to (YYYY-MM). Defaults: last 12 months ending this month.
-    const now = new Date();
-    const thisMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
-    const m12Ago = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1));
-    const defaultFrom = `${m12Ago.getUTCFullYear()}-${String(m12Ago.getUTCMonth() + 1).padStart(2, '0')}`;
-
-    const fromMonth = /^\d{4}-\d{2}$/.test(req.query.from || '') ? req.query.from : defaultFrom;
-    const toMonth   = /^\d{4}-\d{2}$/.test(req.query.to   || '') ? req.query.to   : thisMonth;
-
-    // SQLite text comparison works correctly because exited_at is 'YYYY-MM-DD HH:MM:SS'.
-    const rows = db._conn.prepare(`
-      SELECT pnl, exited_at, strategy_tag
-      FROM paper_closed_trades
-      WHERE user_id = ?
-        AND substr(exited_at, 1, 7) >= ?
-        AND substr(exited_at, 1, 7) <= ?
-      ORDER BY exited_at ASC
-    `).all(req.user.id, fromMonth, toMonth);
-
-    const months = aggregateMonthly(rows);
-    const summary = summarize(rows);
-    res.json({
-      ok: true,
-      from: fromMonth,
-      to: toMonth,
-      summary,
-      months,
-    });
-  } catch (e) {
-    console.error('[/api/me/pnl/monthly] error:', e && e.message);
-    res.status(500).json({ ok: false, reason: 'aggregation_failed', detail: String(e && e.message || e).slice(0, 200) });
-  }
-}));
-
-// T-158: per-month sweep ledger aggregation. Powers the Portfolio screen's
-// Deployed (MTD) waterfall tile (T-135 left it as "—" pending this).
-//
-// Note: the SweepEngine is currently single-tenant (singleton, not per-user).
-// Multi-tenant per-user sweep history is a future ship; for now this returns
-// the global engine's monthly aggregation, scoped via withAuth so only logged-in
-// users hit it. The history may include sweeps from the operator's own paper
-// account in v1; per-user separation will come with the broker_accounts-aware
-// scope refactor.
-app.get('/api/me/sweep/monthly', withAuth((req, res) => {
-  if (!sweep || typeof sweep.aggregateMonthly !== 'function') {
-    return res.json({ ok: true, from: null, to: null, months: [], note: 'sweep_engine_not_initialised' });
-  }
-  try {
-    const now = new Date();
-    const thisMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
-    const m12Ago = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1));
-    const defaultFrom = `${m12Ago.getUTCFullYear()}-${String(m12Ago.getUTCMonth() + 1).padStart(2, '0')}`;
-    const fromMonth = /^\d{4}-\d{2}$/.test(req.query.from || '') ? req.query.from : defaultFrom;
-    const toMonth   = /^\d{4}-\d{2}$/.test(req.query.to   || '') ? req.query.to   : thisMonth;
-
-    const months = sweep.aggregateMonthly({ fromMonth, toMonth });
-    const current = months.find(m => m.month === thisMonth) || null;
-    res.json({
-      ok: true,
-      from: fromMonth,
-      to: toMonth,
-      current_month: thisMonth,
-      mtd: current ? current.total_inr : 0,
-      mtd_count: current ? current.count : 0,
-      mtd_by_target: current ? current.byTarget : {},
-      months,
-    });
-  } catch (e) {
-    console.error('[/api/me/sweep/monthly] error:', e && e.message);
-    res.status(500).json({ ok: false, reason: 'aggregation_failed', detail: String(e && e.message || e).slice(0, 200) });
-  }
-}));
+// T-402 (god-object split #22): 3 /api/me/pnl* + /api/me/sweep/monthly
+// routes extracted to routes/me-pnl.js.
+const { mountMePnlRoutes } = require('./routes/me-pnl');
+mountMePnlRoutes(app, {
+  withAuth,
+  getDb:    () => db,
+  getSweep: () => sweep,
+});
 
 // T-159: paper→live promotion-readiness rate. Foundation for the Signals
 // screen's Paper→Live rate tile (T-81 left it as "—"). Computes a proxy:
