@@ -778,19 +778,7 @@ try {
   }
 } catch (e) { console.error('[server] market-meta init failed:', e && e.message); }
 
-app.get('/api/market/holidays', (_req, res) => {
-  // Lazy init: broker may have been async at module-load time
-  if (!_marketMeta && db && broker) {
-    try {
-      const { createMarketMeta } = require('./market-meta');
-      _marketMeta = createMarketMeta({ db, broker });
-      _marketMeta.scheduleDailyRefresh();
-    } catch (e) { console.error('[server] market-meta lazy init failed:', e.message); }
-  }
-  if (!_marketMeta) return res.status(503).json({ ok: false, reason: 'market_meta_unavailable' });
-  const r = _marketMeta.getHolidays();
-  res.json({ ok: true, ...r });
-});
+// T-406 (god-object split #32): /api/market/holidays moved to routes/misc.js.
 
 // ---------- Tier 80: daily auto-reauth cron (per-user headless Kite login) ----------
 // _cronReauth is initialised inside init() once db + vault are ready.
@@ -1374,10 +1362,7 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-// Tell clients whether auth is enabled (frontend uses this to know if Bearer needed).
-app.get('/api/auth-mode', (_req, res) => {
-  res.json({ ok: true, authRequired: AUTH_REQUIRED });
-});
+// T-406 (god-object split #32): /api/auth-mode moved to routes/misc.js.
 
 // ---------- Dashboard summary ----------
 // One call returns everything the cockpit's home view needs.
@@ -2241,18 +2226,8 @@ mountLegacyWatchlistAlertsRoutes(app, {
   withDeprecation,
 });
 
-// Config exposed to the front-end
-app.get('/api/config', (_req, res) => {
-  res.json({
-    env: ENV_NAME,
-    features: { liveTrading: false, paperTrading: true, backtest: true, aiReview: true },
-    killSwitch: KILL_SWITCH,
-    liveTrading: LIVE_TRADING,
-    wsUrl: '/ws',
-    broker: broker.name,
-    defaultSymbols: DEFAULT_SYMBOLS,
-  });
-});
+// T-406 (god-object split #32): /api/config + 3 boot/wiring routes
+// extracted to routes/misc.js (mount call below).
 
 // T-402 (god-object split #21): 3 quote routes (symbols, quote/:sym, quotes)
 // extracted to routes/quote.js. Quotes use the GLOBAL broker (market data
@@ -2317,48 +2292,23 @@ app.get('/api/profile', withAuth(async (req, res) => {
   }
 }));
 
-// T99-T70: per-user preferences from user_preferences table. Used by the
-// Profile screen 'Preferences' card so it shows REAL user choices (theme,
-// density, currency format, etc.) instead of static defaults.
-app.get('/api/me/prefs', (req, res) => {
-  if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
-  try {
-    const row = db && db.prefs && typeof db.prefs.get === 'function'
-      ? db.prefs.get(req.user.id) : null;
-    res.json({
-      ok: true,
-      prefs: row || {
-        theme: 'auto', density: 'comfortable', currency_format: 'abbrev',
-        round_rupees: 0, show_pnl_in_header: 1, daily_ai_cap_inr: 50,
-        ai_mode: 'balanced', redact_pii: 1,
-      },
-    });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: e.message });
-  }
+// T-406 (god-object split #33): me/prefs + me/identity extracted to routes/me-identity.js.
+const { mountMeIdentityRoutes } = require('./routes/me-identity');
+mountMeIdentityRoutes(app, { getDb: () => db });
+
+// Mount the misc cluster (config + auth-mode + kill-switch + market/holidays)
+const { mountMiscRoutes } = require('./routes/misc');
+mountMiscRoutes(app, {
+  ENV_NAME, KILL_SWITCH, LIVE_TRADING, AUTH_REQUIRED, DEFAULT_SYMBOLS,
+  getBroker:     () => broker,
+  getDb:         () => db,
+  getMarketMeta: () => _marketMeta,
+  setMarketMeta: (mm) => { _marketMeta = mm; },
 });
 
-// T99-T67: per-user identity from the users table. /api/profile returns the
-// BROKER profile (Kite). This returns OUR user record so the Profile screen
-// can show the logged-in user's actual email/name/created_at instead of
-// hardcoded sample text.
-app.get('/api/me/identity', (req, res) => {
-  if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
-  // Don't return password_hash / tokens / failed_logins / locked_until.
-  // Only the safe display fields.
-  res.json({
-    ok: true,
-    user: {
-      id:            req.user.id,
-      email:         req.user.email,
-      name:          req.user.name || null,
-      is_verified:   !!req.user.is_verified,
-      is_admin:      !!req.user.is_admin,
-      created_at:    req.user.created_at,
-      last_login_at: req.user.last_login_at || null,
-    },
-  });
-});
+// Mount historical + instruments-search
+const { mountHistoricalRoutes } = require('./routes/historical');
+mountHistoricalRoutes(app, { getBroker: () => broker });
 
 // T-185 (SCREENS-AUDIT F-7): per-mode runtime aggregates for the Trading Modes
 // screen. The screen previously rendered a hardcoded RUNTIME object with zeros
@@ -2585,55 +2535,9 @@ app.get('/api/reconcile', withAuth(async (_req, res) => {
   });
 }));
 
-// ---------- Historical OHLCV ----------
-// GET /api/historical?symbol=RELIANCE&interval=5minute&from=2026-05-12&to=2026-05-13
-const HISTORICAL_MAX_DAYS = parseInt(process.env.HISTORICAL_MAX_DAYS || '730', 10); // 2 years
-app.get('/api/historical', async (req, res) => {
-  try {
-    const { symbol, interval, from, to, continuous, oi } = req.query;
-    if (!symbol || !interval || !from || !to) {
-      return res.status(400).json({ ok: false, reason: 'symbol, interval, from, to are required' });
-    }
-    // Bound the date range to avoid Kite rate-limit storms.
-    const dFrom = new Date(String(from));
-    const dTo   = new Date(String(to));
-    if (!isFinite(dFrom.getTime()) || !isFinite(dTo.getTime())) {
-      return res.status(400).json({ ok: false, reason: 'from/to must be valid dates' });
-    }
-    const days = Math.floor((dTo.getTime() - dFrom.getTime()) / (86400 * 1000));
-    if (days < 0) return res.status(400).json({ ok: false, reason: 'to must be after from' });
-    if (days > HISTORICAL_MAX_DAYS) {
-      return res.status(400).json({ ok: false, reason: `range too wide: ${days}d > ${HISTORICAL_MAX_DAYS}d max` });
-    }
-    const candles = await broker.getHistorical({
-      symbol: String(symbol),
-      interval: String(interval),
-      from: String(from),
-      to: String(to),
-      continuous: continuous === '1' || continuous === 'true',
-      oi: oi === '1' || oi === 'true',
-    });
-    res.json({ ok: true, symbol: String(symbol), interval: String(interval), count: candles.length, candles });
-  } catch (e) {
-    res.status(400).json({ ok: false, reason: e.message });
-  }
-});
+// T-406 (god-object split #34): /api/historical + /api/instruments/search extracted to routes/historical.js (mount call above).
 
-// ---------- Instrument search ----------
-// GET /api/instruments/search?q=RELI&limit=20
-app.get('/api/instruments/search', (req, res) => {
-  try {
-    const q = String(req.query.q || '').trim();
-    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit || '20', 10) || 20));
-    if (q.length < 1) return res.status(400).json({ ok: false, reason: 'q is required' });
-    const results = broker.searchInstruments(q, limit);
-    res.json({ ok: true, q, count: results.length, results });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: e.message });
-  }
-});
-
-app.get('/api/kill-switch', (_req, res) => res.json({ killSwitch: KILL_SWITCH }));
+// T-406 (god-object split #32): /api/kill-switch moved to routes/misc.js.
 
 // ---------- Watchlist backtest ----------
 // POST /api/backtest/watchlist  body: { strategy, from, to, qty?, params?, interval? }
