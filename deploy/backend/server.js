@@ -2405,79 +2405,20 @@ mountMePortfolioMetaRoutes(app, {
 
 // T-403 (split #23): regime + attribution + slippage moved to routes/me-portfolio-meta.js.
 
-// Tier 23: rebalance suggestions. Auto-derives buckets + holdings + paper equity + cash if not in body.
-app.post('/api/rebalance', async (req, res) => {
-  if (!rebalance) return res.status(503).json({ ok:false, reason:'rebalance_not_initialized' });
-  try {
-    const body = req.body || {};
-    let buckets = body.buckets;
-    if (!buckets && longterm) buckets = longterm.getBuckets();
-    if (!buckets) return res.status(400).json({ ok:false, reason:'no buckets supplied or initialized' });
-
-    let holdingsValueINR = Number(body.holdingsValueINR);
-    let paperEquityINR   = Number(body.paperEquityINR);
-    let cashINR          = Number(body.cashINR);
-
-    if (!Number.isFinite(holdingsValueINR)) {
-      try {
-        const p = await pickBroker(req);
-        const hs = p.broker ? await p.broker.getHoldings() : [];
-        holdingsValueINR = (hs || []).reduce((s, h) => s + (h.quantity || 0) * (h.last_price || h.ltp || 0), 0);
-      } catch (_e) { holdingsValueINR = 0; }
-    }
-    if (!Number.isFinite(paperEquityINR) && paper) {
-      const ps = paper.stats() || {};
-      paperEquityINR = ps.totalEquity || 0;
-    }
-    if (!Number.isFinite(cashINR) && paper) {
-      const ps = paper.stats() || {};
-      // Use cash sitting in paper trading as a rough proxy for emergency funds.
-      cashINR = ps.cash || 0;
-    }
-
-    const out = rebalance.suggest({
-      buckets,
-      holdingsValueINR: holdingsValueINR || 0,
-      paperEquityINR:   paperEquityINR   || 0,
-      cashINR:          cashINR          || 0,
-      thresholdPct:     body.thresholdPct,
-    });
-    res.json(out);
-  } catch (e) {
-    res.status(400).json({ ok:false, reason:e.message });
-  }
-});
+// T-415 (god-object split #41): /api/rebalance moved to routes/misc-trading.js.
 
 // Tier 18: AI-generated monthly review narrative (spec §4 Stage 4).
 
-// ---------- Tier 27: Historical replay (step-through candles + signals) ----------
-app.post('/api/paper/replay', async (req, res) => {
-  if (!replay) return res.status(503).json({ ok:false, reason:'replay_not_initialized' });
-  try {
-    const { symbol, from, to, strategy, params, qty, interval, candles } = req.body || {};
-    if (!strategy) return res.status(400).json({ ok:false, reason:'strategy required' });
-    let bars;
-    if (Array.isArray(candles) && candles.length >= 30) {
-      // Caller-supplied candles -- skip Kite fetch (useful when broker is offline)
-      bars = candles;
-    } else {
-      if (!symbol)   return res.status(400).json({ ok:false, reason:'symbol required (or pass candles[])' });
-      if (!from || !to) return res.status(400).json({ ok:false, reason:'from and to required (YYYY-MM-DD)' });
-      try {
-        bars = await broker.getHistorical({ symbol, interval: interval || 'day', from, to });
-      } catch (e) {
-        return res.status(502).json({ ok:false, reason:`historical fetch failed: ${e.message}`, hint:'Pass candles[] in body to bypass broker.' });
-      }
-      if (!Array.isArray(bars) || bars.length < 30) {
-        return res.status(400).json({ ok:false, reason:`need >= 30 candles, got ${bars ? bars.length : 0}` });
-      }
-    }
-    const result = replay.replay({ candles: bars, strategy, params: params || {}, qty: Number(qty) || 1 });
-    audit('paper.replay', { symbol, strategy, bars: bars.length, trades: result.stats.trades });
-    res.json({ symbol, from, to, ...result });
-  } catch (e) {
-    res.status(400).json({ ok:false, reason:e.message });
-  }
+// T-415 (architecture audit #1, god-object split #41): 2 misc routes
+// (/api/rebalance, /api/paper/replay) extracted to routes/misc-trading.js.
+const { mountMiscTradingRoutes } = require('./routes/misc-trading');
+mountMiscTradingRoutes(app, {
+  audit, pickBroker,
+  getRebalance: () => rebalance,
+  getLongterm:  () => longterm,
+  getPaper:     () => paper,
+  getBroker:    () => broker,
+  getReplay:    () => replay,
 });
 
 // ---------- Tier 27: Email alerts ----------
