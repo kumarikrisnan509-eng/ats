@@ -2019,142 +2019,8 @@ mountDiagnosticRoutes(app, {
   classifyRegime,
 });
 
-// GET /api/benchmark?strategy=rsi_mean_revert&symbol=RELIANCE&from=...&to=...&qty=10&benchmark=NIFTY+50
-// Runs the strategy backtest, then fetches benchmark over the SAME window,
-// computes daily returns for both, then reports alpha + beta + Sharpe + vs-benchmark drawdown.
-app.get('/api/benchmark', async (req, res) => {
-  try {
-    const symbol    = req.query.symbol;
-    const strategy  = req.query.strategy;
-    const from      = req.query.from;
-    const to        = req.query.to;
-    const qty       = parseInt(req.query.qty || '1', 10) || 1;
-    const benchmark = req.query.benchmark || 'NIFTY 50';
-    const interval  = req.query.interval  || 'day';
-    if (!symbol)   return res.status(400).json({ ok:false, reason:'symbol required' });
-    if (!strategy) return res.status(400).json({ ok:false, reason:'strategy required' });
-    if (!from || !to) return res.status(400).json({ ok:false, reason:'from and to required' });
-
-    // Parse strategy params from query (e.g. ?period=14&entryRsi=30)
-    const params = {};
-    for (const k of ['period','entryRsi','exitRsi','fast','slow','signal','k']) {
-      if (req.query[k] != null) params[k] = Number(req.query[k]);
-    }
-
-    // Fetch both series in parallel
-    const [stratCandles, benchCandles] = await Promise.all([
-      broker.getHistorical({ symbol,    interval, from, to }),
-      broker.getHistorical({ symbol: benchmark, interval, from, to }),
-    ]);
-    if (!Array.isArray(stratCandles) || stratCandles.length < 30) {
-      return res.status(400).json({ ok:false, reason:`strategy symbol needs >= 30 candles, got ${stratCandles ? stratCandles.length : 0}` });
-    }
-    if (!Array.isArray(benchCandles) || benchCandles.length < 30) {
-      return res.status(400).json({ ok:false, reason:`benchmark symbol needs >= 30 candles, got ${benchCandles ? benchCandles.length : 0}` });
-    }
-
-    // Run strategy
-    const bt = runBacktest({ candles: stratCandles, strategy, params, qty });
-
-    // Align equity curve to benchmark by date
-    const benchByDate = new Map();
-    for (const c of benchCandles) benchByDate.set(c.date.slice(0, 10), c.close);
-
-    // Strategy equity / benchmark close per shared date
-    const aligned = [];
-    for (const e of bt.equity) {
-      const d = e.date.slice(0, 10);
-      if (benchByDate.has(d)) aligned.push({ date: d, eq: e.equity, bench: benchByDate.get(d) });
-    }
-    if (aligned.length < 30) {
-      return res.status(400).json({ ok:false, reason:`only ${aligned.length} aligned bars between symbol and benchmark` });
-    }
-
-    // Convert strategy equity into total-return basis:
-    //   strategy starts at notional = entryPrice * qty (so its % return is comparable to buy-and-hold).
-    const notional = stratCandles[0].close * qty;
-    const stratRet = []; // daily simple returns
-    const benchRet = [];
-    let prevS = notional + aligned[0].eq;
-    let prevB = aligned[0].bench;
-    for (let i = 1; i < aligned.length; i++) {
-      const sNow = notional + aligned[i].eq;
-      const bNow = aligned[i].bench;
-      stratRet.push((sNow - prevS) / prevS);
-      benchRet.push((bNow - prevB) / prevB);
-      prevS = sNow;
-      prevB = bNow;
-    }
-    const n = stratRet.length;
-    const mean = a => a.reduce((s,x)=>s+x,0) / a.length;
-    const std  = (a, m) => Math.sqrt(a.reduce((s,x)=>s+(x-m)*(x-m),0) / a.length);
-    const cov  = (a, b, ma, mb) => {
-      let s = 0; for (let i = 0; i < a.length; i++) s += (a[i]-ma)*(b[i]-mb);
-      return s / a.length;
-    };
-    const mS = mean(stratRet), mB = mean(benchRet);
-    const sS = std(stratRet, mS), sB = std(benchRet, mB);
-    const c  = cov(stratRet, benchRet, mS, mB);
-    const beta  = sB === 0 ? 0 : c / (sB * sB);
-    // Annualized using 252 trading days
-    const annStratRet = (1 + mS) ** 252 - 1;
-    const annBenchRet = (1 + mB) ** 252 - 1;
-    const alpha       = annStratRet - beta * annBenchRet;
-    // Annualized Sharpe (assume rf = 0)
-    const sharpe      = sS === 0 ? 0 : (mS / sS) * Math.sqrt(252);
-    const benchSharpe = sB === 0 ? 0 : (mB / sB) * Math.sqrt(252);
-    // Annualized volatility
-    const annVol = sS * Math.sqrt(252);
-    const benchAnnVol = sB * Math.sqrt(252);
-    // Max drawdown on strategy equity curve (reuse bt.equity values)
-    // bt.stats.maxDrawdown is in absolute units; keep that, plus compute benchmark max drawdown
-    let bPeak = -Infinity, bMaxDd = 0, bMaxDdPct = 0;
-    for (const a of aligned) {
-      if (a.bench > bPeak) bPeak = a.bench;
-      const dd = bPeak - a.bench;
-      if (dd > bMaxDd) {
-        bMaxDd = dd;
-        bMaxDdPct = bPeak !== 0 ? dd / bPeak * 100 : 0;
-      }
-    }
-    // Correlation
-    const corr = (sS === 0 || sB === 0) ? 0 : c / (sS * sB);
-
-    res.json({
-      ok: true,
-      symbol, strategy, benchmark, from, to,
-      candlesUsed: stratCandles.length,
-      benchmarkCandles: benchCandles.length,
-      alignedBars: aligned.length,
-      strategy_: {
-        trades:         bt.stats.trades,
-        winRate:        bt.stats.winRate,
-        totalPnl:       bt.stats.totalPnl,
-        annualReturn:   +(annStratRet * 100).toFixed(2),
-        annualVol:      +(annVol * 100).toFixed(2),
-        sharpe:         +sharpe.toFixed(2),
-        maxDrawdown:    bt.stats.maxDrawdown,
-        maxDrawdownPct: bt.stats.maxDrawdownPct,
-      },
-      benchmark_: {
-        annualReturn:   +(annBenchRet * 100).toFixed(2),
-        annualVol:      +(benchAnnVol * 100).toFixed(2),
-        sharpe:         +benchSharpe.toFixed(2),
-        maxDrawdown:    +bMaxDd.toFixed(2),
-        maxDrawdownPct: +bMaxDdPct.toFixed(2),
-      },
-      vs: {
-        alpha:          +(alpha * 100).toFixed(2),    // % annualized
-        beta:           +beta.toFixed(3),
-        correlation:    +corr.toFixed(3),
-        excessSharpe:   +(sharpe - benchSharpe).toFixed(2),
-        excessReturn:   +((annStratRet - annBenchRet) * 100).toFixed(2),
-      },
-    });
-  } catch (e) {
-    res.status(500).json({ ok:false, reason: e.message });
-  }
-});
+// T-409: /api/benchmark (strategy vs benchmark candles, alpha/beta/sharpe)
+// moved to routes/broker-reads.js (mounted below).
 
 // ---------- Scanner ----------
 // T-390 (architecture audit #1, god-object split #7): 3 scanner routes
@@ -2200,16 +2066,12 @@ async function resolveUserBroker(req) {
 mountPortfolioRoutes(app, { resolveUserBroker }); // T-218: was 4 inline /api/portfolio + /api/me/portfolio routes; see routes/portfolio.js
 // T-248: mountMfRoutes removed (routes/mf.js deleted). 410 Gone stubs added inline below at the search/nav block for all 6 retired /api/me/mf/* + /api/me/portfolio/mf endpoints.
 
-app.get('/api/orders', async (req, res) => {
-  try {
-    const r = await resolveUserBroker(req);
-    if (!r.broker) return res.json({ ok: true, brokerConnected: false, reason: r.reason, rows: [] });
-    const rows = await r.broker.getOrders();
-    res.json({ ok: true, brokerConnected: true, rows });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: e.message });
-  }
-});
+// T-409 (architecture audit #1, god-object split #38): 5 broker-read routes
+// (/api/orders, /api/profile, /api/margins, /api/reconcile, /api/benchmark)
+// extracted to routes/broker-reads.js. The pickBroker + resolveUserBroker
+// helpers are defined further down in this file; we mount the routes after
+// those declarations to keep the closure references resolvable. See the
+// mountBrokerReadsRoutes(app, ...) call below.
 
 // Tier 63: helper to pick user's broker if authenticated+connected, else fall back to global.
 // Keeps unauthenticated callers working (returns the admin broker), authenticated callers
@@ -2224,21 +2086,26 @@ async function pickBroker(req) {
   return { broker: broker || null, isUserOwn: false };
 }
 
-// T-357: require auth. Previously anonymous callers got the OPERATOR'S broker
-// data because pickBroker(req) falls back to the global broker when req.user
-// is unset (Tier 63 comment above pickBroker explicitly documents the
-// fallback). Security audit T-355 flagged this as CRITICAL: anyone hitting
-// /api/profile, /api/margins, /api/reconcile got operator's live broker
-// state. Now gated with withAuth so anonymous callers get 401.
-app.get('/api/profile', withAuth(async (req, res) => {
-  try {
-    const p = await pickBroker(req);
-    if (!p.broker) return res.status(503).json({ ok: false, reason: 'broker_unavailable' });
-    res.json({ ok: true, profile: await p.broker.getProfile(), isUserOwn: p.isUserOwn });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: e.message });
-  }
-}));
+// T-409 (architecture audit #1, god-object split #38): 5 broker-read routes
+// extracted to routes/broker-reads.js.
+//   - /api/orders     (resolveUserBroker, per-user orders)
+//   - /api/profile    (withAuth + pickBroker)
+//   - /api/margins    (withAuth + pickBroker)
+//   - /api/reconcile  (withAuth, side-by-side broker vs paper)
+//   - /api/benchmark  (strategy backtest vs benchmark, alpha/beta/sharpe)
+// Mounted HERE -- after pickBroker + resolveUserBroker declarations and after
+// _brokerResolver is loaded, so the dep getters resolve cleanly.
+const { mountBrokerReadsRoutes } = require('./routes/broker-reads');
+mountBrokerReadsRoutes(app, {
+  withAuth,
+  KILL_SWITCH,
+  LIVE_TRADING,
+  getBroker: () => broker,
+  getPaper:  () => paper,
+  resolveUserBroker,
+  pickBroker,
+  runBacktest,
+});
 
 // T-406 (god-object split #33): me/prefs + me/identity extracted to routes/me-identity.js.
 const { mountMeIdentityRoutes } = require('./routes/me-identity');
@@ -2296,140 +2163,10 @@ mountMeHeavyRoutes(app, {
   getBrokerResolver: () => _brokerResolver,
 });
 
-// T-357 (security): require auth (was leaking operator's margin data to anonymous callers)
-app.get('/api/margins', withAuth(async (req, res) => {
-  try {
-    const p = await pickBroker(req);
-    if (!p.broker) return res.status(503).json({ ok: false, reason: 'broker_unavailable' });
-    res.json({ ok: true, margins: await p.broker.getMargins(), isUserOwn: p.isUserOwn });
-  } catch (e) {
-    res.status(500).json({ ok: false, reason: e.message });
-  }
-}));
+// T-357 + T-409: /api/margins moved to routes/broker-reads.js (mounted below).
 
 // ---------- Reconciliation ----------
-// GET /api/reconcile -- side-by-side: broker live state vs backend (paper) state.
-// While KILL_SWITCH=true (paper-only mode), the broker side reflects the user's
-// real Kite account (holdings, intraday positions, today's orders, cash). Paper
-// side is the simulator. This surfaces any drift -- useful pre-go-live as a
-// sanity check, and post-go-live to catch silent mismatches between what
-// the backend thinks it placed vs what Kite actually accepted.
-// T-357 (security): require auth (was leaking operator's reconciliation state to anonymous callers)
-app.get('/api/reconcile', withAuth(async (_req, res) => {
-  if (!paper) return res.status(503).json({ ok:false, reason:'paper_not_initialized' });
-  const safe = async (fn) => {
-    try { return { ok: true, data: await fn() }; }
-    catch (e) { return { ok: false, error: e.message }; }
-  };
-
-  const [holdingsR, positionsR, ordersR, marginsR] = await Promise.all([
-    safe(() => broker.getHoldings()),
-    safe(() => broker.getPositions()),
-    safe(() => broker.getOrders()),
-    safe(() => broker.getMargins()),
-  ]);
-
-  // ---- Cash drift ----
-  let brokerCash = null;
-  if (marginsR.ok && marginsR.data) {
-    const eq = marginsR.data.equity || {};
-    const av = eq.available || {};
-    brokerCash = typeof av.cash === 'number' ? av.cash
-               : typeof av.live_balance === 'number' ? av.live_balance
-               : typeof eq.net === 'number' ? eq.net
-               : null;
-  }
-  const paperStats = paper.stats();
-
-  // ---- Holdings diff ----
-  // Broker holdings: kc.getHoldings() returns [{ tradingsymbol, quantity, average_price, last_price, ... }]
-  // Paper holdings: derived from paper.positions() (only long net positions matter for compare)
-  const brokerHoldings = holdingsR.ok && Array.isArray(holdingsR.data) ? holdingsR.data : [];
-  const paperPositions = paper.positions();
-  const holdingsBySymbol = new Map();
-  for (const h of brokerHoldings) {
-    const s = (h.tradingsymbol || h.symbol || '').toUpperCase();
-    if (!s) continue;
-    holdingsBySymbol.set(s, {
-      symbol: s,
-      brokerQty: Number(h.quantity || 0),
-      brokerAvg: Number(h.average_price || 0),
-      brokerLtp: Number(h.last_price || 0),
-      paperQty: 0,
-      paperAvg: 0,
-    });
-  }
-  for (const p of paperPositions) {
-    const s = p.symbol.toUpperCase();
-    const cur = holdingsBySymbol.get(s) || { symbol: s, brokerQty: 0, brokerAvg: 0, brokerLtp: p.ltp || 0, paperQty: 0, paperAvg: 0 };
-    cur.paperQty = p.qty;
-    cur.paperAvg = p.avgPrice;
-    holdingsBySymbol.set(s, cur);
-  }
-  const holdingsRows = Array.from(holdingsBySymbol.values()).map(r => ({
-    ...r,
-    qtyDrift: r.brokerQty - r.paperQty,
-    matches: r.brokerQty === r.paperQty,
-  }));
-
-  // ---- Pending-orders diff ----
-  // Backend (paper) pending orders: status=PENDING
-  // Broker pending: status === 'OPEN' or 'TRIGGER PENDING' (Kite values)
-  const allPaperOrders = paper.list();
-  const paperPending = allPaperOrders.filter(o => o.status === 'PENDING');
-  const brokerOrdersAll = ordersR.ok && Array.isArray(ordersR.data) ? ordersR.data : [];
-  const brokerPending = brokerOrdersAll.filter(o => {
-    const s = String(o.status || '').toUpperCase();
-    return s === 'OPEN' || s === 'TRIGGER PENDING' || s === 'PENDING';
-  });
-
-  const summary = {
-    cashDrift:        (brokerCash != null) ? +(brokerCash - paperStats.cash).toFixed(2) : null,
-    holdingsDrifts:   holdingsRows.filter(r => !r.matches).length,
-    paperPendingCnt:  paperPending.length,
-    brokerPendingCnt: brokerPending.length,
-  };
-
-  res.json({
-    ok: true,
-    asOf: new Date().toISOString(),
-    killSwitch: KILL_SWITCH,
-    liveTrading: LIVE_TRADING,
-    brokerName: broker.name,
-    brokerConnected: !!(broker.health && broker.health().connected),
-    // T99-T49: mirror T-42's broker.health stall fields so the dashboard knows
-    // when the 'Current' portfolio values are computed from stale ticks. Both
-    // default to false when broker.health() is absent (mock broker etc.).
-    brokerStalledOnToken: !!(broker.health && broker.health().stalledOnToken),
-    brokerTickStale:      !!(broker.health && broker.health().tickStale),
-    cash: {
-      paper:    paperStats.cash,
-      broker:   brokerCash,
-      drift:    summary.cashDrift,
-      brokerOk: marginsR.ok,
-      brokerErr: marginsR.ok ? null : marginsR.error,
-    },
-    holdings: {
-      rows:       holdingsRows,
-      brokerOk:   holdingsR.ok,
-      brokerErr:  holdingsR.ok ? null : holdingsR.error,
-    },
-    pendingOrders: {
-      paper:     paperPending,
-      broker:    brokerPending,
-      brokerOk:  ordersR.ok,
-      brokerErr: ordersR.ok ? null : ordersR.error,
-    },
-    paperStats: {
-      totalEquity:   paperStats.totalEquity,
-      realizedPnl:   paperStats.realizedPnl,
-      unrealizedPnl: paperStats.unrealizedPnl,
-      filledOrders:  paperStats.filledOrders,
-      closedTrades:  paperStats.closedTrades,
-    },
-    summary,
-  });
-}));
+// T-357 + T-409: /api/reconcile moved to routes/broker-reads.js (mounted below).
 
 // T-406 (god-object split #34): /api/historical + /api/instruments/search extracted to routes/historical.js (mount call above).
 
@@ -3722,24 +3459,4 @@ setTimeout(() => {
   }
 })();
 
-// ---------- Shutdown ----------
-function shutdown(sig) {
-  audit('server.stop', { signal: sig });
-  console.log(`\nCaught ${sig}, shutting down...`);
-  Promise.resolve(broker && broker.stop()).finally(() => {
-    server.close(() => process.exit(0));
-    setTimeout(() => process.exit(1), 10000).unref();
-  });
-}
-process.on('SIGINT',  () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-
-process.on('unhandledRejection', (r) => {
-  audit('error.unhandledRejection', { reason: String(r) });
-  console.error('unhandledRejection:', r);
-});
-process.on('uncaughtException', (e) => {
-  audit('error.uncaughtException', { message: e.message, stack: e.stack });
-  console.error('uncaughtException:', e);
-  process.exit(1);
-});
+// ---------- Shutdow
