@@ -2944,13 +2944,9 @@ mountRiskAuditRoutes(app, {
   audit,
 });
 
-// ---------- Tier 35: IP allowlist state (for the Brokers/Compliance UI) ----------
-app.get('/api/security/ip-allowlist', (_req, res) => {
-  if (!ipAllowlist || typeof ipAllowlist.state !== 'function') {
-    return res.status(503).json({ ok:false, reason:'ip_allowlist_not_initialized' });
-  }
-  res.json({ ok:true, ...ipAllowlist.state() });
-});
+// T-400 (god-object split #17): 3 /api/security/* routes extracted to routes/security.js.
+const { mountSecurityRoutes } = require('./routes/security');
+mountSecurityRoutes(app, { getIpAllowlist: () => ipAllowlist, getTwoFactor: () => twoFactor });
 
 // Tier 37: echo the IP the server sees for this client, so users can paste
 // it into their API_IP_WHITELIST. Mirrors what nginx puts in X-Real-IP.
@@ -4078,17 +4074,6 @@ app.get('/api/me/slippage', (req, res) => {
   catch (e) { res.status(500).json({ ok:false, reason: e.message }); }
 });
 
-app.get('/api/security/my-ip', (req, res) => {
-  const xrip = req.headers['x-real-ip'];
-  const xff  = req.headers['x-forwarded-for'];
-  let ip = (typeof xrip === 'string' && xrip.trim())
-        || (typeof xff  === 'string' && xff.split(',')[0].trim())
-        || (req.socket && req.socket.remoteAddress)
-        || '';
-  if (typeof ip === 'string' && ip.startsWith('::ffff:')) ip = ip.slice(7);
-  res.json({ ok:true, ip, source: xrip ? 'x-real-ip' : (xff ? 'x-forwarded-for' : 'socket') });
-});
-
 // Tier 23: rebalance suggestions. Auto-derives buckets + holdings + paper equity + cash if not in body.
 app.post('/api/rebalance', async (req, res) => {
   if (!rebalance) return res.status(503).json({ ok:false, reason:'rebalance_not_initialized' });
@@ -4241,12 +4226,6 @@ mountOrdersRoutes(app, {
 // Tier 41: reject a pending 2FA token. Useful when the user spots a
 // suspicious order in the Telegram alert and wants to abort.
 // GET so it can be one-click from Telegram; POST also accepted.
-
-// Tier 38: status endpoint (for the Compliance UI panel).
-app.get('/api/security/two-factor', (_req, res) => {
-  if (!twoFactor) return res.status(503).json({ ok:false, reason:'two_factor_not_initialized' });
-  res.json({ ok:true, ...twoFactor.stats() });
-});
 
 // Tier 11: cancel a working order. Same dual gating as place.
 
