@@ -1377,7 +1377,7 @@ mountBootWiringRoutes(app, {
   readSessionCookie,
   isInternalIp,
   getClientIp,
-  ensureDrTable: _ensureDrTableImpl,
+  ensureDrTable: () => _ensureDrTableImpl(db),
   getStatusCache:     () => _statusCache,
   setStatusCache:     (v) => { _statusCache = v; },
   STATUS_CACHE_MS,

@@ -169,8 +169,14 @@ function mountBootWiringRoutes(app, deps) {
         }
       } else {
         checks.drLastTestAgo = 'unavailable';
+        checks.drLastTestOk  = false;
+        checks.drStale       = true;
       }
-    } catch (e) { checks.drLastTestAgo = 'error:' + (e.message || 'unknown').slice(0, 40); }
+    } catch (e) {
+      checks.drLastTestAgo = 'error:' + (e.message || 'unknown').slice(0, 40);
+      checks.drLastTestOk  = false;
+      checks.drStale       = true;
+    }
 
     // T99-T34/T37/T55: broker WS + tick + token age
     try {
