@@ -1119,7 +1119,25 @@ function getClientIp(req) {
   return req.ip || (req.connection && req.connection.remoteAddress) || (req.socket && req.socket.remoteAddress) || '';
 }
 
+// T-411: health-check endpoints bypass the rate-limit entirely.
+//
+// These are cheap, public, idempotent reads used by:
+//   - monitoring systems (Pingdom, UptimeRobot, internal Prometheus scrape)
+//   - load balancers + reverse proxies (nginx upstream health checks)
+//   - CI smoke tests (Playwright suite hits /api/health early in every spec
+//     to assert deploy-switchover completed before exercising auth-gated routes)
+//
+// Rate-limiting them was causing CI flake -- the GitHub runner makes ~80 specs
+// with retries from a single IP, exhausting the 300/min/IP budget. Failed
+// health pings then cascade into structural-rendering failures because the
+// app shell never confirms the backend is ready. None of these endpoints
+// expose user data; they're already public, so excluding them from rate-limit
+// has no security cost. (Cost-of-compute is also negligible: they read from
+// in-memory state, not the DB or broker.)
+const RATE_LIMIT_BYPASS = new Set(['/api/health', '/api/health-deep', '/api/status']);
+
 app.use('/api', (req, res, next) => {
+  if (RATE_LIMIT_BYPASS.has(req.path)) return next();
   const ra = getClientIp(req).replace('::ffff:', '');
   if (isInternalIp(ra)) return next(); // never throttle internal callers
   const now = Date.now();
@@ -3164,32 +3182,4 @@ const _sessionJanitorTimer = setInterval(() => {
 }, 60 * 60 * 1000);   // 1 hour
 if (_sessionJanitorTimer.unref) _sessionJanitorTimer.unref();
 // Also run once at boot so a server that has been down a while doesn't wait
-// an hour before its first cleanup.
-setTimeout(() => {
-  try {
-    if (db && db.sessions && typeof db.sessions.purgeExpired === 'function') {
-      const removed = db.sessions.purgeExpired();
-      console.log(`[sessions] janitor boot-sweep removed ${removed} expired session(s)`);
-    }
-  } catch (e) { console.warn('[sessions] boot janitor error:', e && e.message); }
-}, 30_000);  // wait 30s so db/init has settled
-
-
-// ---------- Boot ----------
-(async () => {
-  try {
-    await init();
-    await startBrokerFanout();
-    // Bind 0.0.0.0 inside the container; host exposure is restricted by docker-compose port mapping to 127.0.0.1.
-    server.listen(PORT, '0.0.0.0', () => {
-      audit('server.start', { port: PORT, env: ENV_NAME, killSwitch: KILL_SWITCH, broker: broker.name });
-      console.log(`ats-backend listening on 127.0.0.1:${PORT} (env=${ENV_NAME}, broker=${broker.name}, killSwitch=${KILL_SWITCH})`);
-    });
-  } catch (err) {
-    console.error('FATAL boot error:', err);
-    audit('server.bootError', { msg: err.message });
-    process.exit(1);
-  }
-})();
-
-// ---------- Shutdow
+// an hour before it
