@@ -159,14 +159,16 @@ jobs:
               deploy/scripts/setup-auto-login-cron.sh \
               deploy/scripts/setup-auto-login-daemon.sh \
               deploy/scripts/auto-login-daemon.js \
+              deploy/scripts/auto-login-host.js \
               deploy/scripts/ats-auto-login-daemon.service \
               deploy/scripts/setup-all.sh \
+              deploy/scripts/setup-rclone-archive.sh \
               "${{ secrets.OCI_SSH_USER }}@${{ secrets.OCI_SSH_HOST }}:/tmp/"
           ssh -i ~/.ssh/id_ed25519 \
               -o StrictHostKeyChecking=yes \
               -o UserKnownHostsFile=~/.ssh/known_hosts \
               "${{ secrets.OCI_SSH_USER }}@${{ secrets.OCI_SSH_HOST }}" \
-              "for f in dr-restore-test.sh setup-dr-cron.sh backup-db-tokens.sh ats-archive.sh repair-rclone-wrapper.sh sync-nginx-config.sh setup-auto-login-cron.sh setup-auto-login-daemon.sh auto-login-daemon.js ats-auto-login-daemon.service setup-all.sh; do mv /tmp/\$f /opt/ats/scripts/\$f && chmod +x /opt/ats/scripts/\$f 2>/dev/null || true; done"
+              "for f in dr-restore-test.sh setup-dr-cron.sh backup-db-tokens.sh ats-archive.sh repair-rclone-wrapper.sh sync-nginx-config.sh setup-auto-login-cron.sh setup-auto-login-daemon.sh auto-login-daemon.js auto-login-host.js ats-auto-login-daemon.service setup-all.sh setup-rclone-archive.sh; do mv /tmp/\$f /opt/ats/scripts/\$f && chmod +x /opt/ats/scripts/\$f 2>/dev/null || true; done"
           # T99-T41: stage nginx configs so sync-nginx-config.sh can install them.
           # We don't apply them automatically — operator runs sync-nginx-config.sh once
           # so any breaking nginx change is caught at their hands, not mid-deploy.
