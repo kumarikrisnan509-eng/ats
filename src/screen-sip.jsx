@@ -34,8 +34,9 @@ window.SipScreen = function SipScreen() {
   const load = React.useCallback(async () => {
     try {
       const [p, h] = await Promise.all([
-        /** @type {Promise<SipPlanResponse>} */ (fetch('/api/sip/plan').then(r => r.json())),
-        /** @type {Promise<SipHistoryResponse>} */ (fetch(`/api/sip/history?days=${days}`).then(r => r.json())),
+        // T-445 (audit-2026-05-26 frontend M4): use window.fetchApi.
+        /** @type {Promise<SipPlanResponse>} */ (window.fetchApi('/api/sip/plan')),
+        /** @type {Promise<SipHistoryResponse>} */ (window.fetchApi(`/api/sip/history?days=${days}`)),
       ]);
       if (p && p.ok) { setPlan(p.plan); setStats(p.stats); } else setErr(p && p.reason);
       if (h && h.ok) setHistory(h.history || []);

@@ -31,7 +31,10 @@ window.AttributionScreen = function AttributionScreen() {
   const load = React.useCallback(async () => {
     try {
       /** @type {AttributionResponse} */
-      const r = await fetch(`/api/me/attribution?n=${days}`).then(r => r.json());
+      // T-445 (audit-2026-05-26 frontend M4): switched to window.fetchApi
+      // which checks r.ok, adds credentials:include, and wraps errors with
+      // a real Error{status,reason,requestId} instead of swallowing 401/5xx.
+      const r = await window.fetchApi(`/api/me/attribution?n=${days}`);
       if (r && r.ok) { setData(r.recent || []); setStats(r.stats || null); }
       else setErr(r && r.reason);
     } catch (e) { setErr(e.message); }

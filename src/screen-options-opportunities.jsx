@@ -60,8 +60,9 @@ window.OptionsOpportunitiesScreen = function OptionsOpportunitiesScreen() {
   const load = React.useCallback(async () => {
     try {
       const [s, o] = await Promise.all([
-        /** @type {Promise<OptionScannerStatusResponse>} */ (fetch('/api/options/scanner/status').then(r => r.json())),
-        /** @type {Promise<OptionOpportunitiesResponse>} */ (fetch('/api/options/opportunities?limit=50').then(r => r.json())),
+        // T-445 (audit-2026-05-26 frontend M4): use window.fetchApi.
+        /** @type {Promise<OptionScannerStatusResponse>} */ (window.fetchApi('/api/options/scanner/status')),
+        /** @type {Promise<OptionOpportunitiesResponse>} */ (window.fetchApi('/api/options/opportunities?limit=50')),
       ]);
       if (s && s.ok) setStatus(s);
       if (o && o.ok) setOpps(o.opportunities || []);

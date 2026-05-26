@@ -34,8 +34,9 @@ window.CalibrationScreen = function CalibrationScreen() {
   const load = React.useCallback(async () => {
     try {
       const [c, r] = await Promise.all([
-        fetch(`/api/me/calibration?windowDays=${days}`).then(r => r.json()),
-        fetch(`/api/me/recommend-retire?windowDays=${days}`).then(r => r.json()),
+        // T-445 (audit-2026-05-26 frontend M4): window.fetchApi for r.ok handling.
+        window.fetchApi(`/api/me/calibration?windowDays=${days}`),
+        window.fetchApi(`/api/me/recommend-retire?windowDays=${days}`),
       ]);
       if (c && c.ok) setCalibration(c.calibration || []);
       if (r && r.ok) setRecommendation(r);

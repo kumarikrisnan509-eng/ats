@@ -33,7 +33,8 @@ window.MacroSignalsScreen = function MacroSignalsScreen() {
   const load = React.useCallback(async () => {
     try {
       /** @type {MacroSignalsResponse} */
-      const r = await fetch('/api/me/macro-signals').then(r => r.json());
+      // T-445 (audit-2026-05-26 frontend M4): use window.fetchApi.
+      const r = await window.fetchApi('/api/me/macro-signals');
       if (r && r.ok) setData(r);
       else setErr(r && r.reason);
     } catch (e) { setErr(e.message); }

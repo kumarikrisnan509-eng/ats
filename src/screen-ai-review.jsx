@@ -92,17 +92,25 @@ const AIReviewScreen = () => {
   // to the demo list so the screen renders for users with no trades yet.
   const liveMonthRows = (liveMonthly && Array.isArray(liveMonthly.months)) ? liveMonthly.months : [];
   const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  // T-445 (audit-2026-05-26 frontend M3): in LIVE mode with no months yet,
+  // do NOT fall back to demo months (March/Feb/Jan 2026 / Dec 2025). That
+  // showed phantom months to users who had never traded. Demo-mode users
+  // still see the populated dropdown for the screen tour.
+  const _isDemoMonths = !!(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
   const months = liveMonthRows.length > 0
     ? liveMonthRows.map(r => {
         const [y, m] = r.month.split('-');
         return { v: r.month, label: `${MONTH_NAMES[parseInt(m,10)-1] || m} ${y}` };
       }).reverse()  // most-recent first
-    : [
-        { v: "2026-03", label: "March 2026" },
-        { v: "2026-02", label: "February 2026" },
-        { v: "2026-01", label: "January 2026" },
-        { v: "2025-12", label: "December 2025" },
-      ];
+    : (_isDemoMonths
+        ? [
+            { v: "2026-03", label: "March 2026" },
+            { v: "2026-02", label: "February 2026" },
+            { v: "2026-01", label: "January 2026" },
+            { v: "2025-12", label: "December 2025" },
+          ]
+        : []  // live mode + no months yet → empty dropdown, prompt to trade
+      );
   // Find the live row for the selected month (or null if user has none)
   const liveRow = liveMonthRows.find(r => r.month === month) || null;
   // T-383 (audit, formatINR consolidation): was an ad-hoc 6-line helper
