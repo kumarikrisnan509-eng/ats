@@ -71,7 +71,25 @@ class Vault {
     const nonce = raw.slice(0, nlen);
     const ct = raw.slice(nlen);
     const pt = s.crypto_secretbox_open_easy(ct, nonce, this._key);
-    if (!pt) throw new Error('decryption failed');
+    // T-434 (audit-2026-05-26 backend M3): when secretbox_open returns null
+    // (corrupt blob, master.key rotated without re-sealing, truncated DB row),
+    // emit a structured audit event before throwing so operators can spot a
+    // master-key mismatch immediately. Many callers (e.g. broker-resolver)
+    // catch the throw and return null, hiding the underlying decryption
+    // failure from any user-visible error.
+    if (!pt) {
+      try {
+        if (typeof globalThis.atsAudit === 'function') {
+          globalThis.atsAudit('vault.open.failed', {
+            reason: 'decryption_failed',
+            blobLen: sealedB64 ? sealedB64.length : 0,
+            nonceLen: nlen,
+            ciphertextLen: ct ? ct.length : 0,
+          });
+        }
+      } catch (_) { /* don't mask the original error */ }
+      throw new Error('decryption failed');
+    }
     return s.to_string(pt);
   }
 }

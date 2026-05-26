@@ -78,7 +78,13 @@ const I = {
 };
 
 // ============ Number + date helpers ============
-const inr = (n, d = 0) => "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: d, minimumFractionDigits: d });
+// T-434 (audit-2026-05-26 frontend M1): bare Number(n).toLocaleString
+// returned "₹NaN" for undefined/null. Mirror inrCompact's guard so
+// any future code path passing undefined produces a clean "—" instead.
+const inr = (n, d = 0) => {
+  if (!Number.isFinite(Number(n))) return "—";
+  return "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: d, minimumFractionDigits: d });
+};
 // Smart precision: more decimals for small magnitudes, fewer for large
 // Examples: ₹847 · ₹4.2k · ₹84.5k · ₹2.84 L · ₹28.4 L · ₹4.83 Cr · ₹48.3 Cr · ₹483 Cr
 const inrCompact = (n) => {
@@ -95,8 +101,17 @@ const inrCompact = (n) => {
   return sign + "₹" + abs.toFixed(0);                                        // <1k → exact
 };
 // Instrument price formatter — full Indian comma grouping (1,23,456.50)
-const inrPrice = (n, d = 2) => "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: d, minimumFractionDigits: d });
-const pct = (n, d = 2) => (n >= 0 ? "+" : "") + n.toFixed(d) + "%";
+// T-434 (audit-2026-05-26 frontend M1): same NaN guard on inrPrice.
+const inrPrice = (n, d = 2) => {
+  if (!Number.isFinite(Number(n))) return "—";
+  return "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: d, minimumFractionDigits: d });
+};
+// T-434 (audit-2026-05-26 frontend M1): pct() threw TypeError on undefined.
+const pct = (n, d = 2) => {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "—";
+  return (v >= 0 ? "+" : "") + v.toFixed(d) + "%";
+};
 const clsPN = (n) => (n > 0 ? "up" : n < 0 ? "down" : "muted");
 
 // ============ Atoms ============

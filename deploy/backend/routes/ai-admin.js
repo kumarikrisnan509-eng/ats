@@ -45,6 +45,16 @@ function mountAiAdminRoutes(app, deps) {
       if (req.query.user_id) { filters.push('user_id = ?'); params.push(parseInt(req.query.user_id, 10)); }
       if (req.query.status)  { filters.push('status = ?'); params.push(String(req.query.status)); }
       if (req.query.workflow) { filters.push('workflow = ?'); params.push(String(req.query.workflow)); }
+      // T-434 (audit-2026-05-26 backend M10): runtime guard against any
+      // future contributor pushing an interpolated string into `filters`.
+      // Each entry must match `column = ?` literally — no `OR`, no
+      // subqueries, no user input. If this throws, the new filter MUST
+      // either go through `?` placeholders or get its own statement.
+      for (const f of filters) {
+        if (!/^[a-z_][a-z0-9_]* = \?$/i.test(f)) {
+          throw new Error('ai-admin filter is not a fixed `column = ?` form: ' + f);
+        }
+      }
       const where = filters.length ? 'WHERE ' + filters.join(' AND ') : '';
       const sql = `SELECT id, user_id, ts, workflow, provider, model,
                           prompt_tokens, completion_tokens, cost_inr, status,

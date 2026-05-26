@@ -42,7 +42,17 @@ function signState(userId) {
   return `${idB64}.${nonceB64}.${sig}`;
 }
 
+// T-434 (audit-2026-05-26 backend M2): sweep expired nonces on every
+// verifyState call too, not just signState. Otherwise an abandoned-OAuth
+// flow (signState fires but verifyState never gets called because the
+// user closed the popup) leaks memory until the next signState.
+function _gcExpiredNonces() {
+  const now = Date.now();
+  for (const [k, v] of _pendingNonces) if (v.exp < now) _pendingNonces.delete(k);
+}
+
 function verifyState(state, expectedUserId) {
+  _gcExpiredNonces();
   // T-424 (audit-2026-05-26 backend C1): added timing-safe sig compare and
   // an OPTIONAL expectedUserId binding. If expectedUserId is provided (e.g.
   // req.user.id from session), the state's embedded userId must match it

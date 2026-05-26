@@ -190,10 +190,19 @@ function mountPaperTradingRoutes(app, deps) {
     try {
       // === Gate 1: win-rate over last 30 days ===
       const cutoff = new Date(Date.now() - 30 * 86400_000).toISOString();
-      const params = [req.user.id, strategy, cutoff];
-      let where = "user_id = ? AND strategy_tag = ? AND exited_at > ?";
-      if (symbol) { where += " AND symbol = ?"; params.push(symbol); }
-      const rows = db._conn.prepare(`SELECT pnl FROM paper_closed_trades WHERE ${where}`).all(...params);
+      // T-434 (audit-2026-05-26 backend M6): split into two fixed prepared
+      // statements instead of string-interpolating `where`. Eliminates the
+      // future-contributor footgun where someone adds an `if (extra) where +=
+      // " AND " + req.body.extra` and accidentally enables SQL injection.
+      const rows = symbol
+        ? db._conn.prepare(
+            'SELECT pnl FROM paper_closed_trades '
+            + 'WHERE user_id = ? AND strategy_tag = ? AND exited_at > ? AND symbol = ?'
+          ).all(req.user.id, strategy, cutoff, symbol)
+        : db._conn.prepare(
+            'SELECT pnl FROM paper_closed_trades '
+            + 'WHERE user_id = ? AND strategy_tag = ? AND exited_at > ?'
+          ).all(req.user.id, strategy, cutoff);
       const trades = rows.length;
       const wins = rows.filter(r => Number(r.pnl) > 0).length;
       const winRate = trades > 0 ? +(wins / trades).toFixed(4) : 0;
