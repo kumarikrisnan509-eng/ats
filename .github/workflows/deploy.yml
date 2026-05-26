@@ -134,6 +134,7 @@ jobs:
               -o UserKnownHostsFile=~/.ssh/known_hosts \
               deploy/scripts/dr-restore-test.sh \
               deploy/scripts/setup-dr-cron.sh \
+              deploy/scripts/backup-db-tokens.sh \
               deploy/scripts/ats-archive.sh \
               deploy/scripts/repair-rclone-wrapper.sh \
               deploy/scripts/sync-nginx-config.sh \
@@ -147,7 +148,7 @@ jobs:
               -o StrictHostKeyChecking=yes \
               -o UserKnownHostsFile=~/.ssh/known_hosts \
               "${{ secrets.OCI_SSH_USER }}@${{ secrets.OCI_SSH_HOST }}" \
-              "for f in dr-restore-test.sh setup-dr-cron.sh ats-archive.sh repair-rclone-wrapper.sh sync-nginx-config.sh setup-auto-login-cron.sh setup-auto-login-daemon.sh auto-login-daemon.js ats-auto-login-daemon.service setup-all.sh; do mv /tmp/\$f /opt/ats/scripts/\$f && chmod +x /opt/ats/scripts/\$f 2>/dev/null || true; done"
+              "for f in dr-restore-test.sh setup-dr-cron.sh backup-db-tokens.sh ats-archive.sh repair-rclone-wrapper.sh sync-nginx-config.sh setup-auto-login-cron.sh setup-auto-login-daemon.sh auto-login-daemon.js ats-auto-login-daemon.service setup-all.sh; do mv /tmp/\$f /opt/ats/scripts/\$f && chmod +x /opt/ats/scripts/\$f 2>/dev/null || true; done"
           # T99-T41: stage nginx configs so sync-nginx-config.sh can install them.
           # We don't apply them automatically — operator runs sync-nginx-config.sh once
           # so any breaking nginx change is caught at their hands, not mid-deploy.
