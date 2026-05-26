@@ -216,6 +216,12 @@ const PositionsTable = ({ title, rows }) => (
 );
 
 const PortfolioScreen = () => {
+  // T-429+T-433 (audit-2026-05-26 frontend H5): _isDemoFT mirrors the helper
+  // used inside FactorTiltPanel — it gates the hardcoded sweep-waterfall
+  // demo fixture below. CI's JSDoc/tsc check caught that we were referencing
+  // FactorTiltPanel's local _isDemoFT from PortfolioScreen's render; this
+  // promotes it to PortfolioScreen scope so the gate works at runtime too.
+  const _isDemoFT = !!(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
   const [holdings, setHoldings] = React.useState([]);
 
   // T-158: live sweep MTD from /api/me/sweep/monthly. Falls back to "—"
