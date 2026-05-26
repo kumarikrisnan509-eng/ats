@@ -329,9 +329,12 @@ const ComplianceScreen = () => {
       sub: 'Append-only JSONL on local disk + nightly rclone copy to GDrive. WORM/object-lock immutability is a Tier 23+ target.',
     },
     {
+      // T-429 (audit-2026-05-26 frontend H6): do NOT leak the prod egress IP
+      // here. The compliance check exists to remind the operator the IP must
+      // be declared with the broker; the IP itself stays out of the bundle.
       area: 'Static IP whitelisting', ok: false,
-      t: '141.148.192.4 not declared in repo',
-      sub: 'Required by spec §0 for production algo endpoints. Operator-side task; declare to Zerodha via the Kite Connect dashboard.',
+      t: 'Production VM egress IP not declared in repo',
+      sub: 'Required by spec §0 for production algo endpoints. Operator-side task; declare your VM egress IP to Zerodha via the Kite Connect dashboard.',
     },
     {
       area: 'Production security headers', ok: false,

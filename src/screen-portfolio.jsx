@@ -348,22 +348,43 @@ const PortfolioScreen = () => {
               <div className="muted">Per-mode breakdown not wired — needs aggregation endpoint.</div>
             </div>
           </div>
-          <div className="waterfall__step">
-            <div className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>2 · Harvest rule</div>
-            <div style={{ fontSize: 13, fontWeight: 500, margin: "6px 0" }}>On monthly profit ≥ ₹25k sweep 60%</div>
-            <div className="muted" style={{ fontSize: 11 }}>Retain 40% as trading float</div>
-            <div style={{ marginTop: 8 }}>
-              <Pill kind="up" dot>triggered Apr 1</Pill>
-            </div>
-          </div>
-          <div className="waterfall__step">
-            <div className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>3 · Split</div>
-            <div className="col" style={{ gap: 4, marginTop: 6, fontSize: 12 }}>
-              <div className="between"><span>SIP booster</span><span className="mono">40%</span></div>
-              <div className="between"><span>ETF lump</span><span className="mono">35%</span></div>
-              <div className="between"><span>Direct equity</span><span className="mono">25%</span></div>
-            </div>
-          </div>
+          {/* T-429 (audit-2026-05-26 frontend H5): Step 2 "harvest rule"
+              (₹25k / 60%) and Step 3 split (40/35/25) and the "triggered
+              Apr 1" pill were all hardcoded — a new user would believe ATS
+              was auto-sweeping per a rule they never set. Gate to demo. */}
+          {_isDemoFT ? (
+            <>
+              <div className="waterfall__step">
+                <div className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>2 · Harvest rule</div>
+                <div style={{ fontSize: 13, fontWeight: 500, margin: "6px 0" }}>On monthly profit ≥ ₹25k sweep 60%</div>
+                <div className="muted" style={{ fontSize: 11 }}>Retain 40% as trading float</div>
+                <div style={{ marginTop: 8 }}>
+                  <Pill kind="up" dot>triggered Apr 1</Pill>
+                </div>
+              </div>
+              <div className="waterfall__step">
+                <div className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>3 · Split</div>
+                <div className="col" style={{ gap: 4, marginTop: 6, fontSize: 12 }}>
+                  <div className="between"><span>SIP booster</span><span className="mono">40%</span></div>
+                  <div className="between"><span>ETF lump</span><span className="mono">35%</span></div>
+                  <div className="between"><span>Direct equity</span><span className="mono">25%</span></div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="waterfall__step">
+                <div className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>2 · Harvest rule</div>
+                <div style={{ fontSize: 13, fontWeight: 500, margin: "6px 0" }}>—</div>
+                <div className="muted" style={{ fontSize: 11 }}>rule not configured</div>
+              </div>
+              <div className="waterfall__step">
+                <div className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>3 · Split</div>
+                <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>—</div>
+                <div className="muted" style={{ fontSize: 11 }}>configure under Money → Sweep settings</div>
+              </div>
+            </>
+          )}
           <div className="waterfall__step">
             <div className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>4 · Deployed (MTD)</div>
             {/* T99-T158: wired to /api/me/sweep/monthly. Shows the current

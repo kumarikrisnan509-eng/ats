@@ -308,21 +308,28 @@ const StrategiesScreen = () => {
           </div>
         </div>
 
+        {/* T-429 (audit-2026-05-26 frontend H3): mapped backend strats don't
+            populate `trades` or `alloc`; render "—" instead of "undefined". */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 12 }}>
           <div><div className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>Capital</div><div className="mono" style={{ fontSize: 14 }}>{inrCompact(s.cap)}</div></div>
           <div><div className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>30d P&L</div><div className={"mono " + clsPN(s.pnl30)} style={{ fontSize: 14 }}>{s.pnl30 >= 0 ? "+" : ""}{inr(s.pnl30)}</div></div>
           <div><div className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>Win</div><div className="mono" style={{ fontSize: 14 }}>{s.winR || "—"}{s.winR ? "%" : ""}</div></div>
-          <div><div className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>Trades</div><div className="mono" style={{ fontSize: 14 }}>{s.trades}</div></div>
+          <div><div className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>Trades</div><div className="mono" style={{ fontSize: 14 }}>{Number.isFinite(s.trades) ? s.trades : "—"}</div></div>
         </div>
 
-        <Sparkline data={seriesRandom(i + 5, 40, 80, 120, s.pnl30 > 0 ? 0.3 : s.pnl30 < 0 ? -0.25 : 0)} height={44} color={s.pnl30 > 0 ? "var(--up)" : s.pnl30 < 0 ? "var(--down)" : "var(--text-4)"}/>
+        {/* T-429 (audit-2026-05-26 frontend H2): only render the seriesRandom
+            sparkline in demo. In live mode it's an invented curve over a
+            real strategy's name. */}
+        {(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) && (
+          <Sparkline data={seriesRandom(i + 5, 40, 80, 120, s.pnl30 > 0 ? 0.3 : s.pnl30 < 0 ? -0.25 : 0)} height={44} color={s.pnl30 > 0 ? "var(--up)" : s.pnl30 < 0 ? "var(--down)" : "var(--text-4)"}/>
+        )}
 
         <div className="divider"/>
         <div className="between" style={{ fontSize: 12 }}>
           <span className="muted">Allocation of mode capital</span>
-          <span className="mono">{s.alloc}%</span>
+          <span className="mono">{Number.isFinite(s.alloc) ? (s.alloc + "%") : "—"}</span>
         </div>
-        <div style={{ marginTop: 6 }}><Progress value={s.alloc} max={40} kind={s.st === "live" ? "up" : "info"}/></div>
+        <div style={{ marginTop: 6 }}><Progress value={Number.isFinite(s.alloc) ? s.alloc : 0} max={40} kind={s.st === "live" ? "up" : "info"}/></div>
       </Card>
     );
   };

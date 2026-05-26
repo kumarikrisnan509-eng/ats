@@ -524,25 +524,39 @@ const SignalsScreen = () => {
           </div>
         </Card>
 
-        <Card title="Promotion rules" sub="When a signal auto-advances to the next stage">
-          <div className="col" style={{ gap: 14 }}>
-            {[
-              { from: "Signal → Paper", rule: "confidence ≥ 70% AND source_accuracy_30d ≥ 60%", on: true },
-              { from: "Paper → Live",   rule: "paper_win_rate ≥ 65% after 20 trades AND no open risk breach", on: true },
-              { from: "Live → Profit",  rule: "position closed with realized_pnl > 0", on: true },
-              { from: "Profit → Sweep", rule: "monthly_profit ≥ ₹25,000 → sweep 60% into long-term", on: true },
-              { from: "Manual override", rule: "halt all promotions if daily_loss > ₹15,000", on: false },
-            ].map((r, i) => (
-              <div key={i} style={{ padding: 12, border: "1px solid var(--border)", borderRadius: "var(--r-md)" }}>
-                <div className="between" style={{ marginBottom: 4 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500 }}>{r.from}</div>
-                  <Toggle on={r.on}/>
+        {/* T-429 (audit-2026-05-26 frontend H4): the Toggle on each rule
+            never wired onChange (clicks inert) and the rule strings were
+            invented numbers that didn't correspond to the real promotion
+            engine. Gate to demo; live mode points to the autorun service. */}
+        {(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) ? (
+          <Card title="Promotion rules" sub="When a signal auto-advances to the next stage (demo)">
+            <div className="col" style={{ gap: 14 }}>
+              {[
+                { from: "Signal → Paper", rule: "confidence ≥ 70% AND source_accuracy_30d ≥ 60%", on: true },
+                { from: "Paper → Live",   rule: "paper_win_rate ≥ 65% after 20 trades AND no open risk breach", on: true },
+                { from: "Live → Profit",  rule: "position closed with realized_pnl > 0", on: true },
+                { from: "Profit → Sweep", rule: "monthly_profit ≥ ₹25,000 → sweep 60% into long-term", on: true },
+                { from: "Manual override", rule: "halt all promotions if daily_loss > ₹15,000", on: false },
+              ].map((r, i) => (
+                <div key={i} style={{ padding: 12, border: "1px solid var(--border)", borderRadius: "var(--r-md)" }}>
+                  <div className="between" style={{ marginBottom: 4 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500 }}>{r.from}</div>
+                    <Toggle on={r.on}/>
+                  </div>
+                  <code style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-3)" }}>{r.rule}</code>
                 </div>
-                <code style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-3)" }}>{r.rule}</code>
-              </div>
-            ))}
-          </div>
-        </Card>
+              ))}
+            </div>
+          </Card>
+        ) : (
+          <Card title="Promotion rules" sub="When a signal auto-advances to the next stage">
+            <div style={{ padding: 24, textAlign: "center", color: "var(--text-3)", fontSize: 13 }}>
+              Promotion is governed by the autorun service (Tier 13 paper→live
+              gate). A UI-editable rules panel will ship when /api/me/promotion-rules
+              exposes the live config.
+            </div>
+          </Card>
+        )}
       </div>
 
       <window.AIExplainerModal

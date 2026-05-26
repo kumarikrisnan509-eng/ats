@@ -566,12 +566,20 @@ const PaperScreen = () => {
     })();
     return () => { cancelled = true; };
   }, []);
-  const accounts = [
-    { id: "10L", cap: 1000000, used: 412000, pnl: 18420,   trades: 34,  winR: 62 },
-    { id: "25L", cap: 2500000, used: 1180000, pnl: 52840,  trades: 67,  winR: 66 },
-    { id: "50L", cap: 5000000, used: 2140000, pnl: 148320, trades: 142, winR: 71 },
-  ];
-  const acc = accounts.find(a => a.id === account);
+  // T-429 (audit-2026-05-26 frontend H1): gate the hardcoded virtual-account
+  // KPI fixture behind demo. Live mode renders the same shape but pulls cap
+  // from the account-id label (₹10L / ₹25L / ₹50L) and shows zeros for
+  // P&L/trades/winR until /api/paper data fills in. The Live-paper-account
+  // strip above already shows the real cash/equity/pnl from /api/paper.
+  const __accountSizes = { "10L": 1000000, "25L": 2500000, "50L": 5000000 };
+  const accounts = demo
+    ? [
+        { id: "10L", cap: 1000000, used: 412000,  pnl: 18420,  trades: 34,  winR: 62 },
+        { id: "25L", cap: 2500000, used: 1180000, pnl: 52840,  trades: 67,  winR: 66 },
+        { id: "50L", cap: 5000000, used: 2140000, pnl: 148320, trades: 142, winR: 71 },
+      ]
+    : Object.keys(__accountSizes).map(id => ({ id, cap: __accountSizes[id], used: 0, pnl: 0, trades: 0, winR: 0 }));
+  const acc = accounts.find(a => a.id === account) || accounts[0];
 
   // T-346: gate the 6 hardcoded paper-order fixtures behind demo so live
   // mode shows no fake history. Real fills come from /api/paper/orders
@@ -649,7 +657,11 @@ const PaperScreen = () => {
             <Pill kind="acc" dot>Paper · identical to live layout</Pill>
           </div>
           <div className="row" style={{ gap: 8 }}>
-            <span className="mono" style={{ fontSize: 11, color: "var(--text-3)" }}>Since inception · 48 trading days</span>
+            {/* T-429 (audit-2026-05-26 frontend H1): the "48 trading days"
+                string is hardcoded; only show it in demo. */}
+            {demo && (
+              <span className="mono" style={{ fontSize: 11, color: "var(--text-3)" }}>Since inception · 48 trading days</span>
+            )}
           </div>
         </div>
         <div className="grid grid-4">

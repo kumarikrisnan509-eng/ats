@@ -1151,8 +1151,11 @@ const DashboardScreen = () => {
                 <div className="row"><I.server size={14}/><span style={{ fontSize: 13, fontWeight: 500 }}>Ubuntu Ampere A1.Flex</span></div>
                 <Pill kind="up" dot>running</Pill>
               </div>
+              {/* T-429 (audit-2026-05-26 frontend H6): drop the hardcoded
+                  prod egress IP. The host chips are cosmetic; the IP itself
+                  is info-disclosure surface area we don't need. */}
               <div className="chip-row">
-                <span className="chip">141.148.192.4</span>
+                <span className="chip">OCI Ampere A1.Flex</span>
                 <span className="chip">4 OCPU</span>
                 <span className="chip">24 GB</span>
               </div>
@@ -1203,10 +1206,3 @@ const DashboardScreen = () => {
     </>
   );
 };
-
-// Close-position confirmation — context-aware: shows current MTM and slippage estimate
-const DashboardScreenWithModals = (props) => {
-  return <DashboardScreen {...props}/>;
-};
-
-Object.assign(window, { DashboardScreen });

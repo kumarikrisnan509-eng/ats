@@ -474,15 +474,20 @@ const BrokersScreen = () => {
     { n: "Dhan",            st: "slot", note: "Adapter not implemented",    logoLetter: "D", logoColor: "#0dbf81" },
     { n: "Interactive Brokers", st: "slot", note: "For US equity (future)", logoLetter: "IB", logoColor: "#c8102e" },
   ];
+  // T-429 (audit-2026-05-26 frontend H9): the previous matrix lied — it
+  // claimed placeOrder/modifyOrder/cancelOrder/getPositions worked for ALL
+  // 5 brokers including ICICI/Dhan/IB which are marked "Adapter not
+  // implemented" two lines up. Only Zerodha is actually implemented
+  // server-side; the rest are stubs or absent.
   const adapters = [
-    { m: "placeOrder",        zerodha: true, upstox: true, icici: true, dhan: true, ib: true },
-    { m: "modifyOrder",       zerodha: true, upstox: true, icici: true, dhan: true, ib: true },
-    { m: "cancelOrder",       zerodha: true, upstox: true, icici: true, dhan: true, ib: true },
-    { m: "getPositions",      zerodha: true, upstox: true, icici: true, dhan: true, ib: true },
-    { m: "getHoldings",       zerodha: true, upstox: true, icici: true, dhan: true, ib: false },
-    { m: "subscribeTicks",    zerodha: true, upstox: true, icici: false, dhan: true, ib: true },
-    { m: "historicalCandles", zerodha: true, upstox: true, icici: false, dhan: false, ib: true },
-    { m: "placeSIP",          zerodha: true, upstox: false, icici: true, dhan: false, ib: false },
+    { m: "placeOrder",        zerodha: true, upstox: false, icici: false, dhan: false, ib: false },
+    { m: "modifyOrder",       zerodha: true, upstox: false, icici: false, dhan: false, ib: false },
+    { m: "cancelOrder",       zerodha: true, upstox: false, icici: false, dhan: false, ib: false },
+    { m: "getPositions",      zerodha: true, upstox: false, icici: false, dhan: false, ib: false },
+    { m: "getHoldings",       zerodha: true, upstox: false, icici: false, dhan: false, ib: false },
+    { m: "subscribeTicks",    zerodha: true, upstox: false, icici: false, dhan: false, ib: false },
+    { m: "historicalCandles", zerodha: true, upstox: false, icici: false, dhan: false, ib: false },
+    { m: "placeSIP",          zerodha: false, upstox: false, icici: false, dhan: false, ib: false },
   ];
 
   // Tier 79: derive a single status pill colour + label from token_status + auto_login_capable

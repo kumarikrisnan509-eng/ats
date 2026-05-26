@@ -212,17 +212,26 @@ const ModesScreen = () => {
                   style={{ width: "100%", accentColor: meta.color, opacity: active ? 1 : 0.4 }}/>
               </div>
 
-              {/* utilization bar */}
-              <div>
-                <div className="between" style={{ fontSize: 10, marginBottom: 3 }}>
-                  <span className="muted">Utilized</span>
-                  <span className="mono">{Math.round((rt.utilized / capitalFor(id)) * 100) || 0}%</span>
-                </div>
-                <div className="progress"><div className="progress__fill" style={{
-                  width: Math.min(100, (rt.utilized / capitalFor(id)) * 100) + "%",
-                  background: meta.color,
-                }}/></div>
-              </div>
+              {/* utilization bar — T-429 (audit-2026-05-26 frontend H10):
+                  guard divide-by-zero. capitalFor(id) is 0 when the user has
+                  no broker (HAS_LIVE_CAPITAL=false); old code rendered
+                  "Infinity%" and an invalid CSS width. */}
+              {(() => {
+                const _cap = capitalFor(id);
+                const _pct = _cap > 0 ? (rt.utilized / _cap) * 100 : 0;
+                return (
+                  <div>
+                    <div className="between" style={{ fontSize: 10, marginBottom: 3 }}>
+                      <span className="muted">Utilized</span>
+                      <span className="mono">{Math.round(_pct) || 0}%</span>
+                    </div>
+                    <div className="progress"><div className="progress__fill" style={{
+                      width: Math.min(100, Math.max(0, _pct)) + "%",
+                      background: meta.color,
+                    }}/></div>
+                  </div>
+                );
+              })()}
 
               {/* warnings */}
               {warnings.length > 0 && (
