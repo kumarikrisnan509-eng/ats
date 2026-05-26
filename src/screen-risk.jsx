@@ -128,7 +128,28 @@ const RiskEventsCard = () => {
 };
 
 const RiskScreen = () => {
-  const [kill, setKill] = useState(false);
+  // T-425 (audit-2026-05-26 frontend C2): kill-switch is now READ-ONLY
+  // status from /api/kill-switch (the canonical server-side flag).
+  // Was: useState(false) -- a button that did nothing but flip colour.
+  // Operators clicking thought they killed trading; they hadn't.
+  // No POST endpoint exists; KILL_SWITCH is /etc/ats/backend.env. The
+  // honest display below shows current server state; toggling requires
+  // editing backend.env and restarting the container (operator-only).
+  const [killActive, setKillActive] = React.useState(null); // null = loading
+  React.useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const r = await fetch('/api/kill-switch', { credentials: 'include' });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!cancelled) setKillActive(!!j.killSwitch);
+      } catch (e) { /* network blip, leave previous value */ }
+    };
+    poll();
+    const t = setInterval(poll, 10000); // every 10s
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
 
   return (
     <>
@@ -144,12 +165,9 @@ const RiskScreen = () => {
 
       {window.RiskPredictor && <div style={{ marginBottom: 16 }}><window.RiskPredictor/></div>}
 
-      {/* T99-T91: honest banner — the 'Global limits' progress bars
-          (32% / 42% etc.), 'Per-strategy caps' rows (Momentum AI ₹8L /
-          Mean Reversion ₹6L / Grid Trader ₹4L near-cutoff / etc.), and
-          'Risk events' table (5 fake recent events) are all demo data.
-          The kill switch toggle IS local UI state (no backend yet either).
-          Same disclosure pattern as T-82/T-83/T-85/T-86. */}
+      {/* T99-T91 + T-425: honest banner — the 'Global limits' progress bars,
+          'Per-strategy caps' rows, and 'Risk events' table are all demo data.
+          The kill-switch panel below now reflects REAL server state. */}
       <div role="note" style={{
         padding: '8px 12px', marginBottom: 12, borderRadius: 6,
         border: '1px solid color-mix(in oklab, var(--warn, #d97706) 35%, var(--border))',
@@ -159,26 +177,46 @@ const RiskScreen = () => {
         <strong>Risk dashboard is demo data.</strong>{' '}
         The Global limits, Per-strategy caps, and Risk events tables below are
         hardcoded examples. Per-user risk-limit storage and a per-user event
-        log haven't shipped yet. The kill-switch toggle is local UI only — it
-        does not stop live trading. Don't rely on the limits shown for real
-        risk management.
+        log haven't shipped yet. The kill-switch panel reflects REAL server
+        state. Don't rely on the limits shown for real risk management.
       </div>
 
-      {/* Kill switch */}
-      <Card style={{ marginBottom: 16, background: kill ? "var(--down-soft)" : "var(--surface)", borderColor: kill ? "var(--down)" : "var(--border)" }}>
+      {/* T-425 (audit-2026-05-26 C2): READ-ONLY kill-switch status panel.
+          Polls /api/kill-switch every 10s. To engage/disengage, operator
+          must edit /etc/ats/backend.env (KILL_SWITCH=true|false) and
+          restart the container. No POST endpoint exists yet (deferred
+          to a separate task with 2FA gating). */}
+      <Card style={{ marginBottom: 16,
+        background: killActive ? "var(--down-soft)" : (killActive === false ? "var(--up-soft)" : "var(--surface)"),
+        borderColor: killActive ? "var(--down)" : (killActive === false ? "var(--up)" : "var(--border)") }}>
         <div className="between">
           <div className="row" style={{ gap: 14 }}>
-            <div style={{ width: 48, height: 48, borderRadius: 12, background: kill ? "var(--down)" : "var(--down-soft)", color: kill ? "white" : "var(--down)", display: "grid", placeItems: "center" }}>
+            <div style={{ width: 48, height: 48, borderRadius: 12,
+              background: killActive ? "var(--down)" : (killActive === false ? "var(--up)" : "var(--bg-soft)"),
+              color: killActive ? "white" : (killActive === false ? "white" : "var(--text-3)"),
+              display: "grid", placeItems: "center" }}>
               <I.stop size={22}/>
             </div>
             <div>
-              <div style={{ fontSize: 17, fontWeight: 600 }}>Master kill switch</div>
-              <div className="muted" style={{ fontSize: 13 }}>Halts ALL automated trading, cancels open orders, pauses every strategy. Manual trading remains enabled.</div>
+              <div style={{ fontSize: 17, fontWeight: 600 }}>Master kill switch · server-side</div>
+              <div className="muted" style={{ fontSize: 13 }}>
+                {killActive === true && "ENGAGED. All automated trading halted server-side (KILL_SWITCH=true in backend.env). New orders blocked at the API gate."}
+                {killActive === false && "Disengaged. Automated trading is allowed server-side (KILL_SWITCH=false)."}
+                {killActive === null && "Loading current server state from /api/kill-switch..."}
+              </div>
             </div>
           </div>
-          <button className={"btn " + (kill ? "btn--primary" : "btn--danger")} onClick={() => setKill(!kill)} style={{ padding: "12px 22px" }}>
-            {kill ? <><I.play size={14}/> Re-enable trading</> : <><I.stop size={14}/> Engage kill switch</>}
-          </button>
+          <div style={{
+            padding: "12px 22px", borderRadius: 8,
+            border: "1px solid var(--border)",
+            background: "var(--bg-soft)", fontSize: 12, color: "var(--text-2)", maxWidth: 320, textAlign: "right",
+          }}>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>To toggle (operator only)</div>
+            <div className="mono" style={{ fontSize: 10 }}>
+              ssh root@vm → edit /etc/ats/backend.env<br/>
+              KILL_SWITCH=true|false → restart container
+            </div>
+          </div>
         </div>
       </Card>
 

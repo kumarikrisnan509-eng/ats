@@ -186,21 +186,36 @@ const AIReviewScreen = () => {
       {/* Report header */}
       <Card>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+          {/* T-425 (audit-2026-05-26 frontend C5): header verdict + chip
+              now gated on _isDemo || liveRow. Previously unconditional --
+              the cheerful "A strong month overall..." text rendered even
+              when KPIs below were em-dashes, and the green "Consensus
+              reached" chip suggested AI verdict that didn't exist. */}
           <div>
             <div style={{ fontSize: 11, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>
               Monthly report · {months.find(m => m.v === month)?.label}
             </div>
-            <div style={{ fontSize: 22, fontWeight: 600, marginTop: 6, letterSpacing: -0.3 }}>
-              A strong month overall, with one strategy requiring action.
-            </div>
-            <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 6 }}>
-              Generated Apr 1, 2026 · 03:42 AM IST · 3-AI consensus · PDF ref: AR-202603-7842
-            </div>
+            {(_isDemo || liveRow) ? (
+              <>
+                <div style={{ fontSize: 22, fontWeight: 600, marginTop: 6, letterSpacing: -0.3 }}>
+                  {liveRow && liveRow.narrative_summary ? liveRow.narrative_summary : "A strong month overall, with one strategy requiring action."}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 6 }}>
+                  {liveRow ? (`Generated from /api/ai/monthly-review`) : "Generated Apr 1, 2026 · 03:42 AM IST · 3-AI consensus · PDF ref: AR-202603-7842"}
+                </div>
+              </>
+            ) : (
+              <div style={{ fontSize: 14, color: "var(--text-3)", marginTop: 6, fontStyle: "italic" }}>
+                No report available -- click "Regenerate" below to run an AI review for this month.
+              </div>
+            )}
           </div>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-            <Chip variant="up">✓ Consensus reached</Chip>
-            <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 6 }}>3 of 3 AI agreed</div>
-          </div>
+          {(_isDemo || liveRow) ? (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+              <Chip variant="up">✓ Consensus reached</Chip>
+              <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 6 }}>3 of 3 AI agreed</div>
+            </div>
+          ) : null}
         </div>
 
         {/* KPI band */}
@@ -208,27 +223,27 @@ const AIReviewScreen = () => {
           <div>
             <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Net PnL</div>
             <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: liveRow ? (liveRow.net_pnl >= 0 ? "var(--up)" : "var(--down)") : (_isDemo ? "var(--up)" : "var(--text-3)") }}>{liveRow ? _fmtINR(liveRow.net_pnl) : (_isDemo ? "+₹1,24,800" : __dash)}</div>
-            <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>+11.2% of capital</div>
+            <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>{(_isDemo || liveRow) ? "+11.2% of capital" : " "}</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Trades</div>
             <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: liveRow ? undefined : (_isDemo ? undefined : "var(--text-3)") }}>{liveRow ? String(liveRow.trades) : (_isDemo ? "654" : __dash)}</div>
-            <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>across 6 strategies</div>
+            <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>{(_isDemo || liveRow) ? "across 6 strategies" : " "}</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Win rate</div>
             <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: liveRow ? undefined : (_isDemo ? undefined : "var(--text-3)") }}>{liveRow ? `${(liveRow.win_rate * 100).toFixed(1)}%` : (_isDemo ? "58.4%" : __dash)}</div>
-            <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>vs 3mo avg 56.2%</div>
+            <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>{(_isDemo || liveRow) ? "vs 3mo avg 56.2%" : " "}</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Sharpe</div>
             <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: (liveRisk && Number.isFinite(liveRisk.sharpeRatio)) ? undefined : (_isDemo ? undefined : "var(--text-3)") }}>{(liveRisk && Number.isFinite(liveRisk.sharpeRatio)) ? liveRisk.sharpeRatio.toFixed(2) : (_isDemo ? "1.72" : __dash)}</div>
-            <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>vs 3mo 1.64</div>
+            <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>{(_isDemo || (liveRisk && Number.isFinite(liveRisk.sharpeRatio))) ? "vs 3mo 1.64" : " "}</div>
           </div>
           <div>
             <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Max DD</div>
             <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: liveRow ? "var(--down)" : (_isDemo ? "var(--down)" : "var(--text-3)") }}>{liveRow ? _fmtINR(liveRow.max_drawdown_inr) : (_isDemo ? "-₹18,400" : __dash)}</div>
-            <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>Mar 14, recovered 2d</div>
+            <div style={{ fontSize: 10, color: "var(--text-3)", marginTop: 2 }}>{(_isDemo || liveRow) ? "Mar 14, recovered 2d" : " "}</div>
           </div>
         </div>
       </Card>

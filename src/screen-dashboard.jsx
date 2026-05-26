@@ -392,11 +392,23 @@ const PipelineFlow = () => {
     { from: "live",       to: "sweep",      label: "realized_pnl > 0\ndaily end-of-day" },
   ];
 
-  // Rejection sinks — shown below each gate
-  const rejections = {
+  // T-425 (audit-2026-05-26 frontend C6): rejection sinks gated.
+  // Was: hardcoded { count: 3, 35, 6, 0 } rendered as "↓ 35 rejected by
+  // router" below every gate -- looked like real flow data because the
+  // adjacent stage numbers (active modes, strat count, signals today)
+  // ARE real (from `pipe`). Now: zero in prod (renders {rej && rej.count > 0}
+  // which now short-circuits below); will be wired to /api/audit filtered
+  // by risk.*/order.blocked.* events in a follow-up task.
+  const _pipeIsDemo = !!(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
+  const rejections = _pipeIsDemo ? {
     "strategies→signals": { count: 3, label: "paper-only" },
     "signals→paper":      { count: 35, label: "rejected by router" },
     "paper→live":         { count: 6, label: "gate blocked" },
+    "live→sweep":         { count: 0, label: "loss days · held" },
+  } : {
+    "strategies→signals": { count: 0, label: "paper-only" },
+    "signals→paper":      { count: 0, label: "rejected by router" },
+    "paper→live":         { count: 0, label: "gate blocked" },
     "live→sweep":         { count: 0, label: "loss days · held" },
   };
 
@@ -496,8 +508,8 @@ const PipelineFlow = () => {
                     }}>
                       {gate.label}
                     </div>
-                    {/* Rejection sink */}
-                    {rej && (
+                    {/* Rejection sink. T-425 C6: only render when count > 0 so prod (all zeros) shows no sinks at all. */}
+                    {rej && rej.count > 0 && (
                       <div style={{ marginTop: 10, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
                         <div style={{
                           width: 1, height: 14,
@@ -775,16 +787,25 @@ const DashboardScreen = () => {
   });
   React.useEffect(() => { try { localStorage.setItem("ats.dash.more", showMore ? "1" : "0"); } catch (e) { console.debug('[screen-dashboard] swallowed:', e && e.message); } }, [showMore]);
 
-  // Live activity feed — synthetic events generated on ticks
-  const [activity, setActivity] = useState([
+  // T-425 (audit-2026-05-26 frontend C1): Live activity feed gated.
+  // Was: 6 hardcoded "recent trades" (INFY/NIFTY/TCS/...) + Math.random()
+  // generator firing every ~4s that fabricated plausible-looking buy/sell
+  // events. Operator comparing against their broker terminal would see
+  // invented trades. T-420 cleaned 3 other surfaces but missed this.
+  // Now: empty initial state outside demo; tick generator gated behind
+  // isDemoOn(). In prod, the card shows "no live activity yet" until the
+  // /api/audit feed is wired into it.
+  const _activityIsDemo = !!(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
+  const [activity, setActivity] = useState(_activityIsDemo ? [
     { t: "09:42:11", m: "BUY",  sym: "INFY",      qty: 60,  px: 1843.00, strat: "Momentum AI",     ok: true },
     { t: "10:02:34", m: "AI",   sym: "NIFTY",     qty: null, px: null,   strat: "Signal · breakout 22540", ok: true, tag: "signal" },
     { t: "10:08:02", m: "BUY",  sym: "NIFTY CE",  qty: 150, px: 82.40,  strat: "Momentum AI",     ok: true },
     { t: "11:15:40", m: "SELL", sym: "TITAN",     qty: 30,  px: 3612.00, strat: "Mean Reversion",  ok: true },
     { t: "11:42:08", m: "RISK", sym: "—",         qty: null, px: null,   strat: "Max loss 30% of daily cap used", ok: false, tag: "risk" },
     { t: "12:18:55", m: "BUY",  sym: "RELIANCE",  qty: 40,  px: 2932.10, strat: "Mean Reversion",  ok: true },
-  ]);
+  ] : []);
   React.useEffect(() => {
+    if (!_activityIsDemo) return; // T-425 C1: no random-walk generator outside demo
     const SYMS = ["RELIANCE", "INFY", "TCS", "HDFCBANK", "ICICIBANK", "SBIN", "ITC", "LT", "TITAN", "BAJFINANCE"];
     const STRATS = ["Momentum AI", "Mean Reversion v2", "Trend Follow", "Grid Trader", "Swing Bot"];
     const SIGNALS = ["breakout above VWAP", "RSI oversold bounce", "20-EMA crossover", "volume spike +180%", "support test held"];

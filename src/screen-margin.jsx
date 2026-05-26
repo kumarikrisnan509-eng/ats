@@ -3,12 +3,20 @@
 /* Margin calculator — SPAN + Exposure margin breakdown, aggregated + per-leg */
 
 const MarginScreen = () => {
-  const [legs, setLegs] = React.useState([
+  // T-425 (audit-2026-05-26 frontend C3): seeded legs gated to demo.
+  // Was: 4 hardcoded F&O legs (NIFTY 25APR 24000 CE etc) with made-up
+  // SPAN/exposure percentages, displayed as if real margin requirements
+  // for the operator's account. Header said "Values match Zerodha's
+  // real-time margin API" -- they did not; calc was client-side
+  // notional * hardcoded fraction. Operator first-opening the screen
+  // saw ₹-sized numbers that looked bespoke. Now empty by default.
+  const _marginIsDemo = !!(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
+  const [legs, setLegs] = React.useState(_marginIsDemo ? [
     { id: 1, sym: "NIFTY 25APR 24000 CE", action: "BUY",  qty: 50,  price: 142, spanPct: 0, expPct: 0, fullPremium: true },
     { id: 2, sym: "NIFTY 25APR 24200 CE", action: "SELL", qty: 50,  price: 88,  spanPct: 0.08, expPct: 0.03 },
     { id: 3, sym: "RELIANCE MAY FUT",      action: "BUY",  qty: 250, price: 2843, spanPct: 0.075, expPct: 0.025 },
     { id: 4, sym: "BANKNIFTY 25APR 50000 PE", action: "SELL", qty: 25, price: 320, spanPct: 0.09, expPct: 0.035 },
-  ]);
+  ] : []);
 
   // Real available cash from Kite via /api/margins. Falls back to hardcoded if endpoint fails.
   const [availableCash, setAvailableCash] = React.useState(null);
@@ -58,7 +66,7 @@ const MarginScreen = () => {
           Execute · Margin calculator
         </div>
         <div style={{ fontSize: 13, color: "var(--text-2)", marginTop: 4, maxWidth: 720 }}>
-          SPAN + Exposure breakdown for F&O positions. Margin benefit applied for hedged portfolios (SEBI Peak Margin rules). Values match Zerodha's real-time margin API.
+          SPAN + Exposure breakdown for F&O positions. Margin benefit applied for hedged portfolios (SEBI Peak Margin rules). Estimates only -- final margin is set by Zerodha at order placement. (T-425: previous header claimed values match the Zerodha API; this is not yet wired.)
         </div>
       </div>
 
@@ -145,25 +153,30 @@ const MarginScreen = () => {
         </Card>
       </div>
 
-      <Card title="Daily margin schedule" sub="How your margin requirement changes over the position's life">
-        <div style={{ padding: "8px 0", display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 8 }}>
-          {["Apr 24", "Apr 25", "Apr 26", "Apr 27", "Apr 28", "Apr 29", "Apr 30"].map((d, i) => {
-            const h = 60 - i * 4;
-            return (
-              <div key={i} style={{ padding: 10, background: "var(--bg-soft)", borderRadius: "var(--r-sm)", textAlign: "center" }}>
-                <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600 }}>{d}</div>
-                <div style={{ height: 60, display: "flex", alignItems: "flex-end", justifyContent: "center", marginTop: 8 }}>
-                  <div style={{ width: 32, height: `${h}%`, background: "var(--acc)", borderRadius: 2 }}/>
+      {/* T-425 (audit-2026-05-26 frontend C3): daily margin schedule gated.
+          Was: 7 hardcoded bars (Apr 24 ... Apr 30) with total.net - i*2000
+          decay -- pure visual filler. Hidden in non-demo. */}
+      {_marginIsDemo && (
+        <Card title="Daily margin schedule" sub="How your margin requirement changes over the position's life">
+          <div style={{ padding: "8px 0", display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 8 }}>
+            {["Apr 24", "Apr 25", "Apr 26", "Apr 27", "Apr 28", "Apr 29", "Apr 30"].map((d, i) => {
+              const h = 60 - i * 4;
+              return (
+                <div key={i} style={{ padding: 10, background: "var(--bg-soft)", borderRadius: "var(--r-sm)", textAlign: "center" }}>
+                  <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600 }}>{d}</div>
+                  <div style={{ height: 60, display: "flex", alignItems: "flex-end", justifyContent: "center", marginTop: 8 }}>
+                    <div style={{ width: 32, height: `${h}%`, background: "var(--acc)", borderRadius: 2 }}/>
+                  </div>
+                  <div className="mono" style={{ fontSize: 11, fontWeight: 600, marginTop: 6 }}>₹{Math.round(total.net - i * 2000).toLocaleString("en-IN")}</div>
                 </div>
-                <div className="mono" style={{ fontSize: 11, fontWeight: 600, marginTop: 6 }}>₹{Math.round(total.net - i * 2000).toLocaleString("en-IN")}</div>
-              </div>
-            );
-          })}
-        </div>
-        <div style={{ marginTop: 12, padding: 12, background: "var(--info-soft)", color: "var(--info)", borderRadius: "var(--r-sm)", fontSize: 11, lineHeight: 1.5 }}>
-          <strong>SEBI Peak Margin:</strong> Exchange snaps margin 4 times/day and takes the highest. If your position expands mid-day, additional margin is blocked at the peak.
-        </div>
-      </Card>
+              );
+            })}
+          </div>
+          <div style={{ marginTop: 12, padding: 12, background: "var(--info-soft)", color: "var(--info)", borderRadius: "var(--r-sm)", fontSize: 11, lineHeight: 1.5 }}>
+            <strong>SEBI Peak Margin:</strong> Exchange snaps margin 4 times/day and takes the highest. If your position expands mid-day, additional margin is blocked at the peak.
+          </div>
+        </Card>
+      )}
     </>
   );
 };

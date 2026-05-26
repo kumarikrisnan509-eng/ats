@@ -182,7 +182,10 @@ const AuditScreen = () => {
             product: r.product, mode: r.mode, strategy: r.strategy, status: r.status,
             pnl: r.pnl, fill_time: r.fillTime, broker: r.broker,
           })))}><I.code size={14}/> Export CSV</button>
-          <button className="btn btn--primary"><I.shield size={14}/> Send to SEBI inbox</button>
+          {/* T-425 (audit-2026-05-26 frontend C4): "Send to SEBI inbox" had no
+              onClick -- visually depressed on click but did nothing. SEBI
+              algo-trading filings are PDFs submitted via their portal, not
+              an API. Removed pending a real export route. */}
         </div>
       </div>
 
@@ -357,13 +360,21 @@ const AuditScreen = () => {
                 })}
               </div>
 
+              {/* T-425 (audit-2026-05-26 frontend C4): SHA-256 hash + VERIFIED
+                  pill were hardcoded -- the hex string did not come from any
+                  hashing, and the pill suggested tamper-checked integrity that
+                  did not exist. The /api/audit/verify endpoint exists (used
+                  by the Compliance screen) but was never wired here. For now
+                  show an honest "not wired" placeholder; follow-up task should
+                  fetch the chain hash for this specific order_id. */}
               <div style={{ marginTop: 24, padding: 14, background: "var(--bg-soft)", borderRadius: "var(--r-md)" }}>
                 <div className="between" style={{ marginBottom: 6 }}>
-                  <span style={{ fontSize: 11, color: "var(--text-3)" }}>SHA-256 audit hash</span>
-                  <span className="pill pill--up" style={{ fontSize: 10 }}>VERIFIED</span>
+                  <span style={{ fontSize: 11, color: "var(--text-3)" }}>Per-order audit hash</span>
+                  <span className="pill" style={{ fontSize: 10 }}>NOT WIRED</span>
                 </div>
-                <div className="mono" style={{ fontSize: 10, wordBreak: "break-all", color: "var(--text-2)" }}>
-                  a3f9c2e8d4b71625a8f0e3d9c1b27485e6a9f2c4d1e7b58a3f6c9e2d5b8a14c
+                <div className="mono" style={{ fontSize: 10, color: "var(--text-3)" }}>
+                  Per-order hash not yet exposed. Chain-level integrity is
+                  available at the Compliance screen (/api/audit/verify).
                 </div>
               </div>
             </div>
