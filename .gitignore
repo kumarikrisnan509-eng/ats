@@ -236,3 +236,4 @@ test-e2e/playwright-report/
 
 # Phase E v4: Playwright auth state captured by global-setup.js -- DO NOT COMMIT
 test-e2e/playwright/.auth/
+# T-424b nudge 2026-05-26 -- force workflow trigger
