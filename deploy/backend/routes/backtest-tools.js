@@ -28,6 +28,11 @@ function mountBacktestToolsRoutes(app, deps) {
   if (typeof getPaper     !== 'function') throw new Error('backtest-tools: getPaper required');
   if (typeof getWatchlist !== 'function') throw new Error('backtest-tools: getWatchlist required');
   if (typeof runBacktest  !== 'function') throw new Error('backtest-tools: runBacktest required');
+  // T-428 (audit-2026-05-26 backend H5): added withAuth for backtest routes
+  // that hit broker.getHistorical -- was unauth, any cookie-auth user could
+  // loop them to drain operator's Kite quota.
+  const withAuth = deps.withAuth;
+  if (typeof withAuth !== 'function') throw new Error('backtest-tools: withAuth required');
 
   // ---------- Option chain ----------
   app.get('/api/option-chain', async (req, res) => {
@@ -123,7 +128,7 @@ function mountBacktestToolsRoutes(app, deps) {
   });
 
   // ---------- Backtest (single symbol) ----------
-  app.post('/api/backtest', async (req, res) => {
+  app.post('/api/backtest', withAuth(async (req, res) => {
     try {
       const broker = getBroker();
       const { symbol, strategy, from, to, qty, params, interval } = req.body || {};
@@ -154,10 +159,10 @@ function mountBacktestToolsRoutes(app, deps) {
     } catch (e) {
       res.status(400).json({ ok: false, reason: e.message });
     }
-  });
+  }));
 
   // ---------- Backtest (whole watchlist) ----------
-  app.post('/api/backtest/watchlist', async (req, res) => {
+  app.post('/api/backtest/watchlist', withAuth(async (req, res) => {
     try {
       const broker = getBroker();
       const watchlist = getWatchlist();
@@ -216,7 +221,7 @@ function mountBacktestToolsRoutes(app, deps) {
     } catch (e) {
       res.status(500).json({ ok: false, reason: e.message });
     }
-  });
+  }));
 
   // ---------- Hyperparameter tuner ----------
   app.post('/api/tune', async (req, res) => {

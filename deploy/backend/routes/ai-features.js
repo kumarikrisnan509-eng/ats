@@ -20,12 +20,16 @@
 'use strict';
 
 function mountAiFeatureRoutes(app, deps) {
-  const { getAi, getNews, getPaper } = deps;
+  // T-428 (audit-2026-05-26 backend H2): added withAuth dep.
+  const { getAi, getNews, getPaper, withAuth } = deps;
   if (typeof getAi    !== 'function') throw new Error('ai-features: getAi getter required');
   if (typeof getNews  !== 'function') throw new Error('ai-features: getNews getter required');
   if (typeof getPaper !== 'function') throw new Error('ai-features: getPaper getter required');
+  if (typeof withAuth !== 'function') throw new Error('ai-features: withAuth required');
 
-  app.post('/api/ai/news-sentiment', async (req, res) => {
+  // T-428 (audit-2026-05-26 backend H2): wrapped with withAuth. Was unauth -- any
+  // cookie-auth user could drain shared ANTHROPIC budget in a tight loop.
+  app.post('/api/ai/news-sentiment', withAuth(async (req, res) => {
     const ai = getAi();
     if (!ai || !ai.enabled()) return res.status(503).json({ ok: false, reason: 'ai_disabled', detail: 'set ANTHROPIC_API_KEY env to enable' });
     try {
@@ -34,9 +38,10 @@ function mountAiFeatureRoutes(app, deps) {
       const out = await ai.newsSentiment(items);
       res.json({ ok: true, sentiments: out, stats: ai.stats() });
     } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
-  });
+  }));
 
-  app.post('/api/ai/position-review', async (_req, res) => {
+  // T-428 (audit-2026-05-26 backend H2): wrapped with withAuth.
+  app.post('/api/ai/position-review', withAuth(async (_req, res) => {
     const ai = getAi();
     if (!ai || !ai.enabled()) return res.status(503).json({ ok: false, reason: 'ai_disabled' });
     try {
@@ -45,7 +50,7 @@ function mountAiFeatureRoutes(app, deps) {
       const out = await ai.positionReview(positions);
       res.json({ ok: true, review: out, stats: ai.stats() });
     } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
-  });
+  }));
 
   // @deprecated T-186 (SCREENS-AUDIT F-11): use POST /api/me/ai-workflows/explain
   // instead. The new endpoint is auth-required and BYOK (per-user API key via
@@ -54,14 +59,15 @@ function mountAiFeatureRoutes(app, deps) {
   // strategy_id (must exist in STRATEGIES) and returns a structured shape.
   // This handler stays for back-compat with screen-ai-review.jsx; a future
   // commit will migrate the screen and remove this route. Do not add new callers.
-  app.post('/api/ai/strategy-explain', async (req, res) => {
+  // T-428 (audit-2026-05-26 backend H2): wrapped with withAuth.
+  app.post('/api/ai/strategy-explain', withAuth(async (req, res) => {
     const ai = getAi();
     if (!ai || !ai.enabled()) return res.status(503).json({ ok: false, reason: 'ai_disabled' });
     try {
       const out = await ai.strategyExplain(req.body || {});
       res.json({ ok: true, ...out, stats: ai.stats() });
     } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
-  });
+  }));
 }
 
 module.exports = { mountAiFeatureRoutes };

@@ -15,8 +15,10 @@
 'use strict';
 
 function mountEmailRoutes(app, deps) {
-  const { getEmailAlerts } = deps;
+  // T-428 (audit-2026-05-26 backend H1): added withAuth dep.
+  const { getEmailAlerts, withAuth } = deps;
   if (typeof getEmailAlerts !== 'function') throw new Error('email: getEmailAlerts getter required');
+  if (typeof withAuth !== 'function') throw new Error('email: withAuth required');
 
   app.get('/api/email/status', (_req, res) => {
     const emailAlerts = getEmailAlerts();
@@ -24,13 +26,16 @@ function mountEmailRoutes(app, deps) {
     res.json({ ok: true, ...emailAlerts.status() });
   });
 
-  app.post('/api/email/send', async (req, res) => {
+  // T-428 (audit-2026-05-26 backend H1): wrapped with withAuth. Was unauth --
+  // any cookie-auth user could blast email from platform SMTP creds; reputation
+  // damage + phishing-as-a-service. Now requires session.
+  app.post('/api/email/send', withAuth(async (req, res) => {
     const emailAlerts = getEmailAlerts();
     if (!emailAlerts) return res.status(503).json({ ok: false, reason: 'email_not_initialized' });
     const { to, subject, text } = req.body || {};
     const r = await emailAlerts.send({ to, subject, text });
     res.json(r);
-  });
+  }));
 }
 
 module.exports = { mountEmailRoutes };

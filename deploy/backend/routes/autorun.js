@@ -23,39 +23,43 @@
 'use strict';
 
 function mountAutorunRoutes(app, deps) {
-  const { getAutorun } = deps;
+  // T-428 (audit-2026-05-26 backend H4): added withAuth dep. All 4 routes now
+  // session-gated. Was: any cookie-auth user could DELETE the operator's
+  // autorun config or PUT a malicious strategy + symbol + qty.
+  const { getAutorun, withAuth } = deps;
   if (typeof getAutorun !== 'function') throw new Error('autorun: getAutorun getter required');
+  if (typeof withAuth !== 'function') throw new Error('autorun: withAuth required');
 
-  app.get('/api/autorun', (_req, res) => {
+  app.get('/api/autorun', withAuth((_req, res) => {
     const autorun = getAutorun();
     if (!autorun) return res.status(503).json({ ok: false, reason: 'autorun_not_initialized' });
     res.json({ ok: true, config: autorun.config(), stats: autorun.stats(), history: autorun.history(25) });
-  });
+  }));
 
-  app.put('/api/autorun', (req, res) => {
+  app.put('/api/autorun', withAuth((req, res) => {
     const autorun = getAutorun();
     if (!autorun) return res.status(503).json({ ok: false, reason: 'autorun_not_initialized' });
     try {
       const cfg = autorun.setConfig(req.body || {});
       res.json({ ok: true, config: cfg, stats: autorun.stats() });
     } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
-  });
+  }));
 
-  app.post('/api/autorun/run', async (_req, res) => {
+  app.post('/api/autorun/run', withAuth(async (_req, res) => {
     const autorun = getAutorun();
     if (!autorun) return res.status(503).json({ ok: false, reason: 'autorun_not_initialized' });
     try {
       const run = await autorun.runOnce({ source: 'manual' });
       res.json({ ok: true, run });
     } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
-  });
+  }));
 
-  app.delete('/api/autorun', (_req, res) => {
+  app.delete('/api/autorun', withAuth((_req, res) => {
     const autorun = getAutorun();
     if (!autorun) return res.status(503).json({ ok: false, reason: 'autorun_not_initialized' });
     autorun.clearConfig();
     res.json({ ok: true, stats: autorun.stats() });
-  });
+  }));
 }
 
 module.exports = { mountAutorunRoutes };

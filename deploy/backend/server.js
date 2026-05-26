@@ -1196,7 +1196,16 @@ app.use('/api', (req, res, next) => {
       detail: 'Missing X-CSRF-Token header. Reload the page; the frontend should attach it automatically on every mutating call.',
     });
   }
-  if (got !== expected) {
+  // T-428 (audit-2026-05-26 backend H6): timing-safe compare.
+  // Sibling code at line 778 already uses timingSafeEqual for the session
+  // cookie HMAC; CSRF check forgot.
+  let csrfOk = false;
+  try {
+    const a = Buffer.from(String(got));
+    const b = Buffer.from(String(expected));
+    csrfOk = a.length === b.length && crypto.timingSafeEqual(a, b);
+  } catch (_) { csrfOk = false; }
+  if (!csrfOk) {
     audit('csrf.token.mismatch', { path: req.path, method: m, ip: req.ip });
     return res.status(403).json({
       ok: false,
@@ -1411,6 +1420,7 @@ mountBacktestToolsRoutes(app, {
   getPaper:     () => paper,
   getWatchlist: () => watchlist,
   runBacktest,
+  withAuth, // T-428 H5
 });
 
 // ---------- Paper trading (legacy + stats) ----------
@@ -1445,7 +1455,7 @@ mountPnlRoutes(app, { getPnl: () => pnl });
 // ---------- Strategy auto-runner ----------
 // T-393 (god-object split #10): 4 autorun routes extracted to routes/autorun.js.
 const { mountAutorunRoutes } = require('./routes/autorun');
-mountAutorunRoutes(app, { getAutorun: () => autorun });
+mountAutorunRoutes(app, { getAutorun: () => autorun, withAuth });
 
 // ---------- News feed ----------
 // T-392 (god-object split #9): 3 news routes extracted to routes/news.js.
@@ -1462,7 +1472,7 @@ mountTaxSweepRoutes(app, { getTax: () => tax, getSweep: () => sweep });
 // routes/ai-features.js. /api/me/ai-workflows/* (BYOK, per-user) lives
 // separately in ai-workflows-routes.js.
 const { mountAiFeatureRoutes } = require('./routes/ai-features');
-mountAiFeatureRoutes(app, { getAi: () => ai, getNews: () => news, getPaper: () => paper });
+mountAiFeatureRoutes(app, { getAi: () => ai, getNews: () => news, getPaper: () => paper, withAuth });
 
 // T-410: /api/reconcile/import-csv moved to routes/backtest-tools.js.
 
@@ -2014,7 +2024,7 @@ mountMiscTradingRoutes(app, {
 // ---------- Tier 27: Email alerts ----------
 // T-401 (god-object split #20): 2 email routes extracted to routes/email.js.
 const { mountEmailRoutes } = require('./routes/email');
-mountEmailRoutes(app, { getEmailAlerts: () => emailAlerts });
+mountEmailRoutes(app, { getEmailAlerts: () => emailAlerts, withAuth });
 
 // T-166: admin-gated email status + test. Mirrors /api/email/* but locked
 // behind requireInternal() (loopback IP + X-ATS-Internal header) so it can
