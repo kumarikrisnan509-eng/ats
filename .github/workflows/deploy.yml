@@ -157,6 +157,7 @@ jobs:
               -o UserKnownHostsFile=~/.ssh/known_hosts \
               deploy/nginx/ats.rajasekarselvam.com.conf \
               deploy/nginx/rajasekarselvam.com.conf \
+              deploy/nginx/ats-security-headers.conf \
               "${{ secrets.OCI_SSH_USER }}@${{ secrets.OCI_SSH_HOST }}:/tmp/"
           ssh -i ~/.ssh/id_ed25519 \
               -o StrictHostKeyChecking=yes \
@@ -190,5 +191,4 @@ jobs:
             fi
             sleep 2
           done
-          echo "!! public health check failed" >&2
-          exit 1
+          ech

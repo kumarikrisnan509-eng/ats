@@ -23,6 +23,7 @@ fi
 STAGED_DIR="/opt/ats/scripts/nginx-staged"
 SITES_AVAILABLE="/etc/nginx/sites-available"
 SITES_ENABLED="/etc/nginx/sites-enabled"
+SNIPPETS_DIR="/etc/nginx/snippets"
 
 if [[ ! -d "$STAGED_DIR" ]]; then
   echo "ERROR: $STAGED_DIR not found. Has the latest deploy landed?" >&2
@@ -30,10 +31,33 @@ if [[ ! -d "$STAGED_DIR" ]]; then
   exit 2
 fi
 
-echo "==> [1/3] copy staged configs -> $SITES_AVAILABLE"
+# T-423b: known snippet filenames (everything else is treated as a site config
+# and copied to sites-available). Keep this list small + explicit so a stray
+# .conf file in the staged dir doesn't accidentally land in /etc/nginx/snippets/.
+declare -A IS_SNIPPET=(
+  [ats-security-headers.conf]=1
+)
+
+echo "==> [1/3] copy staged configs -> $SITES_AVAILABLE (or $SNIPPETS_DIR)"
+mkdir -p "$SNIPPETS_DIR"
 for src in "$STAGED_DIR"/*.conf; do
   [[ -f "$src" ]] || continue
   base=$(basename "$src")
+
+  # T-423b: route the security-headers snippet (and any future snippet) to
+  # /etc/nginx/snippets/ instead of sites-available. nginx site configs
+  # `include` from there.
+  if [[ -n "${IS_SNIPPET[$base]:-}" ]]; then
+    dst="$SNIPPETS_DIR/$base"
+    if [[ -f "$dst" ]] && ! cmp -s "$src" "$dst"; then
+      cp -a "$dst" "$dst.bak-$(date +%s)"
+      echo "    backed up snippet: $base"
+    fi
+    install -m 0644 -o root -g root "$src" "$dst"
+    echo "    installed snippet: $base"
+    continue
+  fi
+
   dst="$SITES_AVAILABLE/$base"
   # Backup existing on first divergence so a manual rollback is trivial.
   if [[ -f "$dst" ]] && ! cmp -s "$src" "$dst"; then
