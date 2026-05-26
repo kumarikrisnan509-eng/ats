@@ -144,9 +144,23 @@ const TOKENS_DIR      = process.env.TOKENS_DIR || path.join(__dirname, 'tokens')
 const SESSION_SECRET  = process.env.SESSION_SECRET || 'dev-only-change-me';
 // T-195 (CODE-AUDIT C.10 #5): refuse to boot in prod with the default secret.
 // In dev/test we tolerate it so contributors can run the suite without env wiring.
-if (SESSION_SECRET === 'dev-only-change-me' && (process.env.ENV_NAME === 'prod' || process.env.NODE_ENV === 'production')) {
-  console.error('FATAL: SESSION_SECRET is still the default value in a prod-flagged environment.');
-  console.error('       Set SESSION_SECRET=<32+ random bytes> in /etc/ats/backend.env and re-deploy.');
+// T-443 (audit-2026-05-26 vm-scripts M2): also reject the
+// setup-oracle-linux-docker.sh placeholder CHANGE-ME-BASE64 in case an
+// operator runs an older copy of that script that didn't auto-generate.
+const _BAD_SESSION_SECRETS = new Set([
+  'dev-only-change-me',
+  'CHANGE-ME-BASE64',
+  '__SESSION_SECRET_GENERATED__',
+  '',
+]);
+if (_BAD_SESSION_SECRETS.has(SESSION_SECRET) && (process.env.ENV_NAME === 'prod' || process.env.NODE_ENV === 'production')) {
+  console.error('FATAL: SESSION_SECRET is still a placeholder value in a prod-flagged environment.');
+  console.error('       Set SESSION_SECRET=$(openssl rand -base64 48) in /etc/ats/backend.env and re-deploy.');
+  process.exit(1);
+}
+// Also enforce a minimum length so a too-short manual value doesn't slip through.
+if (SESSION_SECRET.length < 32 && (process.env.ENV_NAME === 'prod' || process.env.NODE_ENV === 'production')) {
+  console.error('FATAL: SESSION_SECRET is shorter than 32 chars in a prod-flagged environment.');
   process.exit(1);
 }
 const DEFAULT_SYMBOLS = (process.env.DEFAULT_SYMBOLS || 'NIFTY 50,BANKNIFTY,RELIANCE,HDFCBANK,TCS,INFY')

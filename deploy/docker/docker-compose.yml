@@ -29,11 +29,11 @@ services:
       # Tier 79: socket path for the host auto-login daemon (token comes from env_file)
       AUTO_LOGIN_SOCKET: /var/run/ats/auto-login.sock
     volumes:
-      # Append-only audit log — host owns the directory; container appends.
+      # Append-only audit log -- host owns the directory; container appends.
       - type: bind
         source: /var/log/ats
         target: /var/log/ats
-      # Sealed per-user Zerodha access tokens.
+      # Sealed per-user Zerodha access tokens + SQLite DB.
       - type: bind
         source: /var/lib/ats/tokens
         target: /var/lib/ats/tokens
@@ -42,15 +42,27 @@ services:
         source: /etc/ats/master.key
         target: /run/secrets/master.key
         read_only: true
-      # T99-T36: read the full /etc/ats dir so the backend can verify the DR
-      # auth token (/etc/ats/.dr-token) for POST /api/admin/dr-status. The token
-      # is written by setup-dr-cron.sh on the host; we read-only here.
+      # T-443 (audit-2026-05-26 infra M7): narrowed from full /etc/ats bind
+      # to ONLY the dr-token file. master.key is still mounted at
+      # /run/secrets/ via the separate bind above; backend.env is loaded via
+      # env_file at compose level. A path-traversal bug in the backend would
+      # previously have leaked every secret in /etc/ats/; now it can only
+      # see the one file it actually needs to authenticate the DR cron POST.
       - type: bind
-        source: /etc/ats
-        target: /etc/ats
+        source: /etc/ats/.dr-token
+        target: /etc/ats/.dr-token
         read_only: true
       # Tier 79: bind-mount the host auto-login daemon socket directory.
       - type: bind
         source: /var/run/ats
         target: /var/run/ats
-    # Tighten kernel-level per
+
+    # T-443 (audit-2026-05-26 infra M9): resource caps. Before this the
+    # container was uncapped -- a runaway loop in the backend could starve
+    # host nginx of CPU/RAM during market hours. mem_limit is the hard
+    # OOM cap; mem_reservation is the soft hint; cpus caps total vCPU
+    # share (host has 4 OCPU on Ampere A1.Flex, so 1.5 leaves 2.5 for
+    # nginx + cron + host).
+    mem_limit: 512m
+    mem_reservation: 256m
+    cpus: 1.5

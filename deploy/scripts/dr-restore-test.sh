@@ -42,23 +42,31 @@ fail() { R[ok]=false; R[error]="$1"; emit; exit "${2:-1}"; }
 
 emit() {
   R[ended_at]="$(date -u +%FT%TZ)"
-  # Convert assoc array to JSON
-  local out="{"
-  local first=1
-  for k in "${!R[@]}"; do
-    [[ $first -eq 0 ]] && out+=", "; first=0
-    local v="${R[$k]}"
-    # crude JSON escaping
-    v="${v//\\/\\\\}"; v="${v//\"/\\\"}"
-    # Booleans + numbers stay unquoted
-    if [[ "$v" == "true" || "$v" == "false" || "$v" =~ ^[0-9]+$ ]]; then
-      out+="\"$k\":$v"
-    else
-      out+="\"$k\":\"$v\""
-    fi
-  done
-  out+="}"
-  echo "$out"
+  # T-443 (audit-2026-05-26 vm-scripts M3): hand-rolled JSON escaping
+  # missed control chars, unicode escapes, and forward slashes. Switched
+  # to python3 json.dumps via a key=value heredoc — handles every edge
+  # case correctly and the script already requires python3 elsewhere.
+  # Booleans + numbers are still coerced to native JSON types via the
+  # one-shot type sniff in the python.
+  python3 -c '
+import sys, json
+out = {}
+for line in sys.stdin:
+    line = line.rstrip("\n")
+    if not line or "=" not in line:
+        continue
+    k, v = line.split("=", 1)
+    if v == "true":  out[k] = True
+    elif v == "false": out[k] = False
+    elif v.lstrip("-").isdigit(): out[k] = int(v)
+    else:
+        # Try float for hash_count etc; fallback to string.
+        try: out[k] = float(v) if "." in v else v
+        except ValueError: out[k] = v
+print(json.dumps(out))
+' <<EOF
+$(for k in "${!R[@]}"; do printf "%s=%s\n" "$k" "${R[$k]}"; done)
+EOF
 }
 
 mkdir -p "$(dirname "$DR_LOG")"

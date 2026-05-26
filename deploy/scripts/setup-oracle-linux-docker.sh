@@ -124,8 +124,18 @@ ZERODHA_API_SECRET=
 ZERODHA_REDIRECT_URL=https://rajasekarselvam.com/api/brokers/zerodha/callback
 MASTER_KEY_PATH=/run/secrets/master.key
 TOKENS_DIR=/var/lib/ats/tokens
-SESSION_SECRET=CHANGE-ME-BASE64
+# T-443 (audit-2026-05-26 vm-scripts M2): real random secret per install.
+# Previously this was the literal "CHANGE-ME-BASE64" which the operator was
+# expected to edit manually before first boot; if they forgot, the backend
+# booted with an attacker-known SESSION_SECRET and session-cookie forgery
+# was trivial. Now we generate it at script-run time so a clean install
+# is safe-by-default.
+SESSION_SECRET=__SESSION_SECRET_GENERATED__
 EOF
+    # Replace the placeholder line with a freshly-rolled 48-byte base64
+    # secret. Done AFTER the heredoc to keep the heredoc readable.
+    GEN_SECRET=$(openssl rand -base64 48 | tr -d '\n')
+    sed -i "s|SESSION_SECRET=__SESSION_SECRET_GENERATED__|SESSION_SECRET=${GEN_SECRET}|" "${ETC_DIR}/backend.env"
     chown root:"${SERVICE_USER}" "${ETC_DIR}/backend.env"
     chmod 640 "${ETC_DIR}/backend.env"
     echo "    seeded ${ETC_DIR}/backend.env — edit to add ZERODHA keys later"

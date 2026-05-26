@@ -98,10 +98,34 @@ if [ -f "$SQLITE_SRC" ] && command -v sqlite3 >/dev/null 2>&1; then
         REMOTE_PATH="$REMOTE/ai-calls/$MONTH/$(basename "$AI_STAGE").gz"
         if /usr/bin/rclone copyto "$AI_STAGE.gz" "$REMOTE_PATH" --log-file "$RCLONE_LOG" --log-level INFO; then
           log "  uploaded $REMOTE_PATH"
-          # Only DELETE locally if upload succeeded
-          sqlite3 "$SQLITE_SRC" "DELETE FROM ai_calls WHERE ts < '$CUTOFF_DATE';" 2>>"$RCLONE_LOG"
-          DEL_COUNT=$(sqlite3 "$SQLITE_SRC" "SELECT changes();" 2>/dev/null || echo 0)
-          log "  deleted $DEL_COUNT local rows"
+          # T-443 (audit-2026-05-26 vm-scripts M1): verify the remote file is
+          # actually intact before DELETE. rclone exit code 0 is necessary but
+          # not sufficient; silent-corruption / zero-byte placeholders have
+          # been observed historically. Compare md5 sums; only DELETE if
+          # they match. If hashsum can't compute (older rclone, remote that
+          # doesn't expose hashes), fall back to size compare.
+          LOCAL_MD5=$(md5sum "$AI_STAGE.gz" 2>/dev/null | awk '{print $1}')
+          REMOTE_MD5=$(/usr/bin/rclone hashsum md5 "$REMOTE_PATH" --quiet 2>/dev/null | awk '{print $1}' || echo "")
+          if [ -n "$LOCAL_MD5" ] && [ -n "$REMOTE_MD5" ] && [ "$LOCAL_MD5" = "$REMOTE_MD5" ]; then
+            log "  md5 verify OK ($LOCAL_MD5)"
+            VERIFY_OK=1
+          else
+            # Fallback: size compare (works on any backend)
+            LOCAL_SZ=$(stat -c%s "$AI_STAGE.gz" 2>/dev/null || echo 0)
+            REMOTE_SZ=$(/usr/bin/rclone size "$REMOTE_PATH" --json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('bytes',0))" 2>/dev/null || echo 0)
+            if [ "$LOCAL_SZ" = "$REMOTE_SZ" ] && [ "$LOCAL_SZ" -gt 0 ]; then
+              log "  size verify OK ($LOCAL_SZ bytes; md5 unavailable)"
+              VERIFY_OK=1
+            else
+              log "WARN: remote verify FAILED (local md5=$LOCAL_MD5 size=$LOCAL_SZ; remote md5=$REMOTE_MD5 size=$REMOTE_SZ) — keeping local rows"
+              VERIFY_OK=0
+            fi
+          fi
+          if [ "$VERIFY_OK" = "1" ]; then
+            sqlite3 "$SQLITE_SRC" "DELETE FROM ai_calls WHERE ts < '$CUTOFF_DATE';" 2>>"$RCLONE_LOG"
+            DEL_COUNT=$(sqlite3 "$SQLITE_SRC" "SELECT changes();" 2>/dev/null || echo 0)
+            log "  deleted $DEL_COUNT local rows"
+          fi
         else
           log "WARN: rclone copyto failed for ai-calls archive — keeping local rows for next run"
         fi

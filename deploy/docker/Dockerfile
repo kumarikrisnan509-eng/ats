@@ -39,8 +39,10 @@ RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit
 # ---------- 2) runtime stage ----------
 FROM node:20-alpine AS runtime
 
-# tini = PID 1 that forwards signals correctly. wget = healthcheck. dumb-init alternative.
-RUN apk add --no-cache tini wget \
+# T-443 (audit-2026-05-26 infra M5): drop wget (~400KB + CVE surface).
+# tini = PID 1 that forwards signals correctly. Healthcheck below uses
+# node's built-in http module so no external binary needed.
+RUN apk add --no-cache tini \
  && addgroup -S ats \
  && adduser  -S -G ats ats
 
@@ -73,8 +75,10 @@ ENV PORT=8080
 EXPOSE 8080
 
 # Healthcheck — surfaces in `docker ps` and `docker compose ps`.
+# T-443 (audit-2026-05-26 infra M5): node-native healthcheck. No wget
+# binary needed; uses the runtime's existing node interpreter.
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:8080/api/health >/dev/null || exit 1
+  CMD node -e "require('http').get('http://127.0.0.1:8080/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
 
 ENTRYPOINT ["/sbin/tini","--"]
 CMD ["node","server.js"]
