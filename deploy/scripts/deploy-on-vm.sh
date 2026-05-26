@@ -18,6 +18,18 @@ set -euo pipefail
 NEW_TAG="${1:?missing image tag}"
 OWNER="${2:?missing repo owner}"
 
+# T-432 (audit-2026-05-26 vm-scripts H2): validate ATS_GHCR_TOKEN is set
+# BEFORE shelling it through `echo | docker login`. Without this, a missing
+# env var produces "Error: Cannot perform an interactive login..." with the
+# OWNER printed but the real cause masked. We also redact the token from
+# any "set -x" trace by never assigning it to a non-readonly variable.
+if [[ -z "${ATS_GHCR_TOKEN:-}" ]]; then
+  echo "FATAL: ATS_GHCR_TOKEN env var is empty. The deploy workflow must" >&2
+  echo "       pass it via 'ATS_GHCR_TOKEN=\${GHCR_PULL_TOKEN} bash ...'." >&2
+  echo "       Check GitHub Secret 'GHCR_PULL_TOKEN' on the repo settings." >&2
+  exit 3
+fi
+
 COMPOSE_DIR="/opt/ats/compose"
 STATIC_DIR="/var/www/ats.rajasekarselvam.com"
 IMAGE="ghcr.io/${OWNER}/ats-backend"

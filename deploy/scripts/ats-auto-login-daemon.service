@@ -1,19 +1,74 @@
 [Unit]
-Description=ATS host-side Kite headless auto-login daemon
-After=network.target
+Description=ATS — host-side auto-login daemon (Tier 79 — Playwright Kite login worker)
+Documentation=https://github.com/kumarikrisnan509-eng/ats/blob/main/deploy/AUTO-LOGIN-SETUP.md
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
+
+# T-432 (audit-2026-05-26 vm-scripts H1): one canonical hardened unit file.
+# Previously the repo carried two materially-different copies — a 20-line
+# stub at deploy/scripts/ (the one the workflow + setup-auto-login-daemon.sh
+# actually install) and a 67-line hardened version at deploy/scripts/systemd/
+# (orphaned, never referenced). This file is the merged result: hardening
+# from the systemd/ version, with PLAYWRIGHT_BROWSERS_PATH preserved at
+# /opt/ats-auto-login/browsers to match what's already deployed on the VM
+# (no runtime contract change, just added resource caps + sandbox).
+#
+# Behaviour:
+# - Listens on /var/run/ats/auto-login.sock (bind-mounted into the backend
+#   container).
+# - POSTs from the container drive a headless Chromium login to kite.zerodha
+#   and return a request_token. Auth is the shared bearer in env
+#   AUTO_LOGIN_TOKEN sourced from EnvironmentFile.
+
 User=ats
 Group=docker
 WorkingDirectory=/opt/ats-auto-login
+
+# Shared bearer + base URL come from a 0640 root:docker file. Operator seeds
+# it via setup-auto-login-daemon.sh. Don't commit this file's contents.
 EnvironmentFile=/etc/ats/auto-login.env
+
+# Playwright resolves Chromium from /opt/ats-auto-login/browsers (installed
+# via setup-auto-login-daemon.sh). DO NOT change this without re-running the
+# setup script — the daemon will fail to find Chromium at startup otherwise.
 Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/ats-auto-login/browsers
-ExecStart=/usr/bin/node /opt/ats-auto-login/auto-login-daemon.js
-Restart=on-failure
-RestartSec=5
+
+# Cap blast radius if headless Chromium leaks. Daily reauth completes in
+# ~15-30s typically; 512M is comfortably above measured RSS.
+MemoryMax=512M
+CPUQuota=60%
+TasksMax=200
+
+# Socket directory + log file are pre-created in setup-auto-login-daemon.sh
+# (chowned ats:docker, mode 0775). The daemon binds the socket at startup
+# and writes to /var/log/ats/auto-login-daemon.log.
+ExecStart=/usr/bin/env node /opt/ats-auto-login/auto-login-daemon.js
+
 StandardOutput=append:/var/log/ats/auto-login-daemon.log
 StandardError=append:/var/log/ats/auto-login-daemon.log
+
+# Restart on crash but back off so a misconfigured Chromium binary doesn't
+# burn CPU. Max 5 restarts in 60s.
+Restart=on-failure
+RestartSec=10s
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+
+# Hardening: deny most kernel facilities the daemon doesn't need.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/run/ats /var/log/ats /opt/ats-auto-login/browsers /tmp
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
 
 [Install]
 WantedBy=multi-user.target

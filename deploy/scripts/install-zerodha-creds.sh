@@ -47,8 +47,14 @@ sudo mkdir -p "$(dirname "$ENC_OUT")"
 # If the container isn't running, fall back to host node.
 if sudo docker ps --filter name=ats-backend --filter status=running --format '{{.Names}}' | grep -q '^ats-backend$'; then
     echo "  (using ats-backend container)"
+    # T-432 (audit-2026-05-26 vm-scripts H6): tmp-creds contains plaintext
+    # Zerodha api_key+api_secret for a few seconds while the container
+    # re-encrypts them into the libsodium vault. 0644 leaked it to every
+    # non-root user on the VM during that window. 0600 root-only is enough:
+    # the container reads as root via `docker exec` below, which bypasses
+    # filesystem permissions on the host bind-mount.
     sudo cp "$INPUT" /var/lib/ats/secrets/.tmp-creds.json
-    sudo chmod 0644 /var/lib/ats/secrets/.tmp-creds.json
+    sudo chmod 0600 /var/lib/ats/secrets/.tmp-creds.json
     sudo docker exec ats-backend node -e "
         (async () => {
           const fs = require('fs');
