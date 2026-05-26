@@ -17,6 +17,16 @@ function mountAuditLogRoutes(app, deps) {
       const sinceQ = req.query.since ? new Date(String(req.query.since)).getTime() : 0;
       const eventQ = typeof req.query.event === 'string' ? String(req.query.event) : null;
 
+      // T-424 (audit-2026-05-26 backend C5): per-user filter. Old code
+      // returned ALL audit lines (every user's order placements, OAuth
+      // callbacks, 2FA tokens, etc.) to any logged-in user. Now: a
+      // session-authenticated request only sees lines whose data.userId
+      // matches the requester's id. The ops-bearer caller (server.js
+      // authMiddleware) sees everything -- that path is for CLI/CI use.
+      const sessionUserId = (req.user && req.user.id != null) ? String(req.user.id) : null;
+      const isAdmin = !!(req.user && req.user.is_admin);
+      const filterByUser = sessionUserId && !isAdmin;
+
       const raw = fs.readFileSync(AUDIT_LOG, 'utf8');
       const lines = raw.split('\n').filter(Boolean);
       const rows = [];
@@ -26,6 +36,11 @@ function mountAuditLogRoutes(app, deps) {
         if (!obj || !obj.ts) continue;
         if (sinceQ && new Date(obj.ts).getTime() < sinceQ) break;
         if (eventQ && obj.event !== eventQ) continue;
+        // T-424 (C5): drop lines that do not belong to this user.
+        if (filterByUser) {
+          const lineUserId = obj.data && (obj.data.userId != null ? String(obj.data.userId) : null);
+          if (lineUserId !== sessionUserId) continue;
+        }
         rows.push(obj);
       }
       res.json({ ok: true, count: rows.length, rows });

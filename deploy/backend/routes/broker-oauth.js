@@ -79,13 +79,41 @@ function mountBrokerOAuthRoutes(app, deps) {
       audit('postback.invalid', { reason: 'missing_required_fields', body });
       return res.status(400).json({ ok: false, reason: 'missing required fields' });
     }
+    // T-424 (audit-2026-05-26 backend C2): timing-safe HMAC compare +
+    // 60-s replay dedup. Old code used `!==` (timing leak) and had no
+    // replay protection -- a captured postback could be re-sent
+    // indefinitely, re-firing /ws fan-out + Telegram alerts.
     const expected = crypto
       .createHash('sha256')
       .update(String(body.order_id) + String(body.status) + (process.env.ZERODHA_API_SECRET || process.env.KITE_API_SECRET || ''))
       .digest('hex');
-    if (expected !== String(body.checksum).toLowerCase()) {
+    const supplied = String(body.checksum || '').toLowerCase();
+    let checksumOk = false;
+    try {
+      const expBuf = Buffer.from(expected, 'hex');
+      const supBuf = Buffer.from(supplied, 'hex');
+      checksumOk = expBuf.length === supBuf.length && crypto.timingSafeEqual(expBuf, supBuf);
+    } catch (_) { checksumOk = false; }
+    if (!checksumOk) {
       audit('postback.invalid', { reason: 'checksum_mismatch', orderId: body.order_id, status: body.status });
       return res.status(401).json({ ok: false, reason: 'checksum mismatch' });
+    }
+    // T-424 (C2): 60-s replay dedup keyed on order_id+status. Same status
+    // for the same order arriving twice within 60s = replay attempt.
+    const dedupKey = String(body.order_id) + '|' + String(body.status);
+    const nowMs = Date.now();
+    if (!global._atsPostbackSeen) global._atsPostbackSeen = new Map();
+    const seenAt = global._atsPostbackSeen.get(dedupKey);
+    if (seenAt && (nowMs - seenAt) < 60000) {
+      audit('postback.replay', { reason: 'duplicate_within_60s', orderId: body.order_id, status: body.status, ageMs: nowMs - seenAt });
+      return res.status(409).json({ ok: false, reason: 'replay' });
+    }
+    global._atsPostbackSeen.set(dedupKey, nowMs);
+    // GC old entries when map grows.
+    if (global._atsPostbackSeen.size > 1000) {
+      for (const [k, t] of global._atsPostbackSeen) {
+        if ((nowMs - t) > 300000) global._atsPostbackSeen.delete(k);
+      }
     }
     audit('postback.received', {
       orderId: body.order_id, status: body.status, symbol: body.tradingsymbol,
@@ -226,8 +254,19 @@ function mountBrokerOAuthRoutes(app, deps) {
     }
 
     // Per-user path
-    const userId = verifyState(state);
-    if (!userId) return res.status(400).send('Invalid or expired state token. Please retry from the Brokers screen.');
+    // T-424 (audit-2026-05-26 backend C1): bind state to req.user.id.
+    // verifyState() now accepts an expectedUserId param; if it doesn't
+    // match the state's embedded userId, return null. This prevents a
+    // stolen state token from being replayed in another user's session.
+    if (!req.user || !req.user.id) {
+      audit('zerodha.callback.no-session', { hasState: !!state });
+      return res.status(401).send('Login required to complete OAuth. Please sign in and retry from the Brokers screen.');
+    }
+    const userId = verifyState(state, req.user.id);
+    if (!userId) {
+      audit('zerodha.callback.state-mismatch', { sessionUserId: req.user.id });
+      return res.status(400).send('Invalid, expired, or session-mismatched state token. Please retry from the Brokers screen.');
+    }
     try {
       const row = db.brokers.getByBroker(userId, 'zerodha');
       if (!row) return res.status(404).send('No Zerodha credentials on file for this user.');
@@ -288,8 +327,16 @@ function mountBrokerOAuthRoutes(app, deps) {
 
     // Per-user path (state present)
     if (state && typeof state === 'string' && state.split('.').length === 3) {
-      const userId = verifyState(state);
-      if (!userId) return res.status(400).send('Invalid or expired state token. Please retry from the Brokers screen.');
+      // T-424 (audit-2026-05-26 backend C1): bind state to req.user.id.
+      if (!req.user || !req.user.id) {
+        audit('zerodha.callback.no-session', { hasState: true });
+        return res.status(401).send('Login required to complete OAuth. Please sign in and retry from the Brokers screen.');
+      }
+      const userId = verifyState(state, req.user.id);
+      if (!userId) {
+        audit('zerodha.callback.state-mismatch', { sessionUserId: req.user.id });
+        return res.status(400).send('Invalid, expired, or session-mismatched state token. Please retry from the Brokers screen.');
+      }
       try {
         const row = db.brokers.getByBroker(userId, 'zerodha');
         if (!row) return res.status(404).send('No Zerodha credentials on file for this user.');

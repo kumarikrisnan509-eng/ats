@@ -138,6 +138,16 @@ class TwoFactor {
     };
   }
 
+  /** Peek at a pending token without consuming it. Used by routes/orders.js
+   *  cancel-2fa handler (T-424) to session-check before reject(). Returns
+   *  {ok, payload, userId, exp} or {ok:false, reason}. */
+  peek(token) {
+    const e = this._pending.get(token);
+    if (!e) return { ok: false, reason: 'unknown_or_used' };
+    if (Date.now() > e.exp) return { ok: false, reason: 'expired' };
+    return { ok: true, payload: e.payload, userId: e.userId, exp: e.exp };
+  }
+
   /** Reject a pending token (the order is discarded). */
   reject(token) {
     const e = this._pending.get(token);

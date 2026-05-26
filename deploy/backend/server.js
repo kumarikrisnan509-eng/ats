@@ -1230,7 +1230,16 @@ function authMiddleware(req, res, next) {
     return res.status(401).json({ ok: false, reason: 'missing_bearer' });
   }
   const token = h.slice(7).trim();
-  if (token !== ATS_OPS_KEY) {
+  // T-424 (audit-2026-05-26 backend C6): timing-safe compare. Old `!==`
+  // leaked digest prefixes one char at a time. Equal-length buffers only;
+  // unequal length is an immediate reject.
+  let ok = false;
+  try {
+    const a = Buffer.from(token);
+    const b = Buffer.from(ATS_OPS_KEY);
+    ok = a.length === b.length && crypto.timingSafeEqual(a, b);
+  } catch (_) { ok = false; }
+  if (!ok) {
     audit('api.auth.fail', { ip: ra, path: req.path });
     return res.status(403).json({ ok: false, reason: 'invalid_token' });
   }

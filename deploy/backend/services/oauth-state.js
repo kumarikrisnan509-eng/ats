@@ -42,7 +42,14 @@ function signState(userId) {
   return `${idB64}.${nonceB64}.${sig}`;
 }
 
-function verifyState(state) {
+function verifyState(state, expectedUserId) {
+  // T-424 (audit-2026-05-26 backend C1): added timing-safe sig compare and
+  // an OPTIONAL expectedUserId binding. If expectedUserId is provided (e.g.
+  // req.user.id from session), the state's embedded userId must match it
+  // exactly -- otherwise this is a STOLEN state token being replayed from
+  // another user's session. Callers MUST pass expectedUserId in OAuth
+  // callback handlers (broker-oauth.js); legacy callers without a session
+  // (auto-login daemon) can omit it.
   if (!state || typeof state !== 'string') return null;
   try {
     const [idB64, nonceB64, sig] = state.split('.');
@@ -50,10 +57,22 @@ function verifyState(state) {
     const userId = Buffer.from(idB64, 'base64').toString();
     const nonce = Buffer.from(nonceB64, 'base64').toString();
     const expected = crypto.createHmac('sha256', SESSION_SECRET).update(`${userId}|${nonce}`).digest('hex');
-    if (sig !== expected) return null;
+    // Timing-safe compare. Lengths can differ when sig is malformed; treat
+    // length mismatch as failure (timingSafeEqual throws if lengths differ).
+    const sigBuf = Buffer.from(sig, 'hex');
+    const expBuf = Buffer.from(expected, 'hex');
+    if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+      return null;
+    }
     const rec = _pendingNonces.get(nonce);
     if (!rec) return null;
     if (rec.exp < Date.now()) { _pendingNonces.delete(nonce); return null; }
+    // T-424 (C1): if caller passed expectedUserId, enforce session binding.
+    if (expectedUserId != null && String(expectedUserId) !== String(userId)) {
+      // Do NOT delete the nonce -- keep it usable for the legitimate session.
+      // Just refuse this caller.
+      return null;
+    }
     _pendingNonces.delete(nonce); // single use
     return userId;
   } catch (_) {

@@ -467,43 +467,74 @@ function mountOrdersRoutes(app, deps) {
       });
   }));
 
-  // ---------- /api/orders/confirm-2fa/:token (T-224 6b) ----------
-  app.post('/api/orders/confirm-2fa/:token', async (req, res) => {
+  // ---------- /api/orders/confirm-2fa/:token (T-224 6b, T-424 hardened) ----------
+  // T-424 (audit-2026-05-26 backend C4): wrapped with withAuth +
+  // session-match check + token hashing in audit lines.
+  //   - withAuth() prevents replay by anyone with audit-log read (token
+  //     was logged plaintext; anyone with /api/audit could grab + replay).
+  //   - session match (req.user.id === payload.userId) prevents account
+  //     hijack across sessions.
+  //   - Audit lines now log a SHA-256 prefix of the token, not the raw
+  //     value, mirroring the T-358 reset-token-hashing pattern.
+  const _hashToken = (t) => crypto.createHash('sha256').update(String(t)).digest('hex').slice(0, 16);
+  app.post('/api/orders/confirm-2fa/:token', withAuth(async (req, res) => {
     const twoFactor = getTwoFactor();
     if (!twoFactor) return res.status(503).json({ ok:false, reason:'two_factor_not_initialized' });
     const token = String(req.params.token || '').trim();
+    const tokHash = _hashToken(token);
+    // T-424 (C4): peek first to session-check before consume.
+    const peek = twoFactor.peek ? twoFactor.peek(token) : null;
+    if (peek && peek.payload && peek.payload.userId != null) {
+      if (String(peek.payload.userId) !== String(req.user.id)) {
+        audit('order.2fa.session-mismatch', { tokenHash: tokHash, payloadUserId: peek.payload.userId, sessionUserId: req.user.id });
+        return res.status(403).json({ ok:false, reason: 'session_mismatch' });
+      }
+    }
     const c = twoFactor.consume(token);
     if (!c.ok) {
+      audit('order.2fa.consume-fail', { tokenHash: tokHash, reason: c.reason, sessionUserId: req.user.id });
       return res.status(c.reason === 'expired' ? 410 : 404).json({ ok:false, reason: c.reason });
     }
     const p = await pickBroker(req);
     if (!p.broker || typeof p.broker.placeOrder !== 'function') {
-      audit('order.2fa.blocked.notImplemented', { token });
+      audit('order.2fa.blocked.notImplemented', { tokenHash: tokHash });
       return res.status(501).json({ ok:false, reason:'PLACE_ORDER_NOT_IMPLEMENTED' });
     }
-    audit('order.2fa.placing', { token, clientOrderId: c.payload && c.payload.clientOrderId, isUserOwn: p.isUserOwn });
+    audit('order.2fa.placing', { tokenHash: tokHash, clientOrderId: c.payload && c.payload.clientOrderId, isUserOwn: p.isUserOwn });
     try {
       _orderRateRecord();
       const result = await p.broker.placeOrder(c.payload);
       audit('order.placed.viaTwoFactor', { clientOrderId: c.payload.clientOrderId, result });
       res.json({ ok:true, confirmed:true, clientOrderId: c.payload.clientOrderId, ...result });
     } catch (err) {
-      audit('order.2fa.placeError', { token, msg: err.message });
+      audit('order.2fa.placeError', { tokenHash: tokHash, msg: err.message });
       res.status(502).json({ ok:false, reason: err.message });
     }
-  });
+  }));
 
-  // ---------- /api/orders/cancel-2fa/:token (GET + POST, T-224 6b) ----------
-  async function handleCancel2fa(req, res) {
+  // ---------- /api/orders/cancel-2fa/:token (T-424: POST only, withAuth) ----------
+  // T-424 (audit-2026-05-26 backend C4): removed the GET cancel route.
+  // GET was wide-open from any origin (CSRF middleware only runs on
+  // POST/PUT/PATCH/DELETE), so any phishing email with <img src> could
+  // cancel a pending 2FA-gated order. POST + withAuth + CSRF is the only
+  // safe path.
+  app.post('/api/orders/cancel-2fa/:token', withAuth(async (req, res) => {
     const twoFactor = getTwoFactor();
     if (!twoFactor) return res.status(503).json({ ok:false, reason:'two_factor_not_initialized' });
     const token = String(req.params.token || '').trim();
+    const tokHash = _hashToken(token);
+    const peek = twoFactor.peek ? twoFactor.peek(token) : null;
+    if (peek && peek.payload && peek.payload.userId != null) {
+      if (String(peek.payload.userId) !== String(req.user.id)) {
+        audit('order.2fa.cancel.session-mismatch', { tokenHash: tokHash, payloadUserId: peek.payload.userId, sessionUserId: req.user.id });
+        return res.status(403).json({ ok:false, reason: 'session_mismatch' });
+      }
+    }
     const r = twoFactor.reject(token);
     if (!r.ok) return res.status(404).json({ ok:false, reason: r.reason });
+    audit('order.2fa.cancelled', { tokenHash: tokHash, sessionUserId: req.user.id });
     res.json({ ok:true, rejected:true, message:'Order rejected. No broker call was made.' });
-  }
-  app.get( '/api/orders/cancel-2fa/:token', handleCancel2fa);
-  app.post('/api/orders/cancel-2fa/:token', handleCancel2fa);
+  }));
 
   // ---------- /api/orders/cancel (T-224 6b) ----------
   app.post('/api/orders/cancel', withAuth(async (req, res) => {
