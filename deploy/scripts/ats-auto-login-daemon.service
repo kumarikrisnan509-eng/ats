@@ -36,9 +36,13 @@ EnvironmentFile=/etc/ats/auto-login.env
 # setup script — the daemon will fail to find Chromium at startup otherwise.
 Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/ats-auto-login/browsers
 
-# Cap blast radius if headless Chromium leaks. Daily reauth completes in
-# ~15-30s typically; 512M is comfortably above measured RSS.
-MemoryMax=512M
+# T-436 (operator follow-up to T-432): observed systemd peak on the
+# running daemon was 618.6M against the T-432-proposed 512M cap. Headless
+# Chromium spins up ~5 processes for the Kite login flow and total RSS
+# briefly spikes well above the steady-state 100-200M. Bumping to 768M
+# (peak + ~25% headroom) so the new limit doesn't OOM-kill the daemon
+# the first time a market-day reauth hits a slow login render.
+MemoryMax=768M
 CPUQuota=60%
 TasksMax=200
 
