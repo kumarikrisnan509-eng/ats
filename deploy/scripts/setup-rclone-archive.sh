@@ -31,6 +31,11 @@ cat > /etc/logrotate.d/ats-audit <<'EOF'
 # haven't wired yet. The duplicate-line risk during the copy
 # window is acceptable for the audit log (entries are seq+ts).
 /var/log/ats/audit.log {
+    # T-440 (audit-2026-05-26 operator follow-up): /var/log/ats is owned
+    # ats:ats and group-writable. Without `su ats ats` logrotate refuses
+    # with "parent directory has insecure permissions" out of an abundance
+    # of caution (a non-root attacker could hardlink a sensitive file).
+    su ats ats
     daily
     rotate 7
     compress
@@ -53,6 +58,11 @@ EOF
 # 500MB but warning is not rotation.
 echo "==> Creating logrotate config: /etc/logrotate.d/ats-misc"
 cat > /etc/logrotate.d/ats-misc <<'EOF'
+# T-440 (audit-2026-05-26 operator follow-up): same `su ats ats` reason
+# as the audit-log stanza above — /var/log/ats/ is group-writable so
+# logrotate refuses unless we declare which user to drop to.
+su ats ats
+
 /var/log/ats/morning-check.log
 /var/log/ats/auto-login-daemon.log
 /var/log/ats/bulk-rotate.log
