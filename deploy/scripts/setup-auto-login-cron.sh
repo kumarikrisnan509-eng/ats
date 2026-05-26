@@ -32,7 +32,11 @@ fi
 echo "    OK"
 
 echo "==> [2/3] write $CRON_PATH (7 days/week, 08:50 IST = 03:20 UTC)"
-cat > "$CRON_PATH" <<'CRONEOF'
+# T-437 (audit-2026-05-26 vm-scripts M4): preserve operator-edited cron.
+# If the file already exists and differs from what we're about to write,
+# save a timestamped backup BEFORE overwrite so a Diwali-holiday tweak
+# or emergency schedule change isn't silently reverted.
+NEW_CRON=$(cat <<'CRONEOF'
 # T99-T31: 7 days/week. Zerodha invalidates tokens daily at ~06:00 IST
 # regardless of weekend/holiday, so the auto-login needs to run every day.
 SHELL=/bin/bash
@@ -43,6 +47,13 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # was 2h 50m after expiry, leaving the morning window broken every day.
 45 0 * * * ubuntu /opt/ats/scripts/morning-check.sh >> /var/log/ats/morning-check.log 2>&1
 CRONEOF
+)
+if [[ -f "$CRON_PATH" ]] && ! diff -q <(printf '%s\n' "$NEW_CRON") "$CRON_PATH" >/dev/null 2>&1; then
+  BACKUP="${CRON_PATH}.bak-$(date +%s)"
+  cp -a "$CRON_PATH" "$BACKUP"
+  echo "    WARN: $CRON_PATH had local edits; saved backup at $BACKUP" >&2
+fi
+printf '%s\n' "$NEW_CRON" > "$CRON_PATH"
 chmod 0644 "$CRON_PATH"
 # cron requires a trailing newline — re-emit just in case the heredoc strips it.
 [ -n "$(tail -c1 "$CRON_PATH")" ] && echo >> "$CRON_PATH"

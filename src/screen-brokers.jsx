@@ -405,7 +405,13 @@ const BrokersScreen = () => {
       const r = await fetch(`/api/v1/me/brokers/${myZerodha?.id || ''}/actions/reauth-url`, { credentials: 'include' });
       const j = await r.json();
       if (!r.ok || !j.ok) { setTestResult({ ok: false, msg: j.detail || j.reason || `HTTP ${r.status}` }); setBusy(null); return; }
-      const popup = window.open(j.url, `kite-reauth-${Date.now()}`, 'width=520,height=720,popup=1,noopener=no');
+      // T-437 (audit-2026-05-26 frontend M7): `noopener=no` actively opted OUT of
+      // the default opener-protection, letting the Kite reauth popup tampering
+      // with window.opener. Switch to `noopener,noreferrer` which is the safer
+      // default. The postMessage handler below still works fine across an
+      // opener-isolated popup because it uses window.addEventListener('message')
+      // which doesn't depend on opener.
+      const popup = window.open(j.url, `kite-reauth-${Date.now()}`, 'width=520,height=720,popup=1,noopener,noreferrer');
       if (!popup) { setTestResult({ ok: false, msg: 'Popup blocked. Allow popups for this site and retry.' }); setBusy(null); return; }
       const onMsg = (ev) => {
         if (ev.data && ev.data.type === 'ats-broker-connected') {

@@ -44,6 +44,36 @@ cat > /etc/logrotate.d/ats-audit <<'EOF'
 }
 EOF
 
+# T-437 (audit-2026-05-26 vm-scripts M7): cover every other long-running log
+# in /var/log/ats/. Before this, only audit.log rotated; morning-check.log,
+# auto-login-daemon.log, bulk-rotate.log, telegram-bridge.log, dr-restore-test
+# log and backup-db-tokens.log all appended unboundedly. On a 50GB VM the
+# daemon log alone hit GBs over months -> disk-full -> docker logs stop ->
+# container OOMs on disk pressure -> trading halted. check-disk.sh warns at
+# 500MB but warning is not rotation.
+echo "==> Creating logrotate config: /etc/logrotate.d/ats-misc"
+cat > /etc/logrotate.d/ats-misc <<'EOF'
+/var/log/ats/morning-check.log
+/var/log/ats/auto-login-daemon.log
+/var/log/ats/bulk-rotate.log
+/var/log/ats/telegram-bridge.log
+/var/log/ats/dr-restore-test.log
+/var/log/ats/backup-db-tokens.log
+/var/log/ats-rclone.log
+{
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    create 0644 ats ats
+    dateext
+    dateformat -%Y-%m-%d
+}
+EOF
+
 echo "==> Creating archive wrapper: $WRAPPER"
 cat > "$WRAPPER" <<EOF
 #!/usr/bin/env bash

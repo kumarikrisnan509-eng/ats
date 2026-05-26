@@ -222,7 +222,15 @@ function audit(event, data) {
   try { if (wormAudit && wormAudit._initialized) wormAudit.append(event, data); } catch (_e) {}
   try {
     fs.mkdirSync(path.dirname(AUDIT_LOG), { recursive: true });
-    fs.appendFileSync(AUDIT_LOG, line + '\n');
+    // T-437 (audit-2026-05-26 backend M7): force mode 0600 on every append so
+    // a misconfigured deploy (e.g. /var/log/ats/ with o+rx for nginx) doesn't
+    // silently inherit world-readable perms. The audit log contains 2FA token
+    // hashes + path traces that must stay operator-only.
+    fs.appendFileSync(AUDIT_LOG, line + '\n', { mode: 0o600 });
+    // Defense-in-depth: if the file already existed with looser perms (it
+    // does on legacy deploys), force-tighten it. fs.chmodSync is a no-op if
+    // already 0600 on most filesystems; tolerant of EPERM if not owner.
+    try { fs.chmodSync(AUDIT_LOG, 0o600); } catch (_) { /* not owner */ }
   } catch (err) {
     console.error('FATAL: audit log write failed:', err);
     process.exit(1);

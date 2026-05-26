@@ -111,7 +111,9 @@ fi
 # bind-mounted directory because new files appear immediately inside.
 
 echo "==> [3/4] write monthly cron entry $CRON_PATH"
-cat > "$CRON_PATH" <<'CRONEOF'
+# T-437 (audit-2026-05-26 vm-scripts M4): preserve operator-edited cron;
+# save a timestamped backup before overwrite if local edits exist.
+NEW_CRON=$(cat <<'CRONEOF'
 # T99-T36: monthly DR restore-test (Tier I1 cadence).
 # 03:30 UTC on the 1st of every month = 09:00 IST.
 # --notify POSTs the result to /api/admin/dr-status so /api/health-deep
@@ -120,6 +122,13 @@ SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 30 3 1 * * root /opt/ats/scripts/dr-restore-test.sh --notify >> /var/log/ats/dr-restore-test.log 2>&1
 CRONEOF
+)
+if [[ -f "$CRON_PATH" ]] && ! diff -q <(printf '%s\n' "$NEW_CRON") "$CRON_PATH" >/dev/null 2>&1; then
+  BACKUP="${CRON_PATH}.bak-$(date +%s)"
+  cp -a "$CRON_PATH" "$BACKUP"
+  echo "    WARN: $CRON_PATH had local edits; saved backup at $BACKUP" >&2
+fi
+printf '%s\n' "$NEW_CRON" > "$CRON_PATH"
 chmod 0644 "$CRON_PATH"
 systemctl reload cron 2>/dev/null || systemctl restart cron 2>/dev/null || true
 echo "    cron entry written + cron reloaded"

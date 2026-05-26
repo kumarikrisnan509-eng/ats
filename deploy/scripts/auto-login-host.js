@@ -57,9 +57,23 @@ function httpRequest({ method, url, headers = {}, body = null }) {
   });
 }
 
+// T-437 (audit-2026-05-26 vm-scripts M6): redact 4-8 digit number sequences
+// from page body text so a screenshot dump that captured a half-filled OTP
+// or user_id no longer persists those digits in the .txt sibling. The PNG
+// can still leak via OCR, but at least the grep-friendly text dump is safe.
+function _redactDigits(s) {
+  if (typeof s !== 'string') return s;
+  return s.replace(/\b\d{4,8}\b/g, m => '[redacted-' + m.length + 'd]');
+}
+
 async function captureFailure(page, ts, label) {
   try {
-    fs.mkdirSync(FAIL_DIR, { recursive: true });
+    // T-437 vm-scripts M6: tighten perms on the failure dir + files. Default
+    // umask leaves dirs 0755 / files 0644 which is world-readable on a
+    // multi-user VM. 0700/0600 limits to root (the daemon runs as root via
+    // sudo).
+    fs.mkdirSync(FAIL_DIR, { recursive: true, mode: 0o700 });
+    try { fs.chmodSync(FAIL_DIR, 0o700); } catch (_) { /* already tight */ }
     const pngFile = path.join(FAIL_DIR, `autologin-${ts}-${label}.png`);
     const txtFile = path.join(FAIL_DIR, `autologin-${ts}-${label}.txt`);
     await page.screenshot({ path: pngFile, fullPage: true });
@@ -96,12 +110,16 @@ async function captureFailure(page, ts, label) {
         'screenshot: ' + pngFile,
         '',
         '--- visible body text (first 2000 chars) ---',
-        bodyText,
+        // T-437 vm-scripts M6: redact 4-8 digit numeric sequences (user_id, OTP).
+        _redactDigits(bodyText),
         '',
         '--- input/button elements ---',
         JSON.stringify(inputs, null, 2),
       ].join('\n');
-      fs.writeFileSync(txtFile, dump);
+      // T-437 vm-scripts M6: 0600 so a sibling-container compromise doesn't read.
+      fs.writeFileSync(txtFile, dump, { mode: 0o600 });
+      try { fs.chmodSync(txtFile, 0o600); } catch (_) { /* not owner */ }
+      try { fs.chmodSync(pngFile, 0o600); } catch (_) { /* not owner */ }
     } catch (_e) { /* don't mask main failure */ }
 
     return pngFile;
