@@ -1,12 +1,29 @@
 #!/usr/bin/env bash
 # morning-check.sh
 #
-# Runs at 08:50 IST (03:20 UTC) every day via /etc/cron.d/ats-auto-login (T-31).
+# Runs at 06:15 IST (00:45 UTC) every day via /etc/cron.d/ats-auto-login.
+# (T-426 audit-2026-05-26 C1: corrected stale comment that said 08:50 IST.
+#  The real schedule is written by setup-auto-login-cron.sh -- 45 0 * * *.)
 # 1. Adds 0-60s jitter
 # 2. Checks if already connected (skips if yes)
 # 3. Runs auto-login-host.js (which drives Kite UI via host-side Playwright)
 # 4. Telegram notification is sent by the backend's notify.js after exchange
 set -uo pipefail
+
+# T-426 (audit-2026-05-26 VM-scripts C2): flock to prevent overlap with
+# bulk-rotate.timer (systemd, 00:15 UTC + 600s jitter) which can land
+# within ~30min of this script (00:45 UTC + 60s jitter). Concurrent
+# rotations of the same broker_account race the DB UPDATE on access_token
+# -- one of the two writes a token Kite has already invalidated, and the
+# in-memory broker singleton ends up out-of-sync with the DB.
+# Same lock name in bulk-rotate path so they serialise.
+LOCK_FILE="/var/lock/ats-reauth.lock"
+exec 9>"$LOCK_FILE" || { echo "[morning-check] cannot open lock file $LOCK_FILE" >&2; exit 0; }
+if ! flock -n 9; then
+    logger -t ats-morning-check "another reauth holds $LOCK_FILE -- exiting silently"
+    exit 0
+fi
+# Lock is held on FD 9 for the lifetime of this shell; auto-released on exit.
 
 sleep $((RANDOM % 60))
 
