@@ -10,7 +10,10 @@
 
 services:
   ats-backend:
-    image: "ghcr.io/${ATS_REPO_OWNER}/ats-backend:${ATS_IMAGE_TAG:-latest}"
+    # T-423 (audit-2026-05-26 sec-ops): no :-latest fallback. If ATS_IMAGE_TAG
+    # isn't set the compose file must fail loudly rather than silently pull a
+    # mutable "latest" tag that breaks reproducibility (and bypasses rollback).
+    image: "ghcr.io/${ATS_REPO_OWNER:?ATS_REPO_OWNER must be set in /opt/ats/compose/.env}/ats-backend:${ATS_IMAGE_TAG:?ATS_IMAGE_TAG must be set in /opt/ats/compose/.env}"
     container_name: ats-backend
     restart: always
     # Only expose to loopback. Nginx on the host fronts this.
@@ -50,20 +53,4 @@ services:
       - type: bind
         source: /var/run/ats
         target: /var/run/ats
-    # Tighten kernel-level perms.
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    cap_add:
-      - NET_BIND_SERVICE
-    read_only: true
-    tmpfs:
-      - /tmp:size=32m
-    mem_limit: 512m
-    pids_limit: 256
-    # Healthcheck is defined in the Dockerfile.
-    logging:
-      driver: journald
-      options:
-        tag: ats-backend
+    # Tighten kernel-level per
