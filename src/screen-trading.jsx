@@ -111,7 +111,9 @@ const TradingScreen = () => {
   // Now: L2 is gated behind demo mode. In prod, `bids`/`asks` are empty arrays
   //      and the depth panel shows an empty state ("Depth not subscribed").
   const liveTick = useLiveTick(sym);
-  const mid = liveTick?.ltp || 2948.50;
+  // T-441 frontend M13: drop the 2948.50 RELIANCE-shaped fallback. If no
+  // tick yet, use 0 — downstream sims guard with parseFloat || 0.
+  const mid = (liveTick && Number.isFinite(liveTick.ltp)) ? liveTick.ltp : 0;
   const tickSize = sym.includes("NIFTY") || mid > 5000 ? 0.05 : 0.05;
   const _l2IsDemo = !!(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
   const seed = Math.floor(mid * 100) % 997;
@@ -182,7 +184,21 @@ const TradingScreen = () => {
   // Pre-trade simulator + 2FA
   const [simOrder, setSimOrder] = useState(null);
   const [qty, setQty] = useState(40);
-  const [price, setPrice] = useState(2948.50);
+  // T-441 (audit-2026-05-26 frontend M13): initial price was hardcoded
+  // ₹2948.50 (RELIANCE-ish). Seed from the live tick on first render so
+  // the field opens at a sensible mid for whatever symbol is selected;
+  // user can still type over it. Falls back to "" until liveTick resolves.
+  const [price, setPrice] = useState(() => {
+    try {
+      const t = (typeof window !== 'undefined' && window.useLiveTick) ? null : null;
+      return ''; // seed empty; the live-mid useEffect below will fill it
+    } catch (_) { return ''; }
+  });
+  React.useEffect(() => {
+    if (price === '' && typeof mid === 'number' && Number.isFinite(mid)) {
+      setPrice(mid.toFixed(2));
+    }
+  }, [mid]);
   const openSim = () => setSimOrder({
     symbol: sym, side, qty: parseInt(qty) || 0, price: parseFloat(price) || 0,
     product, modeId: defaultMode,
@@ -208,23 +224,27 @@ const TradingScreen = () => {
         <ChartCard sym={sym} segment={segment} candles={candles}/>
 
         {/* Order ticket */}
+        {/* T-441 (audit-2026-05-26 frontend M15): every <label> now uses
+            htmlFor pointing at an explicit input id so screen-readers
+            announce the right label for each field. Previously labels were
+            sibling-only which is invisible to assistive tech. */}
         <Card title="Order ticket" sub="Routes to Zerodha Kite">
           <Segmented value={side} onChange={setSide} options={[{ value: "BUY", label: "Buy" }, { value: "SELL", label: "Sell" }]}/>
 
           <div style={{ marginTop: 14 }}>
-            <label className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>Symbol</label>
-            <input value={sym} onChange={e => setSym(e.target.value.toUpperCase())}
+            <label htmlFor="ot-sym" className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>Symbol</label>
+            <input id="ot-sym" value={sym} onChange={e => setSym(e.target.value.toUpperCase())}
               style={{ width: "100%", marginTop: 4, padding: "8px 10px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-md)", fontFamily: "var(--mono)" }}/>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 12 }}>
             <div>
-              <label className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>Qty</label>
-              <input value={qty} onChange={e => setQty(e.target.value)} style={{ width: "100%", marginTop: 4, padding: "8px 10px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-md)", fontFamily: "var(--mono)" }}/>
+              <label htmlFor="ot-qty" className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>Qty</label>
+              <input id="ot-qty" value={qty} onChange={e => setQty(e.target.value)} style={{ width: "100%", marginTop: 4, padding: "8px 10px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-md)", fontFamily: "var(--mono)" }}/>
             </div>
             <div>
-              <label className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>Price</label>
-              <input value={price} onChange={e => setPrice(e.target.value)} style={{ width: "100%", marginTop: 4, padding: "8px 10px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-md)", fontFamily: "var(--mono)" }}/>
+              <label htmlFor="ot-price" className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>Price</label>
+              <input id="ot-price" value={price} onChange={e => setPrice(e.target.value)} style={{ width: "100%", marginTop: 4, padding: "8px 10px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-md)", fontFamily: "var(--mono)" }}/>
             </div>
           </div>
 

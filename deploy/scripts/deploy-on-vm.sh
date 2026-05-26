@@ -130,7 +130,11 @@ if [[ ${ok} -ne 1 ]]; then
 fi
 
 if [[ ${ok} -ne 1 ]]; then
-    echo "!! Health check failed after 20 s. Rolling back."
+    # T-441 (audit-2026-05-26 vm-scripts M8): message was "20 s" but the
+    # loop above is 30 attempts x 2s = 60s total. During a real incident
+    # the operator reading this log line was misled about how long the
+    # container had actually been failing.
+    echo "!! Health check failed after 60 s (30 attempts x 2s). Rolling back."
     # T-418 (production-readiness audit, infra fix #1):
     # Prefer .last-good-tags (only written on SUCCESS, capped at 5 entries)
     # over .previous-tag (overwritten EVERY deploy, including bad ones).
