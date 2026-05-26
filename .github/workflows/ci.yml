@@ -35,6 +35,16 @@ jobs:
     name: validate (lint + syntax)
     runs-on: ubuntu-latest
     timeout-minutes: 8
+    # T-447 (audit-2026-05-26 infra M12): job-level permissions override the
+    # caller's. When deploy.yml calls this workflow via `uses:`, GitHub
+    # applies the CALLER's permissions to the reusable workflow's jobs by
+    # default. deploy.yml had packages:write + id-token:write at the top
+    # level (now scoped per-job by T-430, but defense-in-depth here matters
+    # too). Explicitly pinning the validate job to read-only ensures it
+    # CANNOT push to GHCR or sign artifacts even when called from a
+    # workflow that has those permissions.
+    permissions:
+      contents: read
     # T-364: when triggered by workflow_run, only proceed if the upstream
     # deploy succeeded. (pull_request + workflow_call always run.)
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'

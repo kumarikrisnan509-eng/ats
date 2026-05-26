@@ -255,6 +255,29 @@ function audit(event, data) {
 let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, db, auth, rebalance, replay, emailAlerts, whatsAppAlerts, riskConfigService, sipRunner, portfolioAggregates, regimeDetector, attribution, slippageTracker, preTradeCheck, optionChainFetcher, optionsScanner, signalCalibration, nseMacroFetcher;  // T-381: nseMacroFetcher was previously assigned without declaration -> created an implicit global (works only because CommonJS files arent strict mode). ESLint no-undef caught this.
 
 async function init() {
+  // T-447 (audit-2026-05-26 backend M9): wormAudit MUST come first so
+  // every subsequent audit() call lands on the tamper-evident chain, not
+  // just the JSONL log. The original constructor was ~400 lines down,
+  // after broker.start + 20 other inits — meaning the very first audit
+  // events were silently dropped from the chain.
+  wormAudit = new WormAudit({
+    path: process.env.WORM_PATH || '/var/log/ats/audit.worm.jsonl',
+    merkleEvery: Number(process.env.WORM_MERKLE_EVERY) || 100,
+    onMerkle: (label, root, range) => {
+      try { console.log(JSON.stringify({ level:'info', t:Date.now(), event:label, root, range })); }
+      catch (_) {}
+    },
+  });
+  const _wormInit = wormAudit.init();
+  if (!_wormInit.ok) {
+    // Cannot use audit('worm.init.broken') here because audit() would
+    // try to write to the very chain we just failed to init. Plain console
+    // error; the JSONL audit.log still gets it via the audit() call below.
+    console.error(`!! WORM audit chain BROKEN at entry ${_wormInit.brokenAt} (${_wormInit.count} total)`);
+  } else {
+    console.log(`worm-audit: ${_wormInit.fresh ? 'fresh log' : 'resumed'} (count=${_wormInit.count})`);
+  }
+
   broker = createBroker(process.env);
   await broker.start();
   audit('broker.start', { name: broker.name });
@@ -454,6 +477,22 @@ async function init() {
     riskConfigService = null;
   }
 
+  // T-447 (audit-2026-05-26 backend M8): construct _marketMeta HERE, inside
+  // init() where db + broker are guaranteed available. Previously this lived
+  // as a top-level IIFE that ran before init() and silently failed the guard,
+  // so the daily holiday refresh cron never auto-armed.
+  try {
+    if (db && broker) {
+      const { createMarketMeta } = require('./market-meta');
+      _marketMeta = createMarketMeta({ db, broker });
+      _marketMeta.scheduleDailyRefresh();
+      audit('market-meta.init', { ok: true });
+    }
+  } catch (e) {
+    console.error('[server] market-meta init failed:', e && e.message);
+    audit('market-meta.init.failed', { reason: e && e.message });
+  }
+
   // T-276: SIP runner. Daily cron at 09:30 IST + idempotent order placement.
   // Depends on db (sip_fires table), riskConfigService (read dcaAllocation +
   // capital), paper (place orders), broker (getLastTicks for spot price).
@@ -634,21 +673,15 @@ async function init() {
     nseMacroFetcher = null;
   }
 
-    wormAudit = new WormAudit({
-    path: process.env.WORM_PATH || '/var/log/ats/audit.worm.jsonl',
-    merkleEvery: Number(process.env.WORM_MERKLE_EVERY) || 100,
-    onMerkle: (label, root, range) => {
-      try { console.log(JSON.stringify({ level:'info', t:Date.now(), event:label, root, range })); }
-      catch (_) {}
-    },
-  });
-  const _wormInit = wormAudit.init();
-  if (!_wormInit.ok) {
-    console.error(`!! WORM audit chain BROKEN at entry ${_wormInit.brokenAt} (${_wormInit.count} total)`);
-    audit('worm.init.broken', { brokenAt: _wormInit.brokenAt, count: _wormInit.count });
-  } else {
-    console.log(`worm-audit: ${_wormInit.fresh ? 'fresh log' : 'resumed'} (count=${_wormInit.count})`);
-  }
+  // T-447 (audit-2026-05-26 backend M9): wormAudit was constructed HERE
+  // (mid-init, ~400 lines after broker.start) but audit() at line ~236
+  // refers to it. The first ~20-30 boot audit events (broker.start, db
+  // init, riskConfigService init, autorun load, ...) fired BEFORE
+  // wormAudit existed, so they only landed in audit.log JSONL — never on
+  // the WORM chain. Construction is now at the TOP of init() (see
+  // wormAudit = new WormAudit(...) block above the broker.start call).
+  // This block stays as a no-op for diff history; the real init is now
+  // at the top.
 
   // Tier 34: F&O SPAN-style margin simulator (pre-trade estimator).
   spanSim = new SpanSim();
@@ -817,14 +850,13 @@ app.use((req, _res, next) => {
 });
 
 // ---------- Tier 71: market metadata cache (holidays from Kite) ----------
+// T-447 (audit-2026-05-26 backend M8): _marketMeta init was a top-level
+// IIFE that ran on require('./server') — BEFORE init() had assigned db and
+// broker. The guard `if (db && broker)` was always false here so the
+// daily-holiday-refresh cron never auto-armed. Moved into init() (see
+// _initMarketMeta() call near the end of init() below) where db + broker
+// are guaranteed populated.
 let _marketMeta = null;
-try {
-  if (db && broker) {
-    const { createMarketMeta } = require('./market-meta');
-    _marketMeta = createMarketMeta({ db, broker });
-    _marketMeta.scheduleDailyRefresh();
-  }
-} catch (e) { console.error('[server] market-meta init failed:', e && e.message); }
 
 // T-406 (god-object split #32): /api/market/holidays moved to routes/misc.js.
 
