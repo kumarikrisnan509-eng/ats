@@ -90,10 +90,10 @@ R[t_rclone_sec]="$(( $(date +%s) - T1 ))"
 T1b=$(date +%s)
 PASSPHRASE_PATH="${PASSPHRASE_PATH:-/etc/ats/.backup-passphrase}"
 log "step: T-421 -- check off-site DB snapshot"
-if ! rclone copy "${REMOTE}/db-snapshots" "$DR_STAGE/db-remote" --include "ats-backup-*.tar.gz" --max-age 7d 2>&1 | tee -a "$DR_LOG"; then
+if ! rclone copy "${REMOTE}/db-snapshots" "$DR_STAGE/db-remote" --include "ats-backup-*.tar.gpg" --max-age 7d 2>&1 | tee -a "$DR_LOG"; then
     R[db_remote_check]="rclone-failed"
     log "  WARN: rclone db-snapshots pull failed (non-fatal)"
-elif ! ls "$DR_STAGE/db-remote/"ats-backup-*.gpg "$DR_STAGE/db-remote/"ats-backup-*.tar.gz 2>/dev/null | head -1 | grep -q .; then
+elif ! ls "$DR_STAGE/db-remote/"ats-backup-*.gpg 2>/dev/null | head -1 | grep -q .; then
     R[db_remote_check]="no-remote-backup-found"
     log "  WARN: no off-site DB snapshot present yet (T-421 not enabled? see README-DR.md)"
 else
