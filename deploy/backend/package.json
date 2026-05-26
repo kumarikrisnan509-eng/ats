@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "express": "^4.21.0",
-    "ws": "^8.18.0",
+    "ws": "^8.21.0",
     "kiteconnect": "^5.3.0",
     "libsodium-wrappers": "^0.7.13",
     "cookie": "^0.7.0",
