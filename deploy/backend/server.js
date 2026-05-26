@@ -1097,11 +1097,23 @@ app.use('/api', (req, res, next) => {
 //
 // Rejected requests return 403 { ok:false, reason:'cross_origin_rejected' } and
 // are audited via the existing audit() helper.
-const CSRF_ALLOWED_ORIGINS = new Set([
-  'https://ats.rajasekarselvam.com',
-  'http://localhost:8080',
-  'http://127.0.0.1:8080',
-]);
+// T-431 (audit-2026-05-26 sec-ops X-H3): allowed origins are env-driven so a
+// staging/preview domain can be added by setting CSRF_ALLOWED_ORIGINS=... in
+// the VM env (comma-separated) WITHOUT a code+deploy round-trip. The list
+// always includes prod + localhost so misconfig can't lock us out. Empty,
+// whitespace-only, or malformed entries are silently dropped.
+const CSRF_ALLOWED_ORIGINS = (() => {
+  const baseline = [
+    'https://ats.rajasekarselvam.com',
+    'http://localhost:8080',
+    'http://127.0.0.1:8080',
+  ];
+  const extra = String(process.env.CSRF_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(s => /^https?:\/\/[^\s,]+$/i.test(s));
+  return new Set([...baseline, ...extra]);
+})();
 app.use('/api', (req, res, next) => {
   const m = req.method;
   if (m !== 'POST' && m !== 'PUT' && m !== 'PATCH' && m !== 'DELETE') return next();
