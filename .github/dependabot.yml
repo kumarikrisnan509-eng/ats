@@ -1,0 +1,57 @@
+# T-442 (audit-2026-05-26 infra M13): Dependabot config — automated weekly
+# dependency PRs for the three ecosystems this repo actually uses. Without
+# this, security-relevant transitive bumps require manual `npm audit` /
+# `pip-audit` invocation which the operator has to remember to run.
+#
+# - npm: deploy/backend (real-money trading runtime — keep current)
+# - github-actions: the deploy + ci workflows pin actions by tag (M14
+#   tracks SHA-pinning separately); Dependabot bumps the tags safely.
+# - docker: deploy/docker/Dockerfile (node:20-alpine base image).
+#
+# Rate-limited: 3 open PRs per ecosystem max. Auto-target the `main`
+# branch (no staging). Weekly cadence is enough — we don't want a daily
+# PR storm on a single-operator project.
+
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/deploy/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Kolkata"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(backend)"
+    labels:
+      - "dependencies"
+      - "backend"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Kolkata"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(actions)"
+    labels:
+      - "dependencies"
+      - "ci"
+
+  - package-ecosystem: "docker"
+    directory: "/deploy/docker"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Kolkata"
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "deps(docker)"
+    labels:
+      - "dependencies"
+      - "docker"
