@@ -15,7 +15,10 @@
 # P3 (2026-05-13): pre-transform JSX -> JS with esbuild so the browser does
 # not download Babel (~2MB) or compile in-browser. Same 52 script tags,
 # same load order, same window globals. First paint drops ~3s.
-FROM node:20-alpine AS frontend-build
+# T-469 (audit-2026-05-26 infra M6): pinned to immutable digest.
+# Multi-arch (amd64+arm64). Dependabot will PR digest bumps weekly.
+# Original tag: node:20-alpine (multi-arch manifest, pushed 2026-04-15).
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS frontend-build
 WORKDIR /work
 RUN npm init -y >/dev/null && npm install --no-save esbuild@0.21.5
 COPY src/ ./src/
@@ -24,7 +27,7 @@ RUN node transform.js
 RUN test "$(ls out/src/*.js 2>/dev/null | wc -l)" -ge 30 || (echo "transform produced too few files" && exit 1)
 
 # ---------- 1) deps stage ----------
-FROM node:20-alpine AS deps
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS deps
 WORKDIR /app
 
 # Native build deps for any npm packages that compile from source.
@@ -37,7 +40,7 @@ COPY deploy/backend/package.json deploy/backend/package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
 
 # ---------- 2) runtime stage ----------
-FROM node:20-alpine AS runtime
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS runtime
 
 # T-443 (audit-2026-05-26 infra M5): drop wget (~400KB + CVE surface).
 # tini = PID 1 that forwards signals correctly. Healthcheck below uses
