@@ -18,14 +18,21 @@ const Modal = ({ open, onClose, title, sub, children, width = 560, footer }) => 
     };
   }, [open, onClose]);
   if (!open) return null;
-  // T-488 HOTFIX: was `position:fixed top:50% left:50% translate(-50%,-50%)`
-  // which clips the top half when content exceeds viewport AND breaks entirely
-  // if any ancestor has `transform`/`filter`/`will-change` (containing-block
-  // bug). Switched to a single fixed backdrop that is a flex centering
-  // container; the modal is a flex child with `maxHeight: 100%` + inner scroll
-  // on the body. Robust against any parent transform, never clips top, works
-  // on viewport heights as small as 480px (mobile).
-  return (
+  // T-489 HOTFIX: T-488's flex-centering fix was correct in principle but did
+  // NOT account for the `.top` header having `backdrop-filter: saturate(180%)
+  // blur(8px)` (app.html:200). In Chrome, `backdrop-filter` creates a new
+  // containing block, so the modal's `position:fixed inset:0` collapses to
+  // fill the 60px-tall header instead of the viewport. Result: modal
+  // renders as a thin horizontal strip across the top with just the input
+  // field's placeholder ("HALT") peeking through.
+  //
+  // The portal escapes every parent containing block by mounting at
+  // document.body level. Combined with flex centering + maxHeight:100%
+  // body-scroll, the modal is now robust against:
+  //   - any ancestor transform / filter / backdrop-filter / will-change
+  //   - viewport heights as small as 480px (mobile)
+  //   - content longer than the viewport (inner-body scroll)
+  const modalNode = (
     <div
       onClick={onClose}
       style={{
@@ -34,9 +41,6 @@ const Modal = ({ open, onClose, title, sub, children, width = 560, footer }) => 
         backdropFilter: "blur(4px)",
         display: "flex", alignItems: "center", justifyContent: "center",
         padding: 24,
-        // overflowY:auto allows the WHOLE modal to scroll if viewport is tiny
-        // (e.g. 320px phone landscape) -- internal body scroll handles the
-        // common case, this is the belt-and-suspenders fallback.
         overflowY: "auto",
       }}
     >
@@ -49,8 +53,6 @@ const Modal = ({ open, onClose, title, sub, children, width = 560, footer }) => 
           background: "var(--surface)", border: "1px solid var(--border)",
           borderRadius: "var(--r-lg)", boxShadow: "0 24px 60px -20px oklch(0% 0 0 / 0.4)",
           display: "flex", flexDirection: "column", overflow: "hidden",
-          // T-488: explicit min-height prevents the modal from collapsing
-          // smaller than its title bar when there's no body content.
           minHeight: 0,
         }}
       >
@@ -66,6 +68,9 @@ const Modal = ({ open, onClose, title, sub, children, width = 560, footer }) => 
       </div>
     </div>
   );
+  // ReactDOM is loaded globally via the UMD script tag in app.html, so this
+  // works in the in-browser-no-bundler setup the rest of the app uses.
+  return ReactDOM.createPortal(modalNode, document.body);
 };
 
 // === Pre-trade simulator ===
