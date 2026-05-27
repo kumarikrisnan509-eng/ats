@@ -28,6 +28,9 @@ let _active = false;
 let _firedAt = null;
 let _firedBy = null;
 let _reason = null;
+// T-490: snapshot of the firing user's activeModes BEFORE the kill, so reset
+// can restore them. {modeId: {enabled, capitalPct, ...}} or null if not set.
+let _snapshotActiveModes = null;
 
 function set(opts) {
   const o = opts || {};
@@ -35,6 +38,14 @@ function set(opts) {
   _firedAt = Date.now();
   _firedBy = (o.userId != null) ? String(o.userId) : null;
   _reason = o.reason ? String(o.reason).slice(0, 200) : null;
+  // T-490: capture the user's mode state at fire-time so reset can restore.
+  // Caller (admin-kill route) passes the snapshot it just read from
+  // riskConfigService.get(userId).activeModes.
+  if (o.snapshotActiveModes != null && typeof o.snapshotActiveModes === 'object') {
+    _snapshotActiveModes = JSON.parse(JSON.stringify(o.snapshotActiveModes));
+  } else {
+    _snapshotActiveModes = null;
+  }
 }
 
 function reset() {
@@ -42,9 +53,12 @@ function reset() {
   _firedAt = null;
   _firedBy = null;
   _reason = null;
+  _snapshotActiveModes = null;
 }
 
 function get() { return _active; }
+
+function getSnapshotActiveModes() { return _snapshotActiveModes; }
 
 function state() {
   return {
@@ -52,7 +66,8 @@ function state() {
     firedAt: _firedAt,
     firedBy: _firedBy,
     reason: _reason,
+    hasSnapshot: _snapshotActiveModes != null,
   };
 }
 
-module.exports = { set, reset, get, state };
+module.exports = { set, reset, get, getSnapshotActiveModes, state };

@@ -77,6 +77,9 @@ const KillSwitchButton = () => {
         setFired(true);
         // Keep the legacy event dispatch for the ActiveAutomationStrip re-render.
         window.dispatchEvent(new CustomEvent("kill-switch-fired"));
+        // T-490: tell the Trading Modes screen to re-fetch -- backend just
+        // flipped activeModes for every enabled mode.
+        try { window.dispatchEvent(new CustomEvent('risk-config-changed', { detail: { source: 'soft-kill-fire', modesPausedCount: r.modesPausedCount } })); } catch (_) {}
       } else {
         // Surface backend error so the operator knows it didn't actually halt.
         // eslint-disable-next-line no-alert
@@ -102,6 +105,12 @@ const KillSwitchButton = () => {
               method: 'POST', credentials: 'include',
               headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrfToken || '' },
             }).then(r => r.json());
+            if (!r || !r.ok) {
+              // (failure path below — no dispatch on failure)
+            } else {
+              // T-490: re-hydrate Trading Modes screen now that backend restored activeModes.
+              try { window.dispatchEvent(new CustomEvent('risk-config-changed', { detail: { source: 'soft-kill-reset', modesRestoredCount: r.modesRestoredCount } })); } catch (_) {}
+            }
             if (!r || !r.ok) {
               // eslint-disable-next-line no-alert
               alert('Reset FAILED: ' + ((r && r.reason) || 'unknown') + '. Trading remains halted.');
@@ -147,7 +156,7 @@ const KillSwitchButton = () => {
           open={needs2FA}
           onClose={() => setNeeds2FA(false)}
           action="Halt all automated trading"
-          detail="This will cancel all working orders, square off all open positions, and prevent new trades until manually re-enabled. All 4 trading modes will be paused."
+          detail="This will pause all 4 trading modes and block new live orders until you manually reset the kill switch. Existing open positions are NOT auto-closed -- close them from Zerodha Kite if needed."
           onConfirm={onConfirm2FA}
         />
       )}

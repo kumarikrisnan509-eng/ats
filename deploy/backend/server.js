@@ -2072,7 +2072,7 @@ mountAuthRoutes(app, { getAuth: () => auth, getEmailAlerts: () => emailAlerts })
 // but mountX is called at module top-level; capturing now = undefined.
 mountRiskConfigRoutes(app, { getRiskConfig: () => riskConfigService, getAuth: () => auth, getNotify: () => _notifyModule, getAudit: () => audit });
 // T-484: soft-kill endpoints. Backs the UI top-right Kill button.
-mountAdminKillRoutes(app, { getAuth: () => auth, getAudit: () => audit, getNotify: () => _notifyModule });
+mountAdminKillRoutes(app, { getAuth: () => auth, getAudit: () => audit, getNotify: () => _notifyModule, getRiskConfig: () => riskConfigService });  // T-490: getRiskConfig added so soft-kill can pause/restore activeModes
 // T-290e: option-chain READ routes + ops-key gated manual refresh.
 // fetcher may be null if init failed; the route checks for that.
 app.use((req, res, next) => {

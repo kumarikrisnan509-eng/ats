@@ -179,36 +179,58 @@ const useModeState = () => {
 
   // T-487: pull canonical state from backend on mount. Backend is the source
   // of truth -- localStorage is a per-browser cache.
+  // T-490: extracted into a callable so the risk-config-changed event listener
+  // below can trigger a re-hydrate after soft-kill fires/resets.
+  const hydrateFromBackend = React.useCallback(async () => {
+    try {
+      const r = await fetch('/api/me/risk-config', { credentials: 'include' }).then(r => r.json());
+      if (r && r.ok && r.config && r.config.activeModes && typeof r.config.activeModes === 'object') {
+        const remote = r.config.activeModes;
+        const hasAny = MODE_IDS.some(id => remote[id] && typeof remote[id] === 'object');
+        if (hasAny) {
+          // T-490: when soft-kill flips modes, we must overwrite (not merge
+          // with localStorage) so disabled state actually sticks. Use the
+          // remote payload as the canonical source; fall back to MODE_META
+          // defaults for any field the backend omits.
+          setState(_prev => {
+            const merged = {};
+            MODE_IDS.forEach(id => {
+              if (remote[id] && typeof remote[id] === 'object') {
+                merged[id] = { ...MODE_META[id].defaults, ...remote[id] };
+              } else {
+                merged[id] = { ...MODE_META[id].defaults, ..._prev[id] };
+              }
+            });
+            return merged;
+          });
+        }
+      }
+      hydratedRef.current = true;
+    } catch (_) {
+      hydratedRef.current = true;
+    }
+  }, []);
+
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        const r = await fetch('/api/me/risk-config', { credentials: 'include' }).then(r => r.json());
-        if (cancelled) return;
-        if (r && r.ok && r.config && r.config.activeModes && typeof r.config.activeModes === 'object') {
-          const remote = r.config.activeModes;
-          // Only hydrate keys that exist in MODE_IDS; ignore stale/foreign keys.
-          const hasAny = MODE_IDS.some(id => remote[id] && typeof remote[id] === 'object');
-          if (hasAny) {
-            setState(s => {
-              const merged = { ...s };
-              MODE_IDS.forEach(id => {
-                if (remote[id] && typeof remote[id] === 'object') {
-                  merged[id] = { ...MODE_META[id].defaults, ...s[id], ...remote[id] };
-                }
-              });
-              return merged;
-            });
-          }
-        }
-        hydratedRef.current = true;
-      } catch (_) {
-        // Network failure: keep localStorage state, mark hydrated so push fires later
-        hydratedRef.current = true;
-      }
+      if (cancelled) return;
+      await hydrateFromBackend();
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [hydrateFromBackend]);
+
+  // T-490: listen for soft-kill fire/reset and re-hydrate. Without this, the
+  // Trading Modes screen keeps showing the stale (pre-kill) state until the
+  // user navigates away and back.
+  React.useEffect(() => {
+    const onChange = () => {
+      hydratedRef.current = false;
+      hydrateFromBackend();
+    };
+    window.addEventListener('risk-config-changed', onChange);
+    return () => window.removeEventListener('risk-config-changed', onChange);
+  }, [hydrateFromBackend]);
 
   // T-487: debounced PUT to backend on state change (after initial hydration).
   // 500ms debounce so rapid slider drags coalesce into one network round-trip.

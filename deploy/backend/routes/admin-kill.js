@@ -20,7 +20,9 @@
 const softKill = require('../services/soft-kill');
 
 function mountAdminKillRoutes(app, deps) {
-  const { getAuth, getAudit, getNotify } = deps;
+  // T-490: getRiskConfig is the NEW dep -- needed so the kill button can
+  // also flip the user's activeModes to disabled (and restore on reset).
+  const { getAuth, getAudit, getNotify, getRiskConfig } = deps;
 
   function _audit(event, data) {
     try {
@@ -54,14 +56,50 @@ function mountAdminKillRoutes(app, deps) {
     const body = req.body || {};
     const reason = body.reason ? String(body.reason).slice(0, 200) : 'ui-kill-button';
 
+    // T-490: snapshot the user's activeModes BEFORE flipping the kill flag.
+    // Best-effort: if risk-config service isn't initialized or read fails, we
+    // still fire the kill (the in-memory flag is the safety-critical part);
+    // we just won't be able to pause/restore the per-mode toggles.
+    let snapshotActiveModes = null;
+    let modesPausedCount = 0;
+    let modePauseError = null;
+    try {
+      const svc = (typeof getRiskConfig === 'function') ? getRiskConfig() : null;
+      if (svc && typeof svc.get === 'function' && typeof svc.upsert === 'function') {
+        const cfg = svc.get(req.user.id);
+        if (cfg && cfg.activeModes && typeof cfg.activeModes === 'object') {
+          // Deep-clone the snapshot before we mutate (safer than relying on
+          // svc.get to return a fresh object).
+          snapshotActiveModes = JSON.parse(JSON.stringify(cfg.activeModes));
+          // Build the paused-modes object: every existing mode flipped to
+          // enabled:false. We preserve all other per-mode fields (capitalPct,
+          // mode-specific settings) so reset is a pure re-enable.
+          const pausedModes = {};
+          for (const [modeId, modeCfg] of Object.entries(snapshotActiveModes)) {
+            if (modeCfg && typeof modeCfg === 'object') {
+              pausedModes[modeId] = { ...modeCfg, enabled: false };
+              if (modeCfg.enabled) modesPausedCount++;
+            }
+          }
+          svc.upsert(req.user.id, { activeModes: pausedModes });
+        }
+      }
+    } catch (e) {
+      modePauseError = e && e.message ? e.message : String(e);
+      _audit('admin.softKill.modePauseFailed', { userId: req.user.id, msg: modePauseError });
+      // Do NOT abort the kill. The in-memory flag is the primary safety gate.
+    }
+
     const wasActive = softKill.get();
-    softKill.set({ userId: req.user.id, reason });
+    softKill.set({ userId: req.user.id, reason, snapshotActiveModes });
 
     _audit('admin.softKill.fired', {
       userId: req.user.id,
       email: req.user.email || null,
       reason,
       wasAlreadyActive: wasActive,
+      modesPausedCount,
+      modePauseError,  // null on success
       ip: req.ip || (req.headers && req.headers['x-forwarded-for']) || null,
       ua: (req.headers && req.headers['user-agent']) || null,
     });
@@ -81,7 +119,7 @@ function mountAdminKillRoutes(app, deps) {
     ].join('\n');
     _alert(text); // fire-and-forget
 
-    res.json({ ok: true, ...softKill.state() });
+    res.json({ ok: true, modesPausedCount, ...softKill.state() });
   });
 
   app.post('/api/admin/soft-kill-reset', async (req, res) => {
@@ -94,12 +132,35 @@ function mountAdminKillRoutes(app, deps) {
     }
 
     const prev = softKill.state();
+
+    // T-490: restore the activeModes snapshot that was captured at fire time.
+    // Best-effort: if the snapshot is missing (e.g. backend restarted with
+    // KILL_SWITCH=true while soft-kill was still active) we just clear the
+    // flag and warn -- the operator can re-enable modes manually from UI.
+    let modesRestoredCount = 0;
+    let modeRestoreError = null;
+    try {
+      const snapshot = softKill.getSnapshotActiveModes();
+      const svc = (typeof getRiskConfig === 'function') ? getRiskConfig() : null;
+      if (snapshot && svc && typeof svc.upsert === 'function') {
+        svc.upsert(req.user.id, { activeModes: snapshot });
+        for (const m of Object.values(snapshot)) {
+          if (m && m.enabled) modesRestoredCount++;
+        }
+      }
+    } catch (e) {
+      modeRestoreError = e && e.message ? e.message : String(e);
+      _audit('admin.softKill.modeRestoreFailed', { userId: req.user.id, msg: modeRestoreError });
+    }
+
     softKill.reset();
 
     _audit('admin.softKill.reset', {
       userId: req.user.id,
       email: req.user.email || null,
       prev,
+      modesRestoredCount,
+      modeRestoreError,  // null on success
       ip: req.ip || (req.headers && req.headers['x-forwarded-for']) || null,
     });
 
@@ -115,7 +176,7 @@ function mountAdminKillRoutes(app, deps) {
     ].join('\n');
     _alert(text);
 
-    res.json({ ok: true, ...softKill.state() });
+    res.json({ ok: true, modesRestoredCount, ...softKill.state() });
   });
 }
 
