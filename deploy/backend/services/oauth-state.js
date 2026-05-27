@@ -28,6 +28,24 @@ const crypto = require('crypto');
 const _pendingNonces = new Map(); // nonce -> { userId, exp }
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-only-change-me';
 
+// T-474 (audit-2026-05-26 backend H10): hard prod safeguard.
+// In production, refuse to load if SESSION_SECRET is missing or still the dev
+// placeholder. Without this, an operator that fat-fingers the env file would
+// silently get a deployment where every OAuth state token is HMAC'd with a
+// publicly-known key -- meaning anyone can forge a valid `state` and complete
+// the OAuth callback as ANY user. Caught at module load, not first request,
+// so the container fails to start (deploy.yml's health-check then refuses to
+// promote the new image and the previous good container keeps serving).
+// Dev/test deploys (NODE_ENV !== 'production') keep the convenience fallback.
+if (process.env.NODE_ENV === 'production') {
+  const _ss = process.env.SESSION_SECRET;
+  if (!_ss || _ss === 'dev-only-change-me' || _ss.length < 32) {
+    // eslint-disable-next-line no-console
+    console.error('[oauth-state] FATAL: SESSION_SECRET missing, dev-default, or <32 chars in production. Refusing to start.');
+    process.exit(78); // EX_CONFIG -- matches server.js convention.
+  }
+}
+
 function signState(userId) {
   const nonce = crypto.randomBytes(12).toString('hex');
   const idB64 = Buffer.from(String(userId)).toString('base64').replace(/=+$/,'');

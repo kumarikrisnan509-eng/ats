@@ -80,19 +80,23 @@ jobs:
         run: |
           if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
-      - name: Dependency vulnerability scan (npm audit -- BLOCKING, T-199)
+      - name: Dependency vulnerability scan (npm audit -- BLOCKING, T-199 / T-474)
         working-directory: deploy/backend
         run: |
           # T-199 (CODE-AUDIT D.9 #5): flipped from continue-on-error to blocking.
           # T-171 cleared all 8 high-severity vulns; this gate keeps them clear.
-          # Audit level "high" matches what T-171 verified clean. If a transitive
-          # bump introduces a new high+critical CVE, this step fails the build
-          # and the operator must either update the dep or document an exception.
+          # T-474 (audit-2026-05-26 infra H6): tightened from --audit-level=high to
+          # --audit-level=moderate. T-474 cleared the lone moderate (qs 6.15.1 -> 6.15.2
+          # for GHSA-q8mj-m7cp-5q26); the gate now catches the next moderate before it
+          # ships. A new transitive moderate fails the build; operator either runs
+          # `npm audit fix` (preferred, lockfile-only when possible) or documents an
+          # exception. We deliberately stop short of `--audit-level=low` because the
+          # `low` bucket fluctuates daily and would whack-a-mole the CI gate.
           echo "=== npm audit summary (machine-readable) ==="
           npm audit --json | python3 -c "import sys, json; d=json.load(sys.stdin); m=d.get('metadata',{}).get('vulnerabilities',{}); print('counts:', m); total=sum(m.values()); print('::notice::npm audit total vulnerabilities:', total)" || true
           echo ""
-          echo "=== npm audit (high+, blocking) ==="
-          npm audit --audit-level=high
+          echo "=== npm audit (moderate+, blocking) ==="
+          npm audit --audit-level=moderate
 
       - name: Syntax-check backend JS
         run: |
