@@ -195,6 +195,14 @@ const MultiBrokerPnL = () => {
           <div className="card__title">Broker P&amp;L</div>
           <div className="card__sub">Zerodha · {data && data.connected ? 'connected' : 'reconnecting'}</div>
         </div>
+        {/* T-471 (audit-2026-05-26 frontend L6): the audit flagged <a
+            href="#x"> inside button-styled cards as a semantic mismatch.
+            For THIS specific pattern it's correct: changing the URL hash
+            IS navigation, not an action. The .btn class is purely visual
+            (matches the surrounding action buttons). Tab focus + Enter
+            already work natively on <a href>. Keeping <a> as the right
+            element; comment locks in the intent so a future drive-by
+            refactor doesn't flip to <button>. */}
         <a href="#brokers" className="btn btn--sm btn--ghost">Manage</a>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 14 }}>

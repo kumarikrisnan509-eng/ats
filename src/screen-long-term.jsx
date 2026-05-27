@@ -147,7 +147,14 @@ window.LongTermScreen = function LongTermScreen() {
 
   // ----- Auto-DCA CTA: PUT /api/sip with a new entry (existing Tier 18 backend) -----
   const onAutoDca = async (entry) => {
-    const amtStr = window.prompt(`Monthly DCA amount for ${entry.symbol} (INR):`, '5000');
+    // T-471 (audit-2026-05-26 frontend L7 — final): themed promptAsync.
+    const amtStr = await window.promptAsync({
+      title: `Monthly DCA amount for ${entry.symbol}`,
+      sub: 'Enter rupees per month (₹100 minimum).',
+      placeholder: '5000',
+      defaultValue: '5000',
+      confirmLabel: 'Add to SIP',
+    });
     if (!amtStr) return;
     const amt = Number(amtStr);
     if (!Number.isFinite(amt) || amt < 100) { setMsg('Amount must be ≥ ₹100'); return; }

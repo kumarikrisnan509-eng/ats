@@ -487,4 +487,73 @@ function _confirmAsyncImpl(opts) {
   });
 }
 
-Object.assign(window, { Modal, PreTradeSimulator, TwoFactorModal, AIExplainerModal, ConfirmModal, confirmAsync: _confirmAsyncImpl });
+// T-471 (audit-2026-05-26 frontend L7 — last sites): Promise-based
+// prompt wrapper. Lets callers do
+//   `const v = await window.promptAsync({title, placeholder, defaultValue});`
+// without per-site state plumbing. Returns Promise<string|null> — null
+// when the user cancels. Built on the same portal pattern as
+// confirmAsync (transient mount, React 18 createRoot, cleanup on resolve).
+function _PromptModal({ title, sub, placeholder, defaultValue, confirmLabel, cancelLabel, onClose, onConfirm }) {
+  const [value, setValue] = React.useState(defaultValue || '');
+  const inputRef = React.useRef(null);
+  React.useEffect(() => {
+    if (inputRef.current) try { inputRef.current.focus(); inputRef.current.select(); } catch (_) {}
+  }, []);
+  return React.createElement(Modal, {
+    open: true, onClose, title, sub, width: 480,
+    footer: React.createElement('div', { className: 'row', style: { gap: 10, justifyContent: 'flex-end' } },
+      React.createElement('button', { className: 'btn', onClick: onClose }, cancelLabel || 'Cancel'),
+      React.createElement('button', { className: 'btn btn--accent', onClick: () => onConfirm(value) }, confirmLabel || 'OK')
+    )
+  },
+    React.createElement('input', {
+      ref: inputRef,
+      className: 'input',
+      value: value,
+      placeholder: placeholder || '',
+      onChange: (e) => setValue(e.target.value),
+      onKeyDown: (e) => { if (e.key === 'Enter') onConfirm(value); },
+      style: { width: '100%', padding: '8px 10px', fontSize: 14 },
+    })
+  );
+}
+
+function _promptAsyncImpl(opts) {
+  return new Promise((resolve) => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    let closed = false;
+    let r = null;
+    const close = (result) => {
+      if (closed) return;
+      closed = true;
+      try { if (r && r.unmount) r.unmount(); } catch (_) {}
+      try { root.remove(); } catch (_) {}
+      resolve(result);
+    };
+    try {
+      const el = React.createElement(_PromptModal, {
+        title: opts && opts.title || 'Input',
+        sub: opts && opts.sub,
+        placeholder: opts && opts.placeholder,
+        defaultValue: opts && opts.defaultValue,
+        confirmLabel: opts && opts.confirmLabel,
+        cancelLabel: opts && opts.cancelLabel,
+        onClose: () => close(null),
+        onConfirm: (v) => close(v),
+      });
+      if (typeof window.ReactDOM !== 'undefined' && window.ReactDOM.createRoot) {
+        r = window.ReactDOM.createRoot(root);
+        r.render(el);
+      } else if (typeof window.ReactDOM !== 'undefined' && window.ReactDOM.render) {
+        window.ReactDOM.render(el, root);
+      } else {
+        close(window.prompt((opts && opts.title) || 'Input', (opts && opts.defaultValue) || ''));
+      }
+    } catch (_) {
+      close(window.prompt((opts && opts.title) || 'Input', (opts && opts.defaultValue) || ''));
+    }
+  });
+}
+
+Object.assign(window, { Modal, PreTradeSimulator, TwoFactorModal, AIExplainerModal, ConfirmModal, confirmAsync: _confirmAsyncImpl, promptAsync: _promptAsyncImpl });

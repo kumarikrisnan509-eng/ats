@@ -85,6 +85,17 @@ su ats ats
 EOF
 
 echo "==> Creating archive wrapper: $WRAPPER"
+# T-471 (audit-2026-05-26 vm-scripts L5): heredoc quoting discipline.
+# This heredoc is INTENTIONALLY unquoted so $REMOTE_NAME / $REMOTE_DIR /
+# $LOCAL_LOGDIR / $RCLONE_LOG expand at install time (operator's env
+# values get baked into the wrapper). Variables that should expand
+# at RUN time inside the wrapper are escaped with \$ (e.g. \$REMOTE,
+# \$SQLITE_SRC). If you add a new variable below:
+#   - install-time substitution wanted -> use $VAR
+#   - run-time substitution wanted     -> use \$VAR
+# Failing to escape a run-time var means it expands to empty at install,
+# silently breaking the wrapper. The two logrotate cat > ... <<'EOF'
+# blocks above use SINGLE-QUOTED EOF intentionally so nothing expands.
 cat > "$WRAPPER" <<EOF
 #!/usr/bin/env bash
 # Tier I1: extended in 2026-05 to cover SQLite + sealed tokens (was audit-only).

@@ -212,8 +212,12 @@ const MoneyScreen = () => {
     finally { setBusy(false); setTimeout(() => setMsg(""), 4000); }
   };
   const executeSweep = () => {
-    // If TwoFactorModal isn't loaded for some reason, fall back to a native
-    // confirm so we never lose the money-move guard entirely.
+    // T-471 (audit-2026-05-26 frontend L7 — final): DELIBERATELY keep the
+    // native window.confirm here. This is the absolute-last-resort fallback
+    // when TwoFactorModal hasn't loaded; switching it to confirmAsync would
+    // add an extra failure mode (what if ReactDOM is also unloaded?) when
+    // the whole point of this branch is to gracefully degrade. Native
+    // confirm() is guaranteed available in every browser as long as JS runs.
     if (!window.TwoFactorModal) {
       if (!confirm(`Execute sweep of ${fmtInr(wouldSweepTotal)} now? This will move funds into your long-term plan.`)) return;
       _doSweepPost();
