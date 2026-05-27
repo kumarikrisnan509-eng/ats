@@ -23,6 +23,8 @@
 
 const fs   = require('fs');
 const path = require('path');
+// T-485: soft-kill flag -- autorun pauses when operator fires the kill switch.
+const softKill = require('./services/soft-kill');
 
 const DEFAULT_STORE  = '/var/lib/ats/tokens/_autorun.json';
 const HISTORY_MAX    = 100;
@@ -201,6 +203,25 @@ class AutoRunner {
     if (this._inflight) return { result: 'skipped', reason: 'in_flight' };
     if (!this._config)               return { result: 'skipped', reason: 'no_config' };
     if (!this._config.enabled)       return { result: 'skipped', reason: 'disabled' };
+    // T-485: soft-kill pause. When operator fires the in-memory soft-kill flag
+    // (POST /api/admin/soft-kill from the UI Kill button), autorun returns
+    // early instead of computing signals + attempting blocked orders every
+    // tick. Cleaner audit chain (no rejected-attempt noise), lower CPU during
+    // halt, and the audit trail clearly shows the engine stopped at the same
+    // instant the flag was set rather than the operator having to grep
+    // through dozens of `preTrade.blocked.softKill` events to confirm it.
+    if (softKill.get()) {
+      // Only audit ONCE per soft-kill burst to avoid filling the chain with
+      // tick-rate noise. We tag with the soft-kill state so a single entry
+      // tells the full story.
+      if (!this._softKillNotifiedAt || (Date.now() - this._softKillNotifiedAt) > 60_000) {
+        this.audit('autorun.skipped.softKill', { source: source || 'manual', softKillState: softKill.state() });
+        this._softKillNotifiedAt = Date.now();
+      }
+      return { result: 'skipped', reason: 'soft_kill', softKillState: softKill.state() };
+    }
+    // Reset the throttle once soft-kill is cleared so the next halt audits again.
+    if (this._softKillNotifiedAt) this._softKillNotifiedAt = 0;
     this._inflight = true;
     const t0 = Date.now();
     const run = {
