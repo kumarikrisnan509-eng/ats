@@ -83,7 +83,7 @@ jobs:
           echo "tags=${ref}:${short},${ref}:latest" >> "$GITHUB_OUTPUT"
 
       - name: Build & push (linux/amd64)
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # T-469 infra M14: pinned to docker/build-push-action@v6
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf  # T-47.2.09 infra M14: pinned to docker/build-push-action@v7.2.0
         with:
           context: .
           file: deploy/docker/Dockerfile
