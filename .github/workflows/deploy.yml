@@ -23,6 +23,12 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# T-473 (audit-2026-05-26 infra M11): the concurrency group below DOES
+# cover workflow_dispatch — per GitHub docs, the `group:` key matches
+# across all trigger types (push, workflow_dispatch, schedule, etc.).
+# Verified by reading the run history: workflow_dispatch + push runs
+# queue in the same FIFO and never execute concurrently. The audit's
+# concern about a manual dispatch racing a push is therefore moot.
 concurrency:
   group: deploy-prod
   cancel-in-progress: false   # never preempt a deploy mid-flight

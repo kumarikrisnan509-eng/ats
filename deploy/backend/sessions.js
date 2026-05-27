@@ -23,6 +23,30 @@ const crypto = require('crypto');
 const fs     = require('fs');
 const path   = require('path');
 
+// T-473 (audit-2026-05-26 backend M4 — final): per-method usage tracker.
+// Each unique caller logs once per process (Set-based dedup) so audit.log
+// shows which paths still touch the legacy store without spamming. Once
+// the Set is empty across a few prod hours, the module can actually be
+// deleted.
+const _sessionsCallSites = new Set();
+function _trackDeprecated(method) {
+  try {
+    const stack = new Error().stack || '';
+    // Pick the caller frame (2 frames up: _trackDeprecated -> wrapped method -> caller).
+    const m = stack.split('\n').slice(3, 4).join(' ').trim();
+    const key = `${method}@${m}`;
+    if (!_sessionsCallSites.has(key)) {
+      _sessionsCallSites.add(key);
+      try {
+        if (typeof globalThis.atsAudit === 'function') {
+          globalThis.atsAudit('sessions.deprecated-call', { method, callsite: m });
+        }
+        console.warn(`[sessions:DEPRECATED] ${method} called from: ${m}`);
+      } catch (_) { /* best-effort */ }
+    }
+  } catch (_) { /* never fail real call on tracking */ }
+}
+
 class SessionStore {
   /**
    * @param {object} opts
@@ -30,6 +54,7 @@ class SessionStore {
    * @param {import('./crypto-vault').Vault} opts.vault
    */
   constructor({ tokensDir, vault }) {
+    _trackDeprecated('SessionStore.constructor');
     this.tokensDir = tokensDir;
     this.vault = vault;
     /** Map<sessionId, userId> */
@@ -38,16 +63,19 @@ class SessionStore {
   }
 
   newSession(userId) {
+    _trackDeprecated('SessionStore.newSession');
     const id = crypto.randomBytes(32).toString('base64url');
     this.sessions.set(id, userId);
     return id;
   }
 
   userIdFor(sessionId) {
+    _trackDeprecated('SessionStore.userIdFor');
     return this.sessions.get(sessionId) || null;
   }
 
   destroy(sessionId) {
+    _trackDeprecated('SessionStore.destroy');
     this.sessions.delete(sessionId);
   }
 
@@ -58,6 +86,7 @@ class SessionStore {
   }
 
   async saveTokens(userId, payload) {
+    _trackDeprecated('SessionStore.saveTokens');
     const sealed = await this.vault.seal(JSON.stringify(payload));
     const p = this._tokenPath(userId);
     fs.writeFileSync(p, sealed, { mode: 0o600 });
@@ -65,6 +94,7 @@ class SessionStore {
   }
 
   async loadTokens(userId) {
+    _trackDeprecated('SessionStore.loadTokens');
     const p = this._tokenPath(userId);
     if (!fs.existsSync(p)) return null;
     const sealed = fs.readFileSync(p, 'utf8');
@@ -73,11 +103,13 @@ class SessionStore {
   }
 
   async forgetTokens(userId) {
+    _trackDeprecated('SessionStore.forgetTokens');
     const p = this._tokenPath(userId);
     try { fs.unlinkSync(p); } catch (e) { console.debug('[sessions] swallowed:', e && e.message); }
   }
 
   listAllUserIds() {
+    _trackDeprecated('SessionStore.listAllUserIds');
     if (!fs.existsSync(this.tokensDir)) return [];
     return fs.readdirSync(this.tokensDir)
       .filter(f => f.endsWith('.enc'))

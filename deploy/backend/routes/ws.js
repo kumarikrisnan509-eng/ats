@@ -90,6 +90,13 @@ function mountWs(server, deps) {
 
     // T-130 (Tier 75 Phase 1): WebSocket auth-on-connect.
     //
+    // T-473 (audit-2026-05-26 backend L6): single-cookie model.
+    // The audit referenced a "dual-cookie issue" from a prior C3
+    // finding that has since been resolved — `ats.sid` is now the
+    // canonical session cookie everywhere (no `ats_sid` variant).
+    // No migration needed; this comment locks in the state so a
+    // future drive-by refactor doesn't reintroduce the dual-cookie
+    // architecture by accident.
     // Read the ats.sid cookie from the upgrade-request headers, verify the HMAC,
     // and look up the session row. Stash userId + userEmail on the ws instance
     // so future per-user filtering (Tier 75 Phase 2) can scope tick broadcasts.
