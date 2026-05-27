@@ -195,6 +195,8 @@ const AutorunPanel = () => {
 };
 
 const StrategiesScreen = () => {
+  // T-470 (audit-2026-05-26 frontend M8): surface fetch failures.
+  const [loadErr, setLoadErr] = React.useState(null);
   // Real backend strategy registry + watchlist backtest trigger, exposed via window helpers.
   const [backendStrats, setBackendStrats] = React.useState([]);
   const [stratsLoaded, setStratsLoaded] = React.useState(false);  // T-350: separate "not yet" from "empty"
@@ -212,7 +214,7 @@ const StrategiesScreen = () => {
         }
       } catch (e) {
         console.warn('[screen-strategies] swallowed:', e && e.message);
-        if (!cancelled) setStratsLoaded(true);  // T-350: still mark loaded so we show empty-state, not eternal spinner
+        if (!cancelled) { setStratsLoaded(true); setLoadErr(e); /* T-470 M8 */ }  // T-350: still mark loaded so we show empty-state, not eternal spinner
       }
       try {
         const r = await window.fetchApi('/api/me/risk-metrics?days=30');

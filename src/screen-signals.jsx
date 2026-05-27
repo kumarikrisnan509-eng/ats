@@ -211,6 +211,8 @@ const ModeGateBanner = () => {
 };
 
 const SignalsScreen = () => {
+  // T-470 (audit-2026-05-26 frontend M8): surface fetch failures.
+  const [loadErr, setLoadErr] = React.useState(null);
   // Re-render when mode gates flip
   const [, bump] = React.useReducer(x => x + 1, 0);
   const [explainSig, setExplainSig] = React.useState(null);
@@ -269,7 +271,7 @@ const SignalsScreen = () => {
           total_months: Array.isArray(j.months) ? j.months.length : 0,
           total_swept: (j.months || []).reduce((s, m) => s + (Number(m.total_inr) || 0), 0),
         });
-      } catch (e) { console.warn('[screen-signals] swallowed:', e && e.message); }
+      } catch (e) { console.warn('[screen-signals] swallowed:', e && e.message); setLoadErr(e); /* T-470 M8 */ }
     })();
     return () => { cancelled = true; };
   }, []);

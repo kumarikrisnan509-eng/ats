@@ -9,6 +9,8 @@
 */
 
 const MoneyScreen = () => {
+  // T-470 (audit-2026-05-26 frontend M8): surface fetch failures.
+  const [loadErr, setLoadErr] = React.useState(null);
   // ---- live paper stats (for today's earning) ----
   const [paperStats, setPaperStats] = React.useState(null);
   // ---- live holdings (for long-term breakdown) ----
@@ -107,7 +109,7 @@ const MoneyScreen = () => {
       if (sw && sw.ok) setSweepData(sw);
       if (ev && ev.ok) setEvalData(ev);
       if (bk && bk.ok && bk.buckets) setBuckets(bk.buckets);
-    } catch (e) { console.warn('[screen-money] error:', e && e.message); }
+    } catch (e) { console.warn('[screen-money] error:', e && e.message); setLoadErr(e); /* T-470 M8 */ }
   }, []);
 
   React.useEffect(() => {

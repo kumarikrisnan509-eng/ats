@@ -222,6 +222,8 @@ const PortfolioScreen = () => {
   // FactorTiltPanel's local _isDemoFT from PortfolioScreen's render; this
   // promotes it to PortfolioScreen scope so the gate works at runtime too.
   const _isDemoFT = !!(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
+  // T-470 (audit-2026-05-26 frontend M8): surface fetch failures via LoadError.
+  const [loadErr, setLoadErr] = React.useState(null);
   const [holdings, setHoldings] = React.useState([]);
 
   // T-158: live sweep MTD from /api/me/sweep/monthly. Falls back to "—"
@@ -276,6 +278,8 @@ const PortfolioScreen = () => {
         setHoldings(rows);
       } catch (err) {
         console.warn('[portfolio] /api/portfolio/holdings failed:', err.message);
+        // T-470 frontend M8
+        setLoadErr(err);
         if (!cancelled) setHoldings([]);
       }
     })();

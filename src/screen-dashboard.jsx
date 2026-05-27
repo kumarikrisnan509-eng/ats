@@ -565,6 +565,11 @@ const PipelineFlow = () => {
 const DashboardScreen = () => {
   const [tf, setTf] = useState("1D");
   const [demo] = window.useDemoMode();
+  // T-470 (audit-2026-05-26 frontend M8): surface fetch failures via the
+  // shared <LoadError> primitive instead of swallowing into console.warn.
+  // Captured in the main refresh() catch below; rendered at the top of
+  // the page so the operator sees it without scrolling.
+  const [loadErr, setLoadErr] = React.useState(null);
 
   // Tier 8: live dashboard metrics
   const [liveDash, setLiveDash] = React.useState(null);
@@ -664,7 +669,12 @@ const DashboardScreen = () => {
             : []
         });
         if (profile && profile.ok) setLiveProfile(profile.profile);
-      } catch (e) { console.warn('[screen-dashboard] error:', e && e.message); }
+        // T-470 frontend M8: clear stale err on success
+        if (!cancelled) setLoadErr(null);
+      } catch (e) {
+        console.warn('[screen-dashboard] error:', e && e.message);
+        if (!cancelled) setLoadErr(e);
+      }
     };
     refresh();
     const id = setInterval(refresh, 30000);
@@ -850,6 +860,8 @@ const DashboardScreen = () => {
 
   return (
     <>
+      {/* T-470 (audit-2026-05-26 frontend M8): surface fetch failures. */}
+      {window.LoadError && <window.LoadError err={loadErr}/>}
       <div className="page-header">
         <div>
           <h1 className="page-header__title" style={{ fontSize: 24, marginBottom: 4 }}>Welcome back, {(window.atsCurrentUser && window.atsCurrentUser.name) ? window.atsCurrentUser.name.split(' ')[0] : 'trader'} · <span className="muted" style={{ fontWeight: 400 }}>{fmtDate()}</span></h1>
