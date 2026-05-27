@@ -57,6 +57,23 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: "20"
+          cache: 'npm'
+          cache-dependency-path: deploy/backend/package-lock.json
+
+      # T-463 (audit-2026-05-26 infra L10): cache the THROWAWAY tool
+      # installs from later steps (@babel/parser, typescript, eslint).
+      # Each step previously did `mkdir .ci-tmp && npm install --no-save`
+      # which re-downloaded ~30MB per step per run. Keyed by the tool
+      # versions pinned in the install commands so a bump invalidates
+      # cleanly. Saves ~30-45s per CI run.
+      - name: Cache CI throwaway tool installs
+        uses: actions/cache@v4
+        with:
+          path: |
+            .ci-tmp
+            .ci-tmp-tsc
+            .ci-tmp-eslint
+          key: ci-tools-v1-${{ runner.os }}-babel7-tsc5.4.5-eslint8
 
       - name: Install backend deps
         working-directory: deploy/backend
@@ -122,9 +139,12 @@ jobs:
           # JSX files must parse as JS-with-JSX. Install @babel/parser into a throwaway dir, then require it.
           # Stub package.json prevents npm from walking up to the repo-root package.json
           # (added for local dev loop) and installing into the wrong node_modules.
+          # T-463 infra L10: skip npm install when actions/cache restored the tree.
           mkdir -p .ci-tmp && cd .ci-tmp
-          echo '{"name":"ci-tmp","version":"0.0.0","private":true}' > package.json
-          npm install --silent --no-save --no-package-lock @babel/parser@7 >/dev/null
+          if [ ! -d node_modules/@babel/parser ]; then
+            echo '{"name":"ci-tmp","version":"0.0.0","private":true}' > package.json
+            npm install --silent --no-save --no-package-lock @babel/parser@7 >/dev/null
+          fi
           cd ..
           node -e '
             const parser = require("./.ci-tmp/node_modules/@babel/parser");
@@ -144,7 +164,8 @@ jobs:
             }
             if (bad > 0) { console.error(bad + " JSX file(s) failed to parse"); process.exit(1); }
           '
-          rm -rf .ci-tmp
+          # T-463 infra L10: KEEP .ci-tmp around — actions/cache uploads it
+          # at end of job; deleting here defeats the cache.
 
       - name: Duplicate top-level const guard (.jsx)
         run: |
@@ -180,12 +201,15 @@ jobs:
           # see types/api-shapes.d.ts for the canonical shape definitions.
           # Currently checks 2 files; expand tsconfig.json::include as more
           # screens migrate.
+          # T-463 infra L10: skip npm install when actions/cache restored the tree.
           mkdir -p .ci-tmp-tsc && cd .ci-tmp-tsc
-          echo '{"name":"ci-tmp-tsc","version":"0.0.0","private":true}' > package.json
-          npm install --silent --no-save --no-package-lock typescript@5.4.5 >/dev/null
+          if [ ! -d node_modules/typescript ]; then
+            echo '{"name":"ci-tmp-tsc","version":"0.0.0","private":true}' > package.json
+            npm install --silent --no-save --no-package-lock typescript@5.4.5 >/dev/null
+          fi
           cd ..
           ./.ci-tmp-tsc/node_modules/.bin/tsc --noEmit -p tsconfig.json
-          rm -rf .ci-tmp-tsc
+          # T-463 infra L10: KEEP .ci-tmp-tsc for the cache. See note above.
           echo "JSDoc typecheck OK"
 
       - name: ESLint backend (T-381 -- catch ReferenceError class pre-deploy)

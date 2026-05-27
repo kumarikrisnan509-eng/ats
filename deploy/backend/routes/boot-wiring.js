@@ -213,7 +213,17 @@ function mountBootWiringRoutes(app, deps) {
   }
   app.get('/api/csrf-token', (req, res) => {
     const sid = readSessionCookie(req);
-    if (!sid) return res.status(401).json({ ok: false, reason: 'auth_required' });
+    if (!sid) {
+      // T-463 (audit-2026-05-26 backend L7): UX fix. Frontend bootstrap
+      // fetches /api/csrf-token unconditionally on page load. Before this
+      // change every anon visit produced a 401 in browser dev tools and
+      // any error-tracking dashboard (Sentry, _lastRequestId observer).
+      // Not a security issue — the caller had no cookie so no CSRF token
+      // is needed yet — but the 401 noise muddied real error signals.
+      // Return 200 + csrfToken:null so the caller knows "no session yet,
+      // come back after login" without flagging the request as an error.
+      return res.json({ ok: true, csrfToken: null, reason: 'no_session' });
+    }
     const token = _csrfToken(sid);
     return res.json({ ok: true, csrfToken: token });
   });
