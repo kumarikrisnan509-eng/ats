@@ -264,7 +264,8 @@ const AIReviewScreen = () => {
               {mrBusy ? 'Generating…' : 'Generate review'}
             </button>
           }>
-          {mrErr && <div style={{ padding: 12, background: 'var(--down-soft)', color: 'var(--down)', borderRadius: 6, fontSize: 12 }}>Error: {mrErr}</div>}
+          {/* T-476 (audit-2026-05-26 frontend M8 final): LoadError primitive. */}
+          {mrErr && (window.LoadError ? <window.LoadError err={mrErr}/> : <div style={{ padding: 12, background: 'var(--down-soft)', color: 'var(--down)', borderRadius: 6, fontSize: 12 }}>Error: {mrErr}</div>)}
           {!mrText && !mrErr && !mrBusy && (
             <div style={{ padding: 16, background: 'var(--bg-soft)', borderRadius: 6, fontSize: 12, color: 'var(--text-3)' }}>
               Click <b>Generate review</b> to have Claude analyse your paper-trading month and surface verdict / what worked / what didn't / one behavioral pattern / one actionable change.

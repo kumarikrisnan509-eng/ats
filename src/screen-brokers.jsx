@@ -298,7 +298,8 @@ const BrokerWizardModal = ({ open, mode, brokerName, existing, onClose, onSaved 
               </div>
             )}
 
-            {err && <div style={{ padding: 10, background: 'color-mix(in oklab, var(--danger) 12%, transparent)', color: 'var(--danger)', borderRadius: 6, fontSize: 12, marginBottom: 12 }}>{err}</div>}
+            {/* T-476 (audit-2026-05-26 frontend M8 final): consolidated to LoadError primitive (same styling, one source of truth). */}
+            {err && (window.LoadError ? <window.LoadError err={err}/> : <div style={{ padding: 10, background: 'color-mix(in oklab, var(--danger) 12%, transparent)', color: 'var(--danger)', borderRadius: 6, fontSize: 12, marginBottom: 12 }}>{err}</div>)}
 
             <div className="between">
               <button type="button" className="btn btn--sm" onClick={() => setStep(2)} disabled={busy}>Back</button>

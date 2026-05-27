@@ -137,10 +137,10 @@ window.RiskCockpitScreen = function RiskCockpitScreen() {
           Loading risk cockpit…
         </div>
       )}
-      {error && !data && (
-        <div style={{ padding: '6px 10px', marginBottom: 8, background: 'rgba(185,28,28,0.08)', borderRadius: 6, fontSize: 12, color: 'var(--down, #b91c1c)' }}>
-          Could not load aggregates: {String(error)}
-        </div>
+      {/* T-476 (audit-2026-05-26 frontend M8 final): LoadError primitive. */}
+      {error && !data && (window.LoadError
+        ? <window.LoadError err={error}/>
+        : <div style={{ padding: '6px 10px', marginBottom: 8, background: 'rgba(185,28,28,0.08)', borderRadius: 6, fontSize: 12, color: 'var(--down, #b91c1c)' }}>Could not load aggregates: {String(error)}</div>
       )}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <div>

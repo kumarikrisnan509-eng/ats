@@ -108,7 +108,8 @@ window.OptionsOpportunitiesScreen = function OptionsOpportunitiesScreen() {
     <div style={{padding:'16px 24px', maxWidth:1200}}>
       <h2 style={{margin:'4px 0 12px', fontSize:20}}>Options opportunities (SHADOW)</h2>
       {loading && <div style={{padding:'6px 10px', marginBottom:8, background:'var(--bg-soft)', borderRadius:6, fontSize:12, color:'var(--text-2)'}}>Loading scanner status…</div>}
-      {err && <div style={{padding:'6px 10px', marginBottom:8, background:'rgba(185,28,28,0.08)', borderRadius:6, fontSize:12, color:'var(--down, #b91c1c)'}}>Could not load latest data: {String(err)}</div>}
+      {/* T-476 (audit-2026-05-26 frontend M8 final): LoadError primitive. */}
+      {err && (window.LoadError ? <window.LoadError err={err}/> : <div style={{padding:'6px 10px', marginBottom:8, background:'rgba(185,28,28,0.08)', borderRadius:6, fontSize:12, color:'var(--down, #b91c1c)'}}>Could not load latest data: {String(err)}</div>)}
 
       {/* Status banner */}
       <div style={{

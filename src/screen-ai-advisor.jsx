@@ -92,10 +92,10 @@ const AiAdvisorScreen = () => {
         </div>
       </div>
 
-      {err && (
-        <div style={{ padding: 12, marginBottom: 16, borderRadius: 8, background: 'color-mix(in oklab, var(--danger) 10%, transparent)', color: 'var(--danger)', fontSize: 13 }}>
-          {err}
-        </div>
+      {/* T-476 (audit-2026-05-26 frontend M8 final): LoadError primitive. */}
+      {err && (window.LoadError
+        ? <window.LoadError err={err}/>
+        : <div style={{ padding: 12, marginBottom: 16, borderRadius: 8, background: 'color-mix(in oklab, var(--danger) 10%, transparent)', color: 'var(--danger)', fontSize: 13 }}>{err}</div>
       )}
 
       <div className="grid grid-2" style={{ marginBottom: 16 }}>

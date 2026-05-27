@@ -121,10 +121,10 @@ window.WalkForwardScreen = function WalkForwardScreen() {
         >{running ? 'Running...' : 'Run walk-forward'}</button>
       </div>
 
-      {err && (
-        <div style={{padding:'10px 14px', background:'rgba(185, 28, 28, 0.1)', border:'1px solid rgba(185, 28, 28, 0.4)', borderRadius:6, color:'var(--down, #b91c1c)', fontSize:13, marginBottom:14}}>
-          {String(err)}
-        </div>
+      {/* T-476 (audit-2026-05-26 frontend M8 final): LoadError primitive. */}
+      {err && (window.LoadError
+        ? <window.LoadError err={err}/>
+        : <div style={{padding:'10px 14px', background:'rgba(185, 28, 28, 0.1)', border:'1px solid rgba(185, 28, 28, 0.4)', borderRadius:6, color:'var(--down, #b91c1c)', fontSize:13, marginBottom:14}}>{String(err)}</div>
       )}
 
       {result && (

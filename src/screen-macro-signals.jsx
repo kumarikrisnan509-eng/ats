@@ -60,7 +60,8 @@ window.MacroSignalsScreen = function MacroSignalsScreen() {
   };
 
   if (loading) return <div style={{padding:24, color:'var(--text-2)'}}>Loading macro signals...</div>;
-  if (err) return <div style={{padding:24, color:'var(--down)'}}>Error: {String(err)}</div>;
+  // T-476 (audit-2026-05-26 frontend M8 final): swap bare error div for LoadError primitive.
+  if (err) return <div style={{padding:24}}>{window.LoadError ? <window.LoadError err={err}/> : <span style={{color:'var(--down)'}}>Error: {String(err)}</span>}</div>;
 
   const latest = data && data.latest;
   const enabled = data && data.fetcherEnabled;
