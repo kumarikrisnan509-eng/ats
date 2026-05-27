@@ -2187,6 +2187,9 @@ mountOrdersRoutes(app, {
   // T-273: consolidated pre-trade pipeline. orders.js uses this if available;
   // otherwise falls back to the inline gates (backward-compatible).
   getPreTradeCheck: () => preTradeCheck,
+  // T-465 (audit-2026-05-26 backend L8): pass db getter so the daily-loss
+  // circuit can read pnl_daily for live-order realized PnL (not just paper).
+  getDb: () => db,
 });
 
 // Tier 38: confirm a 2FA-pending order. Replays the held payload through

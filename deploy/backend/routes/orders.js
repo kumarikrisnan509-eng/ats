@@ -94,6 +94,10 @@ function mountOrdersRoutes(app, deps) {
     // new leverage + sector concentration gates. Backward compatible: when
     // absent, the existing inline gates still apply.
     getPreTradeCheck,
+    // T-465 (audit-2026-05-26 backend L8): daily-loss circuit now reads
+    // pnl_daily for live-order PnL as a second source. Optional — if
+    // absent, falls back to paper-only behaviour (audit M3 default).
+    getDb,
   } = deps;
 
   // ---------- /api/orders/dry-run (moved here in T-223 piece 6a) ----------
@@ -328,12 +332,37 @@ function mountOrdersRoutes(app, deps) {
       }
     } catch (_e) {}
 
-    // Tier 15 pre-trade risk-gate #3: daily-loss circuit (uses paper realizedPnl as proxy today)
+    // Tier 15 pre-trade risk-gate #3: daily-loss circuit.
+    // T-465 (audit-2026-05-26 backend L8): previously only checked
+    // paper.stats().realizedPnl, which is permanently 0 in a live-only
+    // deploy — the gate would silently never engage and real-money
+    // losses could exceed MAX_DAILY_LOSS_INR. Now reads the MOST
+    // NEGATIVE of (paper realized PnL, pnl_daily today's realized
+    // for the authed user). Either source can fire the circuit.
     try {
       const stats = paper ? paper.stats() : null;
-      const realizedToday = stats ? (stats.realizedPnl || 0) : 0;
+      const paperRealizedToday = stats ? (stats.realizedPnl || 0) : 0;
+      let liveRealizedToday = 0;
+      try {
+        const db = getDb && getDb();
+        if (db && db.pnl && req.user && req.user.id) {
+          const todayISO = new Date().toISOString().slice(0, 10);
+          const rows = db.pnl.recent(req.user.id, 1) || [];
+          const todayRow = rows.find(r => r && r.date === todayISO);
+          if (todayRow && Number.isFinite(todayRow.realized_pnl)) {
+            liveRealizedToday = Number(todayRow.realized_pnl);
+          }
+        }
+      } catch (_) { /* db unavailable — fall back to paper-only check */ }
+      const realizedToday = Math.min(paperRealizedToday, liveRealizedToday);
       if (realizedToday <= -Math.abs(MAX_DAILY_LOSS_INR)) {
-        audit('order.blocked.dailyLoss', { ...normalizedPayload, realizedToday, capINR: MAX_DAILY_LOSS_INR });
+        audit('order.blocked.dailyLoss', {
+          ...normalizedPayload,
+          realizedToday,
+          paperRealizedToday,
+          liveRealizedToday,
+          capINR: MAX_DAILY_LOSS_INR,
+        });
         return res.status(503).json({
           ok: false,
           reason: 'MAX_DAILY_LOSS_HIT',
