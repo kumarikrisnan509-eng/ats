@@ -26,6 +26,11 @@
 
 'use strict';
 
+// T-484: soft-kill flag (in-memory, set via POST /api/admin/soft-kill).
+// Single instance via require-cache; the routes module and this module
+// share the same flag.
+const softKill = require('./soft-kill');
+
 const DEFAULT_MAX_LEVERAGE       = 2.0;
 const DEFAULT_MAX_SECTOR_WEIGHT  = 0.30;  // 30%
 
@@ -46,6 +51,21 @@ function createPreTradeCheck({
    *             field-level validation which orders.js still owns).
    */
   function check({ userId, payload }) {
+    // ----------- GATE 0 (T-484): soft-kill (in-memory) -----------
+    // Fires BEFORE the env KILL_SWITCH check. The operator can flip this
+    // from the UI Kill button without a container restart. Env KILL_SWITCH
+    // remains the persistent gate that survives restarts.
+    if (softKill.get()) {
+      _audit('preTrade.blocked.softKill', { userId, payload, softKillState: softKill.state() });
+      return {
+        ok: false,
+        status: 503,
+        reason: 'SOFT_KILL_ON',
+        message: 'Live orders are disabled by operator soft-kill (fired from UI). Reset via POST /api/admin/soft-kill-reset. The persistent KILL_SWITCH env var is separate and unaffected.',
+        detail: softKill.state(),
+      };
+    }
+
     // ----------- GATE 1: KILL_SWITCH env -----------
     if (KILL_SWITCH) {
       _audit('preTrade.blocked.killSwitch', { userId, payload });

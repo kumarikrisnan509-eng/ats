@@ -33,6 +33,8 @@ const _verifyState = _oauthState.verifyState;
 const { mountAuthRoutes } = require('./routes/auth');
 // T-262: /api/me/risk-config GET/PUT (replaces SETUP-TRADING.cmd CLI).
 const { mountRiskConfigRoutes } = require('./routes/risk-config');
+// T-484: soft-kill endpoints (UI Kill button backing).
+const { mountAdminKillRoutes } = require('./routes/admin-kill');
 const { createRiskConfigService } = require('./services/risk-config');
 // T-264: tax-aware trade economics service (per-trade STT/GST/SEBI/brokerage math).
 const { createTradeEconomics } = require('./services/trade-economics');
@@ -2069,6 +2071,8 @@ mountAuthRoutes(app, { getAuth: () => auth, getEmailAlerts: () => emailAlerts })
 // because riskConfigService is assigned inside init() (after openDb)
 // but mountX is called at module top-level; capturing now = undefined.
 mountRiskConfigRoutes(app, { getRiskConfig: () => riskConfigService, getAuth: () => auth, getNotify: () => _notifyModule, getAudit: () => audit });
+// T-484: soft-kill endpoints. Backs the UI top-right Kill button.
+mountAdminKillRoutes(app, { getAuth: () => auth, getAudit: () => audit, getNotify: () => _notifyModule });
 // T-290e: option-chain READ routes + ops-key gated manual refresh.
 // fetcher may be null if init failed; the route checks for that.
 app.use((req, res, next) => {

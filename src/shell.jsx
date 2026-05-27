@@ -40,10 +40,30 @@ const KillSwitchButton = () => {
     setProgress(0);
   };
 
-  const onConfirm2FA = () => {
-    setFired(true);
+  // T-484: was theatre -- dispatched event but no backend call. Now POSTs to
+  // /api/admin/soft-kill which sets the in-memory flag that pre-trade.js GATE 0
+  // enforces. UI button now genuinely halts automated trading.
+  const onConfirm2FA = async () => {
     setNeeds2FA(false);
-    window.dispatchEvent(new CustomEvent("kill-switch-fired"));
+    try {
+      const r = await fetch('/api/admin/soft-kill', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrfToken || '' },
+        body: JSON.stringify({ reason: 'ui-kill-button' }),
+      }).then(r => r.json());
+      if (r && r.ok) {
+        setFired(true);
+        // Keep the legacy event dispatch for the ActiveAutomationStrip re-render.
+        window.dispatchEvent(new CustomEvent("kill-switch-fired"));
+      } else {
+        // Surface backend error so the operator knows it didn't actually halt.
+        // eslint-disable-next-line no-alert
+        alert('Kill switch FAILED to fire: ' + ((r && r.reason) || 'unknown error') + '. Trading is NOT halted.');
+      }
+    } catch (e) {
+      // eslint-disable-next-line no-alert
+      alert('Kill switch request failed: ' + (e && e.message ? e.message : String(e)) + '. Trading is NOT halted.');
+    }
   };
 
   if (fired) {
@@ -51,8 +71,29 @@ const KillSwitchButton = () => {
       <button
         className="top__killswitch"
         style={{ background: "var(--down)", color: "white", opacity: 0.9 }}
-        onClick={() => { setFired(false); setProgress(0); }}
-        title="All automated trading halted — click to reset"
+        onClick={async () => {
+          // T-484: was UI-only state flip. Now POSTs to /api/admin/soft-kill-reset
+          // so the in-memory backend flag is cleared too -- otherwise the UI would
+          // say "ready" while orders stay blocked.
+          try {
+            const r = await fetch('/api/admin/soft-kill-reset', {
+              method: 'POST', credentials: 'include',
+              headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrfToken || '' },
+            }).then(r => r.json());
+            if (!r || !r.ok) {
+              // eslint-disable-next-line no-alert
+              alert('Reset FAILED: ' + ((r && r.reason) || 'unknown') + '. Trading remains halted.');
+              return;
+            }
+          } catch (e) {
+            // eslint-disable-next-line no-alert
+            alert('Reset request failed: ' + (e && e.message ? e.message : String(e)) + '. Trading remains halted.');
+            return;
+          }
+          setFired(false);
+          setProgress(0);
+        }}
+        title="Soft-kill active — click to reset and re-enable automated trading"
       >
         <I.stop size={14}/> Halted
       </button>
