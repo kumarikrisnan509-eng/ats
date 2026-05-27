@@ -26,6 +26,19 @@ deploy/backend/.env
 deploy/backend/.env.*
 !deploy/backend/.env.example
 
+# T-456 (audit-2026-05-26 infra L6): block any stray key/cert from
+# entering the image, no matter where it lands in the build context.
+# These patterns are belt-and-suspenders for the operator who might
+# leave a local debugging key alongside the source.
+*.key
+**/*.key
+*.pem
+**/*.pem
+*.crt
+**/*.crt
+.secrets-local/
+**/.secrets-local/
+
 # Build artefacts
 dist
 build

@@ -45,6 +45,21 @@ function createAccountRouter({ db, vault, requireAuth, auth }) {
       // Typed-confirmation required
       const confirm = (req.body && req.body.confirm) || (req.query && req.query.confirm);
       if (confirm !== 'DELETE') return res.status(400).json({ ok: false, reason: 'confirm_required', detail: 'POST body must include { confirm: "DELETE" }' });
+      // T-456 (audit-2026-05-26 backend L5): audit BEFORE delete so the
+      // user-id is still on the row to read. Cascading FK deletes wipe
+      // brokers, sessions, watchlist, etc.; without this event there's
+      // no trace of the self-delete in audit.log / WORM chain.
+      try {
+        const u = db.users.byId(req.user.id);
+        if (typeof globalThis.atsAudit === 'function') {
+          globalThis.atsAudit('user.self-delete', {
+            userId: req.user.id,
+            email: u ? u.email : null,
+            created_at: u ? u.created_at : null,
+            ip: req.ip || null,
+          });
+        }
+      } catch (_) { /* don't block delete on audit failure */ }
       db.users.delete(req.user.id);
       // Clear session cookie
       if (auth && typeof auth._clearCookie === 'function') auth._clearCookie(res);

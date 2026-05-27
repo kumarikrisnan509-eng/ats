@@ -40,10 +40,15 @@ async function loadMasterKey(filePath) {
   return new Uint8Array(buf);
 }
 
+// T-456 (audit-2026-05-26 backend L2): registry of live Vault instances
+// for SIGTERM/SIGINT key-wipe. See _zeroAllVaultKeys() below.
+const _registeredVaults = new Set();
+
 class Vault {
   /** @param {Uint8Array} masterKey */
   constructor(masterKey) {
     this._key = masterKey;
+    _registeredVaults.add(this);
   }
 
   static async open(filePath) {
@@ -92,6 +97,34 @@ class Vault {
     }
     return s.to_string(pt);
   }
+}
+
+// T-456 (audit-2026-05-26 backend L2): wipe the master key from RSS on
+// SIGTERM (clean container stop / restart). Defense-in-depth — a heap
+// dump captured AFTER SIGTERM but BEFORE process exit will no longer
+// reveal the master key buffer contents.
+//
+// Registry approach: the Vault constructor (above) was patched to push
+// `this` into _registeredVaults; signal handlers iterate the registry
+// and zero each key in place. New seal/open calls after wipe will
+// throw on null this._key — correct behaviour for a shutting-down
+// process. Uses .fill(0) on the live buffer (not reassign) so a heap
+// dump can't recover via the original reference.
+function _zeroAllVaultKeys() {
+  for (const v of _registeredVaults) {
+    try {
+      const k = v._key;
+      if (k && typeof k.fill === 'function') k.fill(0);
+      v._key = null;
+    } catch (_) { /* best effort */ }
+  }
+  _registeredVaults.clear();
+}
+if (!process.listenerCount('SIGTERM')) {
+  process.once('SIGTERM', () => { _zeroAllVaultKeys(); });
+}
+if (!process.listenerCount('SIGINT')) {
+  process.once('SIGINT', () => { _zeroAllVaultKeys(); });
 }
 
 module.exports = { Vault, writeNewMasterKey };
