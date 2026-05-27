@@ -815,8 +815,14 @@ function sign(value) {
 }
 function setSessionCookie(res, sid) {
   const v = `${sid}.${sign(sid)}`;
+  // T-453 (audit-2026-05-26 backend L1): gate Secure on env so dev over
+  // plain http://localhost:8080 actually persists the cookie. users.js
+  // already does this via the `secureCookie` flag; the server.js helper
+  // had `secure: true` hardcoded which broke dev sign-in. Match the
+  // ENV_NAME check used for users.js construction (line 417).
+  const secure = (ENV_NAME === 'prod' || process.env.NODE_ENV === 'production');
   res.setHeader('Set-Cookie', cookie.serialize('ats.sid', v, {
-    httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge: 60 * 60 * 24 * 7,
+    httpOnly: true, secure, sameSite: 'lax', path: '/', maxAge: 60 * 60 * 24 * 7,
   }));
 }
 function readSessionCookie(req) {

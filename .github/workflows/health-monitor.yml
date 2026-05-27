@@ -16,9 +16,12 @@ name: health-monitor
 
 on:
   schedule:
-    # Every 15 min, 03:00 to 10:59 UTC (covers 08:30-16:30 IST, a 30-min buffer
-    # either side of NSE 09:00-15:30 trading hours), Monday through Friday.
-    - cron: '*/15 3-10 * * 1-5'
+    # T-453 (audit-2026-05-26 infra L9): bumped from */15 to */10 so an
+    # outage at the 09:15 IST market open is detected within 10 min instead
+    # of the previous worst-case 15 min (the 09:00 UTC slot was 15 min too
+    # early to catch a 09:15 IST market-open failure). Window stays the
+    # same: 03:00-10:59 UTC = 08:30-16:29 IST, Mon-Fri.
+    - cron: '*/10 3-10 * * 1-5'
   workflow_dispatch: {}
 
 permissions:

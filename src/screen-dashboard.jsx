@@ -673,12 +673,22 @@ const DashboardScreen = () => {
   const fmtDate = () => new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   // R8.C3 — close-position confirmation. Closing routes a market order at LTP; never silent.
   const [closing, setClosing] = React.useState(null);   // { sym, qty, avg, ltp, pnl, strat }
+  // T-453 (audit-2026-05-26 frontend L1 — but real impact is HIGH):
+  // the Dashboard "Equity curve" AreaChart was unconditionally rendering
+  // a seriesRandom-generated fake curve in BOTH demo and live mode. T-343
+  // claimed to gate the equity curve but missed this useMemo. Now gated:
+  // demo gets the synthetic curve; live returns [] which AreaChart already
+  // handles (T-345 added the empty-data guard) — the chart shows an empty
+  // state with the labels strip. When /api/me/pnl/daily-summary ships a
+  // real intraday series this useMemo will be the wire-up point.
+  const _isDemoEquity = !!(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
   const equitySeries = useMemo(() => {
+    if (!_isDemoEquity) return [];
     const map = { "1D": 78, "1W": 40, "1M": 30, "3M": 60, "YTD": 120, "1Y": 180 };
     const n = map[tf] || 78;
     const base = seriesRandom(7, n, 70, 120, 0.15).map((v, i) => v + i * 0.25);
     return base;
-  }, [tf]);
+  }, [tf, _isDemoEquity]);
 
   // T-353a: Watchlist symbol enum only. Previous version seeded literal prices
   // (RELIANCE 2948.50 / TCS 4120.10 / etc.) that flashed before live ticks arrived
@@ -1206,3 +1216,10 @@ const DashboardScreen = () => {
     </>
   );
 };
+
+// Close-position confirmation — context-aware: shows current MTM and slippage estimate
+const DashboardScreenWithModals = (props) => {
+  return <DashboardScreen {...props}/>;
+};
+
+Object.assign(window, { DashboardScreen });
