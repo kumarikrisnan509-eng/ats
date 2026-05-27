@@ -1,11 +1,24 @@
 #!/usr/bin/env bash
 # ============================================================
-#  repair-rclone-wrapper.sh — T99-T39 one-time install.
+#  repair-rclone-wrapper.sh — INSTALLER (despite the name).
 #
-#  Installs the standalone ats-archive.sh wrapper (which fixes the SQLITE_SRC
-#  path bug — old default /data/ats/ats.db doesn't exist on this VM; correct
-#  path is /var/lib/ats/tokens/ats.db). Symlinks /usr/local/bin/ats-archive-audit.sh
-#  to the new script so the existing cron entry keeps working.
+#  T-464 (audit-2026-05-26 vm-scripts L4): historical name — the original
+#  purpose was a one-time repair of a SQLITE_SRC path bug (T99-T39). The
+#  file is now invoked from setup-all.sh:36 as the canonical install step
+#  for the rclone backup wrapper, even on fresh VMs. The "repair" in the
+#  name is therefore misleading. Renaming would break:
+#    - setup-all.sh:36 ("rclone backup wrapper|.../repair-rclone-wrapper.sh")
+#    - .github/workflows/deploy.yml:157 (scp source path)
+#    - on-VM cron references at /opt/ats/scripts/repair-rclone-wrapper.sh
+#  So the file keeps its historical name; this comment block is the
+#  authoritative explanation. If you're reading this for the first time:
+#  THIS IS AN INSTALLER, not a repair tool.
+#
+#  What it does:
+#    Installs the standalone ats-archive.sh wrapper (which fixes the SQLITE_SRC
+#    path bug — old default /data/ats/ats.db doesn't exist on this VM; correct
+#    path is /var/lib/ats/tokens/ats.db). Symlinks /usr/local/bin/ats-archive-audit.sh
+#    to the new script so the existing cron entry keeps working.
 #
 #  Runs as root via sudo. Idempotent — safe to re-run.
 #
