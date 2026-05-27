@@ -564,8 +564,13 @@ const TableSkeleton = ({ rows = 5, cols = 4 }) => (
         <tr key={r}>
           {Array.from({ length: cols }).map((_, c) => (
             <td key={c}>
+              {/* T-460 (audit-2026-05-26 frontend L2): bar width seeded by
+                  (r*7+c*13) instead of Math.random so first paint matches
+                  subsequent re-renders. Eliminates the visual jitter where
+                  every render the skeleton bars resized while the user
+                  was looking at them. */}
               <div style={{
-                height: 12, width: `${50 + Math.random() * 40}%`, borderRadius: 4,
+                height: 12, width: `${50 + ((r * 7 + c * 13) % 41)}%`, borderRadius: 4,
                 background: "linear-gradient(90deg, var(--bg-sunk), var(--surface-2), var(--bg-sunk))",
                 backgroundSize: "200% 100%", animation: "skel 1.4s ease-in-out infinite",
               }}/>

@@ -161,9 +161,16 @@ function createCronReauth({ db, vault, audit, postTelegram, broker, sessions }) 
           try { await _refreshGlobalBrokerToken(row.user_id, row.broker); } catch (e) { console.warn('[cron-reauth] swallowed:', e && e.message); }
         }
         if (!result.ok && typeof postTelegram === 'function') {
-          // Best-effort user notification. We don't have per-user TG handles yet, so this just goes
-          // to the global TG channel with the user_id called out.
-          try { postTelegram(`ATS auto-reauth failed for user_id=${row.user_id} broker=${row.broker} reason=${result.reason || 'unknown'}`); } catch (e) { console.warn('[cron-reauth] swallowed:', e && e.message); }
+          // T-460 (audit-2026-05-26 backend L9): the global Telegram channel
+          // was leaking raw user_id values (a multi-tenant deploy would
+          // enable user enumeration via the channel feed). Hash the user_id
+          // with sha256 so messages are still correlatable per-user (same
+          // hash = same user) but the raw id is hidden. First 8 hex chars
+          // give 32 bits which is plenty of uniqueness for a single-operator
+          // op channel.
+          const _crypto = require('crypto');
+          const _uidHash = _crypto.createHash('sha256').update(String(row.user_id)).digest('hex').slice(0, 8);
+          try { postTelegram(`ATS auto-reauth failed for user=${_uidHash} broker=${row.broker} reason=${result.reason || 'unknown'}`); } catch (e) { console.warn('[cron-reauth] swallowed:', e && e.message); }
         }
         results.push({ user_id: row.user_id, broker: row.broker, ok: !!result.ok, reason: result.reason, elapsed_ms: elapsed });
         // Spacing between users to respect Kite rate limit + give the headless browser time to reset.

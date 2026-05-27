@@ -6,6 +6,15 @@ OWNER="${OWNER:-kumarikrisnan509-eng}"
 REPO="${REPO:-ats}"
 # T-190 redaction (P0 #1 from SECRETS-AUDIT.md): rotated; literal removed.
 # Set GH_PAT env var before running: export GH_PAT=ghp_yournewpat
+# T-460 (audit-2026-05-26 vm-scripts L2): explicit guard BEFORE the
+# ${VAR:-${OTHER}} substitution so an unset GH_PAT under `set -u` doesn't
+# blow up with "GH_PAT: unbound variable" — give the operator the same
+# friendly error message instead of a cryptic bash trace.
+PAT="${PAT:-}"
+if [ -z "$PAT" ] && [ -z "${GH_PAT:-}" ]; then
+    echo "ERROR: GH_PAT env var not set. Run: export GH_PAT=ghp_yournewpat" >&2
+    exit 1
+fi
 PAT="${PAT:-${GH_PAT}}"
 if [ -z "$PAT" ]; then
     echo "ERROR: GH_PAT env var not set. Run: export GH_PAT=ghp_yournewpat" >&2
