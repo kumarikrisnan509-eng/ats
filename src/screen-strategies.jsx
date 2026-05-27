@@ -71,8 +71,12 @@ const AutorunPanel = () => {
     finally { setBusy(false); }
   };
 
-  const clearCfg = async () => {
-    if (!window.confirm('Clear auto-runner config and stop the timer?')) return;
+  // T-467 (audit-2026-05-26 frontend L7): replaced native confirm()
+  // with window.ConfirmModal (themed, focus-trapped, screen-reader-
+  // friendly). State drives modal visibility; on confirm we delete.
+  const [_clearCfgOpen, _setClearCfgOpen] = React.useState(false);
+  const _doClearCfg = async () => {
+    _setClearCfgOpen(false);
     setBusy(true); setMsg(null);
     try {
       const r = await window.fetchApi('/api/autorun', { method: 'DELETE' });
@@ -81,6 +85,7 @@ const AutorunPanel = () => {
     } catch (e) { setMsg('✗ ' + e.message); }
     finally { setBusy(false); }
   };
+  const clearCfg = () => _setClearCfgOpen(true);
 
   const inputStyle = {
     width: '100%', padding: '6px 8px',
@@ -170,6 +175,20 @@ const AutorunPanel = () => {
             </table>
           </div>
         </div>
+      )}
+      {/* T-467 (audit-2026-05-26 frontend L7): themed ConfirmModal
+          replaces native window.confirm() for the Clear action. */}
+      {_clearCfgOpen && window.ConfirmModal && (
+        <window.ConfirmModal
+          open={_clearCfgOpen}
+          onClose={() => _setClearCfgOpen(false)}
+          onConfirm={_doClearCfg}
+          title="Clear auto-runner config?"
+          sub="This stops the timer and discards the saved configuration."
+          confirmLabel="Clear"
+          tone="danger"
+          busy={busy}
+        />
       )}
     </div>
   );

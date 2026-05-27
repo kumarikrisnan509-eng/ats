@@ -78,3 +78,11 @@ services:
     mem_limit: 512m
     mem_reservation: 256m
     cpus: 1.5
+
+    # T-467 (audit-2026-05-26 infra M8): explicit tmpfs for /tmp at 64M.
+    # Default container tmpfs is unset = no mount (overlay disk), or
+    # 32M if anyone enables it later. SIP/factor-tilt CSV staging + the
+    # libsodium scratch allocations spike to ~30M briefly; 64M leaves
+    # margin without forcing operator intervention.
+    tmpfs:
+      - /tmp:size=64m,mode=1777
