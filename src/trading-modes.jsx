@@ -203,6 +203,31 @@ const useModeState = () => {
             });
             return merged;
           });
+        } else {
+          // T-490b: backend has empty activeModes but UI may have meaningful
+          // local state (e.g. 4/4 enabled from a fresh install where the user
+          // never explicitly toggled). Bootstrap by pushing the current local
+          // state to backend NOW so the next kill-button click has data to
+          // pause/restore.
+          //
+          // Read from React state via the functional-update trick (we don't
+          // want to depend on `state` and re-create the callback every render).
+          let snap;
+          setState(s => { snap = s; return s; });
+          // Allow React to flush so `snap` is populated, then PUT if non-trivial.
+          await new Promise(r => setTimeout(r, 0));
+          if (snap) {
+            const hasMeaningfulLocal = MODE_IDS.some(id => snap[id] && (snap[id].enabled || (snap[id].capitalPct != null && snap[id].capitalPct > 0)));
+            if (hasMeaningfulLocal) {
+              try {
+                await fetch('/api/me/risk-config', {
+                  method: 'PUT', credentials: 'include',
+                  headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrfToken || '' },
+                  body: JSON.stringify({ activeModes: snap }),
+                });
+              } catch (_) { /* swallow -- localStorage still has it */ }
+            }
+          }
         }
       }
       hydratedRef.current = true;
