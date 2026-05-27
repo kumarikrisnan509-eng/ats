@@ -12,6 +12,28 @@ const KillSwitchButton = () => {
   const rafRef = React.useRef(null);
   const startRef = React.useRef(0);
 
+  // T-486 HOTFIX: sync `fired` from backend on mount + poll every 30s.
+  // Without this, the button's local state was wiped on every page refresh,
+  // showing "Kill" (= trading active) even when backend soft-kill was still
+  // halting all orders. The UI was lying. Now the button reflects the real
+  // backend state, which is the source of truth.
+  React.useEffect(() => {
+    let cancelled = false;
+    const syncFromBackend = async () => {
+      try {
+        const r = await fetch('/api/admin/soft-kill', { credentials: 'include' }).then(r => r.json());
+        if (cancelled) return;
+        if (r && r.ok) {
+          // Only update if it actually differs, to avoid forcing a re-render every poll.
+          setFired(prev => prev !== !!r.active ? !!r.active : prev);
+        }
+      } catch (_) { /* network blip -- keep current UI state */ }
+    };
+    syncFromBackend(); // immediate on mount
+    const id = setInterval(syncFromBackend, 30000); // poll every 30s for multi-tab/operator scenarios
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
   const HOLD_MS = 1200;
 
   const begin = () => {
