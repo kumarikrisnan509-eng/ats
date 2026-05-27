@@ -268,7 +268,40 @@ const Progress = ({ value, max = 100, kind = "" }) => (
 );
 
 // Expose
-Object.assign(window, { I, Icon, Card, Stat, Pill, Chip, Toggle, Segmented, Progress,
+// T-451 (audit-2026-05-26 frontend M8): shared LoadError primitive. The
+// _AuditLoadErrPill / _ReconLoadErrPill components in screen-audit.jsx and
+// screen-recon.jsx are the reference impl for surfacing a fetch failure to
+// the user instead of silently swallowing it (the audit counted 25+ catch
+// blocks across the codebase that just console.warn the error). This
+// primitive replaces those screen-local copies with one source of truth.
+// Callers pass { err, onRetry } — onRetry is optional. Renders nothing
+// when err is null/undefined so callers can use {<LoadError err={x}/>}
+// unconditionally in their JSX.
+const LoadError = ({ err, onRetry }) => {
+  if (!err) return null;
+  // Accept Error objects, strings, or { message, reason } shapes.
+  const msg = (typeof err === 'string')
+    ? err
+    : (err && (err.detail || err.reason || err.message)) || String(err);
+  return (
+    <div style={{
+      padding: '10px 14px', marginBottom: 12, borderRadius: 6, fontSize: 12,
+      background: 'color-mix(in oklab, var(--danger) 12%, transparent)',
+      color: 'var(--danger)', border: '1px solid currentColor',
+      display: 'flex', alignItems: 'center', gap: 12,
+    }}>
+      <span>⚠ Could not load live data: {msg}</span>
+      {onRetry && (
+        <button onClick={onRetry} className="btn btn--xs"
+          style={{ marginLeft: 'auto', borderColor: 'currentColor', color: 'currentColor' }}>
+          Retry
+        </button>
+      )}
+    </div>
+  );
+};
+
+Object.assign(window, { I, Icon, Card, Stat, Pill, Chip, Toggle, Segmented, Progress, LoadError,
   EmptyState, useDemoMode, isDemoMode, setDemoMode,
   inr, inrCompact, inrPrice, pct, clsPN,
   useState, useEffect, useMemo, useRef, useCallback });

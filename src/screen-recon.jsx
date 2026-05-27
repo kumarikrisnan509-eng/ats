@@ -17,7 +17,14 @@
 // (HarvestScreen is not defined). Renamed to file-unique names. The fix
 // could also use IIFE wrapping or a shared module, but renaming is the
 // minimal change.
-const _ReconLoadErrPill = ({ err, onRetry }) => {
+// T-451 (audit-2026-05-26 frontend M8): alias for window.LoadError.
+// See screen-audit.jsx for full rationale. Local name kept for call-site
+// stability; behaviour now comes from the shared primitive.
+const _ReconLoadErrPill = (props) => (window.LoadError ? window.LoadError(props) : null);
+
+// Original implementation kept below as a fallback in case primitives.jsx
+// hasn't loaded yet (script ordering). Will be removed in a future cleanup.
+const _ReconLoadErrPill_legacy = ({ err, onRetry }) => {
   if (!err) return null;
   return (
     <div style={{

@@ -34,8 +34,10 @@ function signState(userId) {
   const nonceB64 = Buffer.from(nonce).toString('base64').replace(/=+$/,'');
   const sig = crypto.createHmac('sha256', SESSION_SECRET).update(`${userId}|${nonce}`).digest('hex');
   _pendingNonces.set(nonce, { userId, exp: Date.now() + 5 * 60 * 1000 });
-  // Gc expired entries when the map grows.
-  if (_pendingNonces.size > 100) {
+  // T-451 (audit-2026-05-26 backend L10): GC threshold env-tunable.
+  // Default 100 is fine for single-operator; multi-tenant deploys with
+  // many concurrent OAuth flows can raise via OAUTH_NONCE_GC_AT env.
+  if (_pendingNonces.size > (Number(process.env.OAUTH_NONCE_GC_AT) || 100)) {
     const now = Date.now();
     for (const [k, v] of _pendingNonces) if (v.exp < now) _pendingNonces.delete(k);
   }

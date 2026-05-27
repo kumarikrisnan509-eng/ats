@@ -17,25 +17,10 @@
 // (HarvestScreen is not defined). Renamed to file-unique names. The fix
 // could also use IIFE wrapping or a shared module, but renaming is the
 // minimal change.
-const _AuditLoadErrPill = ({ err, onRetry }) => {
-  if (!err) return null;
-  return (
-    <div style={{
-      padding: '10px 14px', marginBottom: 12, borderRadius: 6, fontSize: 12,
-      background: 'color-mix(in oklab, var(--danger) 12%, transparent)',
-      color: 'var(--danger)', border: '1px solid currentColor',
-      display: 'flex', alignItems: 'center', gap: 12,
-    }}>
-      <span>⚠ Could not load live data: {err}</span>
-      {onRetry && (
-        <button onClick={onRetry} className="btn btn--xs"
-          style={{ marginLeft: 'auto', borderColor: 'currentColor', color: 'currentColor' }}>
-          Retry
-        </button>
-      )}
-    </div>
-  );
-};
+// T-451 (audit-2026-05-26 frontend M8): now an alias for window.LoadError
+// (defined in primitives.jsx). Kept the local name so existing JSX call
+// sites (<_AuditLoadErrPill err={loadErr} />) continue to work unchanged.
+const _AuditLoadErrPill = (props) => (window.LoadError ? window.LoadError(props) : null);
 
 const AuditScreen = () => {
   // ---- live /api/audit ----
