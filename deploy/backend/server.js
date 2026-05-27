@@ -2068,7 +2068,7 @@ mountAuthRoutes(app, { getAuth: () => auth, getEmailAlerts: () => emailAlerts })
 // T-262: per-user risk-management config. Same getter pattern as auth
 // because riskConfigService is assigned inside init() (after openDb)
 // but mountX is called at module top-level; capturing now = undefined.
-mountRiskConfigRoutes(app, { getRiskConfig: () => riskConfigService, getAuth: () => auth });
+mountRiskConfigRoutes(app, { getRiskConfig: () => riskConfigService, getAuth: () => auth, getNotify: () => _notifyModule, getAudit: () => audit });
 // T-290e: option-chain READ routes + ops-key gated manual refresh.
 // fetcher may be null if init failed; the route checks for that.
 app.use((req, res, next) => {
