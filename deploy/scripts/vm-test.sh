@@ -158,8 +158,11 @@ fi
 # ---------- Disk + memory ----------
 section "7. Resources"
 
-usage_pct=$(df / | awk 'NR==2 {gsub(/%/,"",$5); print $5}')
-free_gb=$(df -BG / | awk 'NR==2 {gsub(/G/,"",$4); print $4}')
+# T-461 (audit-2026-05-26 vm-scripts L3): df -BG is GNU-only; macOS dev
+# test runs silently miscalculated. Use `df -Pk` (POSIX kilobytes) and
+# divide by 1024*1024 in awk to get GB (rounded down to int).
+usage_pct=$(df -P / | awk 'NR==2 {gsub(/%/,"",$5); print $5}')
+free_gb=$(df -Pk / | awk 'NR==2 {printf "%d", $4/1024/1024}')
 [ "${usage_pct:-100}" -lt 50 ] && ok "Disk ${usage_pct}% used, ${free_gb}G free" || ng "Disk ${usage_pct}% used"
 
 mem_usage=$(sudo docker stats --no-stream --format '{{.MemUsage}}' ats-backend 2>/dev/null)

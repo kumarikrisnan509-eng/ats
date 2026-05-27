@@ -77,8 +77,12 @@ EXPOSE 8080
 # Healthcheck — surfaces in `docker ps` and `docker compose ps`.
 # T-443 (audit-2026-05-26 infra M5): node-native healthcheck. No wget
 # binary needed; uses the runtime's existing node interpreter.
+# T-461 (audit-2026-05-26 infra L7): port reads from $PORT env (already
+# set above) instead of hardcoded 8080, so a deploy that overrides PORT
+# (custom port-forward, alternate compose setup) gets a working
+# healthcheck. Falls back to 8080 if PORT is empty.
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
-  CMD node -e "require('http').get('http://127.0.0.1:8080/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+  CMD node -e "const p=process.env.PORT||'8080'; require('http').get('http://127.0.0.1:'+p+'/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
 
 ENTRYPOINT ["/sbin/tini","--"]
 CMD ["node","server.js"]
