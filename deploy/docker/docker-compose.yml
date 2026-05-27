@@ -15,7 +15,19 @@ services:
     # mutable "latest" tag that breaks reproducibility (and bypasses rollback).
     image: "ghcr.io/${ATS_REPO_OWNER:?ATS_REPO_OWNER must be set in /opt/ats/compose/.env}/ats-backend:${ATS_IMAGE_TAG:?ATS_IMAGE_TAG must be set in /opt/ats/compose/.env}"
     container_name: ats-backend
-    restart: always
+    # T-449 (audit-2026-05-26 infra M10): switched from `restart: always`
+    # to `unless-stopped`. `always` masks crash-loops — a container that
+    # fails on startup spins forever burning CPU + log space without ever
+    # surfacing to the operator. `unless-stopped` keeps the same crash
+    # recovery behaviour BUT allows a deliberate `docker compose stop` /
+    # `docker stop ats-backend` to actually stay stopped (so the operator
+    # can pull the container offline during an investigation without
+    # fighting the supervisor). Crash-loop detection still relies on the
+    # 15min check-disk + health-monitor cron — `on-failure:5` would be
+    # stricter but risks the daemon staying down across a transient
+    # morning-login OOM, which for a real-money system is the worse
+    # failure mode.
+    restart: unless-stopped
     # Only expose to loopback. Nginx on the host fronts this.
     ports:
       - "127.0.0.1:8080:8080"

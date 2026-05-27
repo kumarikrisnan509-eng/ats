@@ -40,6 +40,16 @@ const ChartCard = ({ sym, segment, candles }) => {
 };
 
 const TradingScreen = () => {
+  // T-449 (audit-2026-05-26 frontend M9): hoist useConnectionState OUT of
+  // the inline IIFE in JSX (was at line ~288 inside the Order ticket Card).
+  // React's rules-of-hooks linter can't see hooks called inside IIFEs, so a
+  // future conditional render of that block would silently desync the hook
+  // call order and throw "Rendered fewer hooks than expected." The
+  // connection-state gate IS critical for order safety — making the hook
+  // call unconditional + top-level eliminates this risk class entirely.
+  const conn = (typeof window !== "undefined" && window.useConnectionState)
+    ? window.useConnectionState()
+    : "connected";
   const [sym, setSym] = useState("RELIANCE");
   const [side, setSide] = useState("BUY");
   const [orderType, setOrderType] = useState("LIMIT");
@@ -284,8 +294,9 @@ const TradingScreen = () => {
             Margin + brokerage estimate not wired yet — confirm with broker before placing.
           </div>
 
+          {/* T-449 frontend M9: IIFE removed — `conn` now hoisted to the
+              top of TradingScreen so the hook call is unconditional. */}
           {(() => {
-            const conn = useConnectionState();
             // T-180 (SCREENS-AUDIT item 5): block order placement whenever
             // KILL_SWITCH=true on the backend. Tooltip shows the reason so
             // it's obvious why the button is greyed out.
