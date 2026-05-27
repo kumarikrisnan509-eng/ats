@@ -401,6 +401,12 @@ function mountBootWiringRoutes(app, deps) {
     push('Broker disconnects (manual + forced)',   'counter', 'ats_broker_disconnects_total',    metricCounters.brokerDisconnects  || 0);
     push('Audit-log write failures (degraded)',    'counter', 'ats_audit_write_failures_total',  metricCounters.auditWriteFailures || 0);
     push('OAuth callback / exchange failures',     'counter', 'ats_oauth_failures_total',        metricCounters.oauthFailures      || 0);
+    // T-458 (audit-2026-05-26 backend L3): Telegram notify delivery failures.
+    try {
+      const { getNotifyFailureStats } = require('../notify');
+      const ns = getNotifyFailureStats();
+      push('Telegram notify delivery failures',     'counter', 'ats_notify_failures_total',       ns.count || 0);
+    } catch (_) { /* notify module not loaded yet — skip */ }
     res.type('text/plain; version=0.0.4').send(lines.join('\n') + '\n');
   });
 

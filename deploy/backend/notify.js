@@ -189,8 +189,44 @@ async function notifyTradeRejectedUneconomic({ symbol, strategy, projectedNetPnl
 }
 
 
-module.exports = { notify, postTelegram, ENABLED,
+// T-458 (audit-2026-05-26 backend L3): Telegram delivery-failure counter.
+// Before this, postTelegram failures (bot token rotated, network blip,
+// Telegram outage) were swallowed in console.warn at the call sites —
+// operator had no visible signal beyond stdout. Counter is monotonic
+// since process start; exposed via /metrics so Prometheus / Grafana can
+// alert on a sustained non-zero delta. Bumped from a `.catch` wrapper
+// added below.
+let _notifyFailureCount = 0;
+let _notifyLastFailureAt = null;
+let _notifyLastFailureReason = null;
+function _recordNotifyResult(result) {
+  if (result && result.sent === false && result.reason !== 'not_configured') {
+    _notifyFailureCount += 1;
+    _notifyLastFailureAt = new Date().toISOString();
+    _notifyLastFailureReason = (result.error || result.status || 'unknown_failure');
+  }
+}
+function getNotifyFailureStats() {
+  return {
+    count: _notifyFailureCount,
+    lastFailureAt: _notifyLastFailureAt,
+    lastFailureReason: _notifyLastFailureReason,
+  };
+}
+
+// Patch notify() to track delivery results without changing its signature
+// or behaviour. Original returns postTelegram(text); we tap the promise.
+const _origNotify = notify;
+const notifyTracked = async function(level, title, details) {
+  const result = await _origNotify(level, title, details);
+  _recordNotifyResult(result);
+  return result;
+};
+
+module.exports = { notify: notifyTracked, postTelegram, ENABLED,
   notifyOrderPlaced, notifyOrderFilled, notifyStopLossHit,
   notifyDailyLossThreshold, notifyTradeCapHit, logOutsideWindow,
-  notifyTradeRejectedUneconomic
+  notifyTradeRejectedUneconomic,
+  // T-458 backend L3:
+  getNotifyFailureStats,
 };

@@ -202,11 +202,43 @@ function _bumpMetric(event) {
     _metricCounters.oauthFailures += 1;
   }
 }
+// T-458 (audit-2026-05-26 backend L4): one-shot Telegram alert at
+// escalating audit-degradation thresholds. Operator has /metrics for
+// quantitative monitoring but no push notification — by the time
+// auditDegradedCount crosses 100 the JSONL stream may have been
+// silently dropping events for hours. Thresholds (10, 50, 100, 500)
+// fire each at most once per process lifetime; the alert goes via
+// console.error + notify() if it's wired (the notify() module is
+// loaded late so we guard).
+const _AUDIT_DEGRADED_THRESHOLDS = [10, 50, 100, 500];
+const _auditAlertsFired = new Set();
+function _maybeAlertAuditDegraded() {
+  for (const t of _AUDIT_DEGRADED_THRESHOLDS) {
+    if (auditDegradedCount >= t && !_auditAlertsFired.has(t)) {
+      _auditAlertsFired.add(t);
+      console.error(`[audit] DEGRADED count crossed ${t}: ${auditLastDegradedError}`);
+      try {
+        if (typeof notify === 'function') {
+          notify('warn', `ATS audit log degraded (${t}+ failures)`, {
+            body: 'audit() write path is dropping events into console fallback.',
+            fields: {
+              'count': String(auditDegradedCount),
+              'lastError': auditLastDegradedError || '(none)',
+              'lastAt': auditLastDegradedAt || '(none)',
+            },
+          }).catch(() => {});
+        }
+      } catch (_) { /* notify may not be loaded yet */ }
+    }
+  }
+}
+
 function recordAuditSwallow(source, msg) {
   auditDegradedCount += 1;
   _metricCounters.auditWriteFailures += 1;
   auditLastDegradedError = String(source || 'unknown') + ': ' + String(msg || 'unknown');
   auditLastDegradedAt    = new Date().toISOString();
+  _maybeAlertAuditDegraded();
 }
 // Tier 15: rolling-window order rate counter (in-memory, per-process).
 // On restart this resets, which is fine -- the cap is per-minute, not per-day.
