@@ -285,6 +285,32 @@ function mountOrdersRoutes(app, deps) {
     }
     } // close T-273 else fallback
 
+    // T-481: micro_live cap-shrink. When user's tradingMode === 'micro_live',
+    // all three real-money caps below (per-order notional, aggregate exposure,
+    // daily-loss circuit) shrink to 10% of the configured value. This matches
+    // the UI's "Micro-live (10% real) -- Caps shrunk 10x" promise that was
+    // previously not enforced by the backend. Safety-increasing: can only
+    // reject MORE orders, never approve more. Re-reads cfg (cheap in-memory
+    // cache in risk-config service) rather than threading through the
+    // paperMode block above so the diff is small and the safety property
+    // is local to this block.
+    let _capMultiplier = 1.0;
+    let _modeForAudit = 'full_live';
+    if (typeof getRiskConfig === 'function' && req.user && req.user.id) {
+      try {
+        const _cfg = getRiskConfig(req.user.id);
+        if (_cfg && _cfg.tradingMode === 'micro_live') {
+          _capMultiplier = 0.1;
+          _modeForAudit = 'micro_live';
+        } else if (_cfg && _cfg.tradingMode) {
+          _modeForAudit = String(_cfg.tradingMode);
+        }
+      } catch (_) { /* keep safe default of 1.0 */ }
+    }
+    const _effMaxPositionINR = Math.floor(MAX_POSITION_SIZE_INR * _capMultiplier);
+    const _effMaxAggregate   = Math.floor(MAX_AGGREGATE_EXPOSURE * _capMultiplier);
+    const _effMaxDailyLoss   = Math.floor(MAX_DAILY_LOSS_INR  * _capMultiplier);
+
     // Tier 15 pre-trade risk-gate #1: order-rate circuit
     if (!_orderRateOk()) {
       audit('order.blocked.rateLimit', { ...normalizedPayload, ordersInWindow: _orderTimes.length, capPerMin: MAX_ORDERS_PER_MIN });
@@ -299,13 +325,14 @@ function mountOrdersRoutes(app, deps) {
     // Tier 15 pre-trade risk-gate #2: per-order notional size cap
     const refPrice = Number(normalizedPayload.price || 0);
     const orderNotional = refPrice > 0 ? refPrice * normalizedPayload.quantity : 0;
-    if (orderNotional > MAX_POSITION_SIZE_INR) {
-      audit('order.blocked.notionalCap', { ...normalizedPayload, orderNotional, capINR: MAX_POSITION_SIZE_INR });
+    if (orderNotional > _effMaxPositionINR) {
+      audit('order.blocked.notionalCap', { ...normalizedPayload, orderNotional, capINR: _effMaxPositionINR, baseCapINR: MAX_POSITION_SIZE_INR, mode: _modeForAudit, capMultiplier: _capMultiplier });
       return res.status(400).json({
         ok: false,
         reason: 'ORDER_NOTIONAL_TOO_LARGE',
-        message: `Order notional ₹${Math.round(orderNotional)} exceeds per-order cap ₹${MAX_POSITION_SIZE_INR}.`,
+        message: `Order notional ₹${Math.round(orderNotional)} exceeds per-order cap ₹${_effMaxPositionINR}${_capMultiplier !== 1.0 ? ` (${_modeForAudit} mode shrinks ₹${MAX_POSITION_SIZE_INR} by ${_capMultiplier}x)` : ''}.`,
         clientOrderId,
+        mode: _modeForAudit,
       });
     }
 
@@ -321,13 +348,14 @@ function mountOrdersRoutes(app, deps) {
         const _pp = await pickBroker(req); const hs = _pp.broker ? await _pp.broker.getHoldings().catch(() => []) : [];
         for (const h of hs) exposure += Math.abs((h.quantity || 0) * (h.last_price || h.ltp || 0));
       }
-      if (exposure > MAX_AGGREGATE_EXPOSURE) {
-        audit('order.blocked.aggregateExposure', { ...normalizedPayload, exposure, capINR: MAX_AGGREGATE_EXPOSURE });
+      if (exposure > _effMaxAggregate) {
+        audit('order.blocked.aggregateExposure', { ...normalizedPayload, exposure, capINR: _effMaxAggregate, baseCapINR: MAX_AGGREGATE_EXPOSURE, mode: _modeForAudit, capMultiplier: _capMultiplier });
         return res.status(400).json({
           ok: false,
           reason: 'AGGREGATE_EXPOSURE_TOO_HIGH',
-          message: `Adding this order would push aggregate exposure to ₹${Math.round(exposure)}, exceeding cap ₹${MAX_AGGREGATE_EXPOSURE}.`,
+          message: `Adding this order would push aggregate exposure to ₹${Math.round(exposure)}, exceeding cap ₹${_effMaxAggregate}${_capMultiplier !== 1.0 ? ` (${_modeForAudit} mode shrinks ₹${MAX_AGGREGATE_EXPOSURE} by ${_capMultiplier}x)` : ''}.`,
           clientOrderId,
+          mode: _modeForAudit,
         });
       }
     } catch (_e) {}
@@ -355,19 +383,23 @@ function mountOrdersRoutes(app, deps) {
         }
       } catch (_) { /* db unavailable — fall back to paper-only check */ }
       const realizedToday = Math.min(paperRealizedToday, liveRealizedToday);
-      if (realizedToday <= -Math.abs(MAX_DAILY_LOSS_INR)) {
+      if (realizedToday <= -Math.abs(_effMaxDailyLoss)) {
         audit('order.blocked.dailyLoss', {
           ...normalizedPayload,
           realizedToday,
           paperRealizedToday,
           liveRealizedToday,
-          capINR: MAX_DAILY_LOSS_INR,
+          capINR: _effMaxDailyLoss,
+          baseCapINR: MAX_DAILY_LOSS_INR,
+          mode: _modeForAudit,
+          capMultiplier: _capMultiplier,
         });
         return res.status(503).json({
           ok: false,
           reason: 'MAX_DAILY_LOSS_HIT',
-          message: `Today's realized P&L ${realizedToday} has hit the daily-loss circuit (cap ₹${MAX_DAILY_LOSS_INR}). New live orders are blocked until tomorrow.`,
+          message: `Today's realized P&L ${realizedToday} has hit the daily-loss circuit (cap ₹${_effMaxDailyLoss}${_capMultiplier !== 1.0 ? ` -- ${_modeForAudit} mode shrinks ₹${MAX_DAILY_LOSS_INR} by ${_capMultiplier}x` : ''}). New live orders are blocked until tomorrow.`,
           clientOrderId,
+          mode: _modeForAudit,
         });
       }
     } catch (_e) {}
