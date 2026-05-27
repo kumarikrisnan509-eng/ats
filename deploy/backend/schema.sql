@@ -271,6 +271,8 @@ CREATE TABLE IF NOT EXISTS user_risk_config (
   tsl_gap_pct          REAL    NOT NULL DEFAULT 0.003,
   max_leverage         REAL    NOT NULL DEFAULT 2.0,
   max_sector_weight    REAL    NOT NULL DEFAULT 0.30,
+  -- T-487: per-user mode state (intraday/swing/options/futures + capital%). Was localStorage-only.
+  active_modes_json    TEXT    NOT NULL DEFAULT '{}',
   updated_at           TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 

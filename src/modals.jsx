@@ -51,7 +51,11 @@ const PreTradeSimulator = ({ open, onClose, order, onConfirm }) => {
   const modeId = order.modeId || "intraday";
   const modeMeta = window.MODE_META[modeId];
   const modeState = window.useModeState ? null : null; // read directly from localStorage
-  const modesRaw = (() => { try { return JSON.parse(localStorage.getItem("rc_modes") || "{}"); } catch { return {}; } })();
+  // T-487: was reading from the wrong key ("rc_modes") -- the canonical key
+  // is "rsk.trading_modes.v1" (defined in trading-modes.jsx as MODE_STORAGE_KEY).
+  // Wrong key meant this modal always got {} and fell back to dummy defaults,
+  // making the pre-trade simulator cap-breach warning meaningless.
+  const modesRaw = (() => { try { return JSON.parse(localStorage.getItem("rsk.trading_modes.v1") || "{}"); } catch { return {}; } })();
   const modeStateData = modesRaw[modeId] || { capitalPct: 30, deployedPct: 45, dailyLossPct: 1.2 };
   const totalCapital = 4500000;
   const modeCap = totalCapital * (modeStateData.capitalPct || 30) / 100;

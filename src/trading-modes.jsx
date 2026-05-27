@@ -171,9 +171,62 @@ const loadModeState = () => {
 
 const useModeState = () => {
   const [state, setState] = React.useState(loadModeState);
+  // T-487: track whether we've hydrated from backend. Initial render uses
+  // localStorage (instant); backend hydration happens async on mount and
+  // overwrites if it differs. Prevents UI flash for the common "they match" case.
+  const hydratedRef = React.useRef(false);
+  const debouncedPushRef = React.useRef(null);
+
+  // T-487: pull canonical state from backend on mount. Backend is the source
+  // of truth -- localStorage is a per-browser cache.
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch('/api/me/risk-config', { credentials: 'include' }).then(r => r.json());
+        if (cancelled) return;
+        if (r && r.ok && r.config && r.config.activeModes && typeof r.config.activeModes === 'object') {
+          const remote = r.config.activeModes;
+          // Only hydrate keys that exist in MODE_IDS; ignore stale/foreign keys.
+          const hasAny = MODE_IDS.some(id => remote[id] && typeof remote[id] === 'object');
+          if (hasAny) {
+            setState(s => {
+              const merged = { ...s };
+              MODE_IDS.forEach(id => {
+                if (remote[id] && typeof remote[id] === 'object') {
+                  merged[id] = { ...MODE_META[id].defaults, ...s[id], ...remote[id] };
+                }
+              });
+              return merged;
+            });
+          }
+        }
+        hydratedRef.current = true;
+      } catch (_) {
+        // Network failure: keep localStorage state, mark hydrated so push fires later
+        hydratedRef.current = true;
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // T-487: debounced PUT to backend on state change (after initial hydration).
+  // 500ms debounce so rapid slider drags coalesce into one network round-trip.
+  // Always writes localStorage immediately for snappy UX + Tab B reads.
   React.useEffect(() => {
     try { localStorage.setItem(MODE_STORAGE_KEY, JSON.stringify(state)); } catch (e) { console.debug('[trading-modes] swallowed:', e && e.message); }
     try { window.dispatchEvent(new CustomEvent("modes-changed")); } catch (e) { console.debug('[trading-modes] swallowed:', e && e.message); }
+    if (!hydratedRef.current) return; // skip the initial render
+    if (debouncedPushRef.current) clearTimeout(debouncedPushRef.current);
+    debouncedPushRef.current = setTimeout(() => {
+      // T-487: send the activeModes subset (not full risk-config) -- backend
+      // merges on top of existing fields.
+      fetch('/api/me/risk-config', {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrfToken || '' },
+        body: JSON.stringify({ activeModes: state }),
+      }).catch(e => console.debug('[trading-modes] backend sync failed (kept local):', e && e.message));
+    }, 500);
   }, [state]);
 
   const toggleMode = (id) => setState(s => ({ ...s, [id]: { ...s[id], enabled: !s[id].enabled }}));
@@ -184,10 +237,26 @@ const useModeState = () => {
     return out;
   });
 
+  // T-487: explicit save (used by Save allocation button). Bypasses debounce so
+  // a user clicking Save gets immediate feedback instead of a 500ms wait.
+  const saveNow = async () => {
+    if (debouncedPushRef.current) clearTimeout(debouncedPushRef.current);
+    try {
+      const r = await fetch('/api/me/risk-config', {
+        method: 'PUT', credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrfToken || '' },
+        body: JSON.stringify({ activeModes: state }),
+      }).then(r => r.json());
+      return r && r.ok ? { ok: true } : { ok: false, reason: (r && r.reason) || 'save_failed' };
+    } catch (e) {
+      return { ok: false, reason: (e && e.message) || 'network_failed' };
+    }
+  };
+
   const activeCount = MODE_IDS.filter(id => state[id].enabled).length;
   const totalCapitalPct = MODE_IDS.reduce((sum, id) => sum + (state[id].enabled ? state[id].capitalPct : 0), 0);
 
-  return { state, toggleMode, setField, killAllModes, activeCount, totalCapitalPct };
+  return { state, toggleMode, setField, killAllModes, saveNow, activeCount, totalCapitalPct };
 };
 
 // ============ Global gate — read-only check used by other screens ============

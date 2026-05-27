@@ -48,6 +48,12 @@ const DEFAULTS = Object.freeze({
   // T-263b: portfolio-level caps consumed by services/pre-trade.js
   maxLeverage:     2.0,      // gross / cash ratio ceiling
   maxSectorWeight: 0.30,     // per-sector concentration ceiling
+  // T-487 (frontend C3 fix): strategy mode toggles + capital allocation per mode.
+  // Was localStorage-only in trading-modes.jsx -- two tabs would disagree, no
+  // server-side gate. Now persisted in user_risk_config so backend autorun can
+  // also honor mode disabling. Empty default means "fall back to frontend
+  // MODE_META.defaults" (see src/trading-modes.jsx).
+  activeModes: Object.freeze({}),
 });
 
 const TRADING_MODES = Object.freeze(['paper', 'micro_live', 'full_live']);
@@ -139,8 +145,11 @@ function _rowToConfig(row) {
   if (!row) return null;
   let dca = null;
   let strategies = null;
+  let modes = null;
   try { dca = JSON.parse(row.dca_allocation_json); } catch (_) { dca = null; }
   try { strategies = JSON.parse(row.active_strategies_json); } catch (_) { strategies = null; }
+  // T-487: activeModes is optional (may be NULL on pre-migration rows).
+  try { if (row.active_modes_json) modes = JSON.parse(row.active_modes_json); } catch (_) { modes = null; }
   return {
     capital: row.capital,
     maxPositionPct: row.max_position_pct,
@@ -160,6 +169,8 @@ function _rowToConfig(row) {
     // T-263b
     maxLeverage:     Number.isFinite(row.max_leverage)        ? row.max_leverage        : DEFAULTS.maxLeverage,
     maxSectorWeight: Number.isFinite(row.max_sector_weight)   ? row.max_sector_weight   : DEFAULTS.maxSectorWeight,
+    // T-487
+    activeModes:     (modes && typeof modes === 'object' && !Array.isArray(modes)) ? modes : {},
     updatedAt: row.updated_at,
   };
 }
@@ -183,6 +194,8 @@ function _defaultsForUser() {
     sipDayOfMonth: DEFAULTS.sipDayOfMonth,
     maxLeverage: DEFAULTS.maxLeverage,
     maxSectorWeight: DEFAULTS.maxSectorWeight,
+    // T-487
+    activeModes: { ...DEFAULTS.activeModes },
     updatedAt: null,
   };
 }
@@ -203,6 +216,8 @@ function createRiskConfigService(db) {
     ['sip_day_of_month',    'INTEGER NOT NULL DEFAULT 5'],
     ['max_leverage',        'REAL NOT NULL DEFAULT 2.0'],
     ['max_sector_weight',   'REAL NOT NULL DEFAULT 0.30'],
+    // T-487
+    ['active_modes_json',   "TEXT NOT NULL DEFAULT '{}'"],
   ];
   for (const [col, ddl] of MIGRATION_COLS) {
     try {
@@ -223,12 +238,14 @@ function createRiskConfigService(db) {
       dca_allocation_json, active_strategies_json, voting_threshold, trading_mode,
       max_daily_trades, golden_start_hhmm, golden_end_hhmm, tsl_activate_pct, tsl_gap_pct,
       sip_day_of_month, max_leverage, max_sector_weight,
+      active_modes_json,
       updated_at
     ) VALUES (
       @user_id, @capital, @max_position_pct, @max_daily_loss_pct, @max_open_positions,
       @dca_allocation_json, @active_strategies_json, @voting_threshold, @trading_mode,
       @max_daily_trades, @golden_start_hhmm, @golden_end_hhmm, @tsl_activate_pct, @tsl_gap_pct,
       @sip_day_of_month, @max_leverage, @max_sector_weight,
+      @active_modes_json,
       datetime('now')
     )
     ON CONFLICT(user_id) DO UPDATE SET
@@ -248,6 +265,7 @@ function createRiskConfigService(db) {
       sip_day_of_month       = @sip_day_of_month,
       max_leverage           = @max_leverage,
       max_sector_weight      = @max_sector_weight,
+      active_modes_json      = @active_modes_json,
       updated_at             = datetime('now')
   `);
 
@@ -301,6 +319,11 @@ function createRiskConfigService(db) {
       // T-263b
       maxLeverage:     partial.maxLeverage     != null ? Number(partial.maxLeverage)     : current.maxLeverage,
       maxSectorWeight: partial.maxSectorWeight != null ? Number(partial.maxSectorWeight) : current.maxSectorWeight,
+      // T-487: activeModes is an arbitrary JSON object {modeId: {enabled, capitalPct, ...}}.
+      // No strict validation -- frontend MODE_META owns the shape. Reject non-objects.
+      activeModes: (partial.activeModes != null && typeof partial.activeModes === 'object' && !Array.isArray(partial.activeModes))
+        ? partial.activeModes
+        : current.activeModes,
     };
     _validate(partial, merged);
 
@@ -322,6 +345,7 @@ function createRiskConfigService(db) {
       sip_day_of_month: merged.sipDayOfMonth,
       max_leverage:      merged.maxLeverage,
       max_sector_weight: merged.maxSectorWeight,
+      active_modes_json: JSON.stringify(merged.activeModes || {}),
     });
     _invalidate(userId);
     return get(userId);

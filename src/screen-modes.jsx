@@ -4,12 +4,14 @@
 
 const ModesScreen = () => {
   const ms = window.useModeState();
-  const { state, toggleMode, setField, killAllModes, activeCount, totalCapitalPct } = ms;
+  const { state, toggleMode, setField, killAllModes, saveNow, activeCount, totalCapitalPct } = ms;
 
   // R8.P13 — mode-switch confirmation. Turning a mode OFF with open positions or live capital
   // is destructive (cancels working orders, optionally squares off). Always confirm; never silent.
   const [pendingToggle, setPendingToggle] = React.useState(null);   // mode id to disable
   const [pendingDisableAll, setPendingDisableAll] = React.useState(false);
+  // T-487: surface backend save result on Save allocation click.
+  const [saveStatus, setSaveStatus] = React.useState(null);
 
   const requestToggle = (id) => {
     // Enabling is non-destructive — fire immediately.
@@ -107,7 +109,21 @@ const ModesScreen = () => {
           <button className="btn" onClick={() => setPendingDisableAll(true)}>
             <I.stop size={12}/> Disable all modes
           </button>
-          <button className="btn btn--primary"><I.check size={12}/> Save allocation</button>
+          <button className="btn btn--primary" onClick={async () => {
+            // T-487: was a button with NO onClick handler -- visual-only fake.
+            // Now PUTs activeModes to backend via saveNow().
+            setSaveStatus({ status: 'saving' });
+            const r = await saveNow();
+            if (r.ok) {
+              setSaveStatus({ status: 'ok', at: Date.now() });
+              setTimeout(() => setSaveStatus(null), 3000);
+            } else {
+              setSaveStatus({ status: 'error', reason: r.reason });
+              setTimeout(() => setSaveStatus(null), 5000);
+            }
+          }}>
+            <I.check size={12}/> {saveStatus && saveStatus.status === 'saving' ? 'Saving...' : saveStatus && saveStatus.status === 'ok' ? 'Saved' : saveStatus && saveStatus.status === 'error' ? 'Save failed' : 'Save allocation'}
+          </button>
         </div>
       </div>
 
