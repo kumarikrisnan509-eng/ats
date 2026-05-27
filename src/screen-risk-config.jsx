@@ -57,6 +57,10 @@ window.RiskConfigScreen = function RiskConfigScreen() {
   const [saving, setSaving] = React.useState(false);
   const [err, setErr] = React.useState('');
   const [ok, setOk] = React.useState('');
+  // T-483 (T-482 frontend): telegramConfigured comes from GET /api/me/risk-config.
+  // Used to grey-out the Full-live radio with a clearer reason than the static
+  // "requires 2FA setup" tooltip.
+  const [telegramConfigured, setTelegramConfigured] = React.useState(false);
 
   // --- initial load: config + strategies (parallel) ---
   React.useEffect(() => {
@@ -71,6 +75,8 @@ window.RiskConfigScreen = function RiskConfigScreen() {
         if (cfgRes && cfgRes.ok && cfgRes.config) {
           setConfig(_clone(cfgRes.config));
           setOriginal(_clone(cfgRes.config));
+          // T-483: GET now also returns telegramConfigured (boolean).
+          setTelegramConfigured(!!cfgRes.telegramConfigured);
         } else {
           setErr('Failed to load config: ' + (cfgRes && cfgRes.reason || 'unknown'));
         }
@@ -96,6 +102,63 @@ window.RiskConfigScreen = function RiskConfigScreen() {
   const errors = React.useMemo(() => _validate(config), [config]);
 
   // --- save handler ---
+  // T-483 (T-482 frontend wiring): when the user is promoting to full_live,
+  // the backend responds 202 with { pending:true, reason:'FULL_LIVE_2FA_REQUIRED',
+  // token } and sends a 6-digit code to the operator's Telegram. We then
+  // prompt for the code and POST it to /confirm-mode-change/:token. Wrong
+  // code -> CODE_MISMATCH (re-prompt up to 5 times via the modal's own retry).
+  // Expired -> TOKEN_INVALID_OR_EXPIRED -> tell user to retry the save.
+  const _confirmFullLiveCode = async (token) => {
+    const ask = (subText) => {
+      if (typeof window.promptAsync !== 'function') {
+        // Fallback for older bundles that don't yet expose promptAsync.
+        // eslint-disable-next-line no-alert
+        return Promise.resolve(window.prompt(subText || 'Enter the 6-digit code from Telegram:', ''));
+      }
+      return window.promptAsync({
+        title: 'Confirm Full-live switch',
+        sub: subText || 'A 6-digit code was sent to your Telegram. Enter it within 5 minutes.',
+        placeholder: '123456',
+        confirmLabel: 'Confirm',
+        cancelLabel: 'Cancel',
+      });
+    };
+
+    // Up to 5 retries on CODE_MISMATCH. The backend already caps at 5 attempts
+    // per token; we surface attemptsRemaining in the sub so the user knows.
+    let sub = null;
+    for (let i = 0; i < 5; i++) {
+      const code = await ask(sub);
+      if (code == null || code === '') return { cancelled: true };
+      try {
+        const r = await window.fetchApi('/api/me/risk-config/confirm-mode-change/' + encodeURIComponent(token), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: String(code).trim() }),
+        });
+        if (r && r.ok && r.config) return { ok: true, config: r.config };
+        sub = (r && r.reason) || 'Verification failed';
+      } catch (e) {
+        // CODE_MISMATCH bubbles up as a 401 -- window.fetchApi throws with
+        // .status / .reason on err. Retry the prompt with the reason as the
+        // sub-text so the user sees why it failed.
+        if (e && (e.status === 401) && e.reason === 'CODE_MISMATCH') {
+          const left = (e.detail && e.detail.attemptsRemaining) || null;
+          sub = 'Wrong code. ' + (left ? left + ' attempt' + (left === 1 ? '' : 's') + ' remaining.' : 'Try again.');
+          continue;
+        }
+        if (e && e.status === 410) {
+          return { error: 'Token expired or invalid. Click Save again to request a fresh code.' };
+        }
+        if (e && e.status === 429) {
+          return { error: 'Too many wrong codes. Click Save again to request a fresh code.' };
+        }
+        return { error: (e && (e.reason || e.message)) || 'Confirmation failed' };
+      }
+    }
+    return { error: 'Too many wrong attempts. Save aborted.' };
+  };
+
   const onSave = async () => {
     if (!config || errors.length) return;
     setSaving(true); setErr(''); setOk('');
@@ -105,6 +168,26 @@ window.RiskConfigScreen = function RiskConfigScreen() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config),
       });
+      // T-483: full_live 2FA challenge path.
+      if (res && res.pending && res.reason === 'FULL_LIVE_2FA_REQUIRED' && res.token) {
+        setOk('Code sent to Telegram. Enter it in the prompt to finish the switch.');
+        const confirm = await _confirmFullLiveCode(res.token);
+        if (confirm.cancelled) {
+          setOk('');
+          setErr('Full-live switch cancelled. Your mode stays as ' + (original && original.tradingMode) + '.');
+          return;
+        }
+        if (confirm.ok) {
+          setConfig(_clone(confirm.config));
+          setOriginal(_clone(confirm.config));
+          setOk('Full-live activated.');
+          setTimeout(() => setOk(''), 4000);
+          return;
+        }
+        setOk('');
+        setErr(confirm.error || 'Confirmation failed');
+        return;
+      }
       if (res && res.ok && res.config) {
         setConfig(_clone(res.config));
         setOriginal(_clone(res.config));
@@ -114,7 +197,14 @@ window.RiskConfigScreen = function RiskConfigScreen() {
         setErr((res && res.reason) || 'Save failed');
       }
     } catch (e) {
-      setErr(window.formatErr ? window.formatErr(e) : (e && e.message) || 'Save failed');
+      // T-483: surface the FULL_LIVE_REQUIRES_TELEGRAM 403 with a clearer
+      // message than the raw HTTP status, so the operator knows to set up
+      // Telegram in backend.env before retrying.
+      if (e && e.reason === 'FULL_LIVE_REQUIRES_TELEGRAM') {
+        setErr('Full-live mode requires Telegram 2FA. Operator must set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in /etc/ats/backend.env and restart the backend.');
+      } else {
+        setErr(window.formatErr ? window.formatErr(e) : (e && e.message) || 'Save failed');
+      }
     } finally {
       setSaving(false);
     }
@@ -354,7 +444,10 @@ window.RiskConfigScreen = function RiskConfigScreen() {
         {[
           { id: 'paper', label: 'Paper (simulated)', sub: 'No real money. Recommended for Phase 1 validation.' },
           { id: 'micro_live', label: 'Micro-live (10% real)', sub: 'Caps shrunk 10x. Validates the live pipeline with minimal exposure.' },
-          { id: 'full_live', label: 'Full-live (100% real)', sub: 'Real capital at risk. Requires 2FA setup in Settings -> Security.', disabled: true, disabledReason: 'Requires 2FA setup in Settings -> Security' },
+          // T-483: Full-live radio enabled iff backend reports telegramConfigured.
+          // The actual switch still requires entering the 2FA code that arrives
+          // on Telegram (handled in onSave via _confirmFullLiveCode).
+          { id: 'full_live', label: 'Full-live (100% real)', sub: telegramConfigured ? 'Real capital at risk. Confirms via Telegram 2FA code.' : 'Real capital at risk. Operator must configure TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in /etc/ats/backend.env first.', disabled: !telegramConfigured, disabledReason: telegramConfigured ? '' : 'Telegram 2FA not configured -- contact operator' },
         ].map(opt => (
           <label key={opt.id} title={opt.disabled ? opt.disabledReason : ''} style={{
             display: 'flex', gap: 10, alignItems: 'flex-start', padding: 10, marginBottom: 6,
