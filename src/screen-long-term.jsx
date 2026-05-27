@@ -126,7 +126,13 @@ window.LongTermScreen = function LongTermScreen() {
       });
       const j = await r.json().catch(() => ({}));
       if (r.ok && j.ok) {
-        const proceed = window.confirm(`Dry-run OK. Place BUY ${qty} ${entry.symbol} at market on Trading screen?`);
+        // T-468 (audit-2026-05-26 frontend L7): themed confirmAsync wrapper.
+        const proceed = await window.confirmAsync({
+          title: `Place BUY ${qty} ${entry.symbol} at market?`,
+          sub: 'Dry-run OK. This redirects to the Trading screen with the order pre-filled.',
+          confirmLabel: 'Go to Trading',
+          tone: 'warn',
+        });
         if (proceed) {
           // Persist the prefill so the trading screen can pick it up
           try { sessionStorage.setItem('ats.tradingPrefill', JSON.stringify({ symbol: entry.symbol, exchange: entry.exchange, side: 'BUY', qty: Number(qty), orderType: 'MARKET', product: 'CNC' })); } catch (_) {}

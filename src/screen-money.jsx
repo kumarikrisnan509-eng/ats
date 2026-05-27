@@ -185,7 +185,13 @@ const MoneyScreen = () => {
     setDraft(null);
   };
   const deleteRule = async (id) => {
-    if (!confirm('Delete this sweep rule?')) return;
+    // T-468 (audit-2026-05-26 frontend L7): themed confirmAsync.
+    if (!(await window.confirmAsync({
+      title: 'Delete this sweep rule?',
+      sub: 'The rule will stop firing on future sweep windows.',
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    }))) return;
     await saveRules(rules.filter(x => x.id !== id));
   };
   const toggleRule = async (id) => {

@@ -439,4 +439,52 @@ const ConfirmModal = ({
   );
 };
 
-Object.assign(window, { Modal, PreTradeSimulator, TwoFactorModal, AIExplainerModal, ConfirmModal });
+// T-468 (audit-2026-05-26 frontend L7): Promise-based confirm wrapper.
+// Lets callers do `if (!await window.confirmAsync({title:..., ...})) return;`
+// without per-site state plumbing. Renders a transient ConfirmModal into
+// a portal container at document root. Returns a Promise<boolean>.
+function _confirmAsyncImpl(opts) {
+  return new Promise((resolve) => {
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    let closed = false;
+    const close = (result) => {
+      if (closed) return;
+      closed = true;
+      try {
+        if (typeof window.ReactDOM !== 'undefined' && window.ReactDOM.unmountComponentAtNode) {
+          window.ReactDOM.unmountComponentAtNode(root);
+        }
+      } catch (_) {}
+      try { root.remove(); } catch (_) {}
+      resolve(result);
+    };
+    try {
+      const el = React.createElement(ConfirmModal, {
+        open: true,
+        onClose: () => close(false),
+        onConfirm: () => close(true),
+        title: opts && opts.title || 'Confirm?',
+        sub: opts && opts.sub,
+        detail: opts && opts.detail,
+        confirmLabel: opts && opts.confirmLabel || 'Confirm',
+        cancelLabel: opts && opts.cancelLabel || 'Cancel',
+        tone: opts && opts.tone || 'warn',
+      });
+      // React 18 createRoot path; fall back to render() for older runtimes.
+      if (typeof window.ReactDOM !== 'undefined' && window.ReactDOM.createRoot) {
+        const r = window.ReactDOM.createRoot(root);
+        r.render(el);
+      } else if (typeof window.ReactDOM !== 'undefined' && window.ReactDOM.render) {
+        window.ReactDOM.render(el, root);
+      } else {
+        // No React DOM — fall back to native confirm so we never block a click.
+        close(window.confirm((opts && opts.title) || 'Confirm?'));
+      }
+    } catch (_) {
+      close(window.confirm((opts && opts.title) || 'Confirm?'));
+    }
+  });
+}
+
+Object.assign(window, { Modal, PreTradeSimulator, TwoFactorModal, AIExplainerModal, ConfirmModal, confirmAsync: _confirmAsyncImpl });

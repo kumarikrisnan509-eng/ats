@@ -1,5 +1,16 @@
 // sessions.js — minimal per-user session + token store.
 //
+// T-468 (audit-2026-05-26 backend M4): DEPRECATED. The DB-backed
+// session path (db.sessions.* in db.js) is the canonical store as of
+// T-340. This module remains because rehydrate-on-boot still reads the
+// sealed-token files at /var/lib/ats/tokens/<userId>.enc as a fallback
+// when the DB lookup misses. Future plan:
+//   1. Migrate any remaining token-file readers to db.brokers.getFull
+//   2. Delete the loadTokens/saveTokens API + the .enc files
+//   3. Delete this module entirely
+// Until step 3, every SessionStore.* call logs once-per-process so
+// the operator can audit which paths still touch the legacy store.
+//
 // v1: in-memory + sealed file on disk per user. Single-VM friendly.
 // v2: Postgres + Redis; per-user broker connections pooled centrally.
 //

@@ -15,6 +15,14 @@ services:
     # mutable "latest" tag that breaks reproducibility (and bypasses rollback).
     image: "ghcr.io/${ATS_REPO_OWNER:?ATS_REPO_OWNER must be set in /opt/ats/compose/.env}/ats-backend:${ATS_IMAGE_TAG:?ATS_IMAGE_TAG must be set in /opt/ats/compose/.env}"
     container_name: ats-backend
+    # T-468 (audit-2026-05-26 vm-scripts M5): join the host docker group
+    # so the container can connect to the auto-login daemon Unix socket
+    # at /var/run/ats/auto-login.sock now that the socket is 0660
+    # (was 0666 world-writable). gid 999 is the Ubuntu default for the
+    # docker group on the OCI VM; verify with `getent group docker` if
+    # connection fails.
+    group_add:
+      - "999"
     # T-449 (audit-2026-05-26 infra M10): switched from `restart: always`
     # to `unless-stopped`. `always` masks crash-loops — a container that
     # fails on startup spins forever burning CPU + log space without ever

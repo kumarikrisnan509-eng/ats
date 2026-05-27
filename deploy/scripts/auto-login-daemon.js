@@ -221,9 +221,16 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(SOCKET_PATH, () => {
-  // Permission so the container's docker user (uid 1001) can connect.
-  try { fs.chmodSync(SOCKET_PATH, 0o666); } catch (_) {}
-  console.log(`auto-login-daemon listening on ${SOCKET_PATH}`);
+  // T-468 (audit-2026-05-26 vm-scripts M5): tightened from 0666 to 0660.
+  // Was world-writable so any uid could connect + trigger a Playwright
+  // login. Daemon runs as ats:docker per the systemd unit; container
+  // gets docker group via docker-compose `group_add: ["docker"]` (host
+  // docker group has the same gid the container sees because gid 999
+  // is /etc/group entry "docker" on Ubuntu). Worst case if the gid
+  // doesn't match: container can't connect + Tier 79 auto-login fails
+  // until the operator fixes the gid — the daemon still runs.
+  try { fs.chmodSync(SOCKET_PATH, 0o660); } catch (_) {}
+  console.log(`auto-login-daemon listening on ${SOCKET_PATH} (mode 0660, group docker)`);
 });
 
 process.on('SIGTERM', async () => {

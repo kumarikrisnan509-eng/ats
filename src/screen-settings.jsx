@@ -252,9 +252,14 @@ const SettingsScreen = () => {
       const what = replacingTelegramToken && replacingWebhookSecret
         ? 'the Telegram bot token AND webhook signing secret'
         : replacingTelegramToken ? 'the Telegram bot token' : 'the webhook signing secret';
-      if (!window.confirm(`Replace ${what}? The previous sealed value will be discarded and cannot be recovered.`)) {
-        return;
-      }
+      // T-468 (audit-2026-05-26 frontend L7): themed confirmAsync.
+      const _ok = await window.confirmAsync({
+        title: `Replace ${what}?`,
+        sub: 'The previous sealed value will be discarded and cannot be recovered.',
+        confirmLabel: 'Replace',
+        tone: 'danger',
+      });
+      if (!_ok) return;
     }
 
     setSavingNotif(true);
