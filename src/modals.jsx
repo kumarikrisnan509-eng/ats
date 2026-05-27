@@ -8,35 +8,63 @@ const Modal = ({ open, onClose, title, sub, children, width = 560, footer }) => 
     if (!open) return;
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // T-488: lock body scroll while modal is open so the page behind doesn't
+    // scroll under it (also prevents the "modal jumps when scrolling" issue).
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
   }, [open, onClose]);
   if (!open) return null;
+  // T-488 HOTFIX: was `position:fixed top:50% left:50% translate(-50%,-50%)`
+  // which clips the top half when content exceeds viewport AND breaks entirely
+  // if any ancestor has `transform`/`filter`/`will-change` (containing-block
+  // bug). Switched to a single fixed backdrop that is a flex centering
+  // container; the modal is a flex child with `maxHeight: 100%` + inner scroll
+  // on the body. Robust against any parent transform, never clips top, works
+  // on viewport heights as small as 480px (mobile).
   return (
-    <>
-      <div onClick={onClose} style={{
+    <div
+      onClick={onClose}
+      style={{
         position: "fixed", inset: 0, zIndex: 100,
         background: "color-mix(in oklab, var(--text) 35%, transparent)",
         backdropFilter: "blur(4px)",
-      }}/>
-      <div style={{
-        position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
-        zIndex: 101, width: `min(${width}px, calc(100vw - 32px))`,
-        maxHeight: "calc(100vh - 64px)",
-        background: "var(--surface)", border: "1px solid var(--border)",
-        borderRadius: "var(--r-lg)", boxShadow: "0 24px 60px -20px oklch(0% 0 0 / 0.4)",
-        display: "flex", flexDirection: "column", overflow: "hidden",
-      }}>
-        <div style={{ padding: "18px 22px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "flex-start", gap: 16 }}>
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 24,
+        // overflowY:auto allows the WHOLE modal to scroll if viewport is tiny
+        // (e.g. 320px phone landscape) -- internal body scroll handles the
+        // common case, this is the belt-and-suspenders fallback.
+        overflowY: "auto",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          zIndex: 101,
+          width: `min(${width}px, 100%)`,
+          maxHeight: "100%",
+          background: "var(--surface)", border: "1px solid var(--border)",
+          borderRadius: "var(--r-lg)", boxShadow: "0 24px 60px -20px oklch(0% 0 0 / 0.4)",
+          display: "flex", flexDirection: "column", overflow: "hidden",
+          // T-488: explicit min-height prevents the modal from collapsing
+          // smaller than its title bar when there's no body content.
+          minHeight: 0,
+        }}
+      >
+        <div style={{ padding: "18px 22px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "flex-start", gap: 16, flexShrink: 0 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 16, fontWeight: 600, letterSpacing: "-0.01em" }}>{title}</div>
             {sub && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{sub}</div>}
           </div>
-          <button className="iconbtn" onClick={onClose} style={{ width: 28, height: 28 }}>×</button>
+          <button className="iconbtn" onClick={onClose} style={{ width: 28, height: 28, flexShrink: 0 }}>×</button>
         </div>
-        <div style={{ padding: 22, overflowY: "auto", flex: 1 }}>{children}</div>
-        {footer && <div style={{ padding: "14px 22px", borderTop: "1px solid var(--border)", background: "var(--bg-soft)" }}>{footer}</div>}
+        <div style={{ padding: 22, overflowY: "auto", flex: "1 1 auto", minHeight: 0 }}>{children}</div>
+        {footer && <div style={{ padding: "14px 22px", borderTop: "1px solid var(--border)", background: "var(--bg-soft)", flexShrink: 0 }}>{footer}</div>}
       </div>
-    </>
+    </div>
   );
 };
 
