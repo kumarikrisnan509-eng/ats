@@ -547,7 +547,13 @@ const BrokersScreen = () => {
             const match = supported.find(s => b.n.toLowerCase().includes(s.toLowerCase()));
             const isImplemented = !!match;
             return (
-              <div className="slot" key={i} style={{ minHeight: 'auto', padding: '20px 16px', justifyContent: 'center', gap: 8 }}>
+              // T-455 (audit-2026-05-26 frontend L4): dim the whole slot for
+              // "Coming soon" adapters so users don't perceive them as
+              // available-but-broken. Button was already dim; icon + name
+              // were full-opacity which made the broker look real until you
+              // tried to click. Wrap-level opacity matches the disabled
+              // button state.
+              <div className="slot" key={i} style={{ minHeight: 'auto', padding: '20px 16px', justifyContent: 'center', gap: 8, opacity: isImplemented ? 1 : 0.55 }}>
                 <div style={{ width: 36, height: 36, borderRadius: 10, background: "color-mix(in oklab, " + b.logoColor + " 18%, transparent)", color: b.logoColor, display: "grid", placeItems: "center", fontWeight: 700, fontSize: 13 }}>{b.logoLetter}</div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{b.n}</div>
                 <div style={{ fontSize: 11, opacity: 0.8 }}>{b.note}</div>
