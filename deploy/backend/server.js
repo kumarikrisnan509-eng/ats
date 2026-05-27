@@ -1654,6 +1654,17 @@ mountPortfolioRoutes(app, { resolveUserBroker }); // T-218: was 4 inline /api/po
 // Tier 63: helper to pick user's broker if authenticated+connected, else fall back to global.
 // Keeps unauthenticated callers working (returns the admin broker), authenticated callers
 // get their own. Returns null only if even the global broker is unavailable.
+//
+// T-466 (audit-2026-05-26 backend M1): when an authed user without their
+// own broker hits a broker route, the silent global fallback effectively
+// runs their request against the OPERATOR's Zerodha account. In a
+// single-operator deploy this is the legitimate path; in a multi-tenant
+// future it is a privilege-escalation primitive. Two safety improvements:
+//   1) AUDIT every fallback so unexpected usage shows up in audit.log
+//   2) STRICT_PER_USER_BROKER=1 env switch — when set, refuses the
+//      fallback and returns { broker: null, isUserOwn: false }. Default
+//      off so the existing single-operator behaviour is unchanged.
+const _STRICT_PER_USER_BROKER = process.env.STRICT_PER_USER_BROKER === '1';
 async function pickBroker(req) {
   try {
     if (req.user && req.user.id && _brokerResolver) {
@@ -1661,6 +1672,23 @@ async function pickBroker(req) {
       if (r.broker) return { broker: r.broker, isUserOwn: true };
     }
   } catch (e) { console.warn('[server] swallowed:', e && e.message); }
+  // T-466 M1: instrument the fallback path.
+  if (req.user && req.user.id && broker) {
+    try {
+      audit('broker.fallback-to-global', {
+        userId: req.user.id,
+        path: req.path,
+        method: req.method,
+        strict: _STRICT_PER_USER_BROKER,
+      });
+    } catch (_) { /* don't block the request on audit failure */ }
+    if (_STRICT_PER_USER_BROKER) {
+      // Refuse the silent fallback. Caller sees null broker and surfaces
+      // a "connect your own broker" error to the user instead of
+      // unknowingly running against the operator's account.
+      return { broker: null, isUserOwn: false };
+    }
+  }
   return { broker: broker || null, isUserOwn: false };
 }
 
