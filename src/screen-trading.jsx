@@ -193,6 +193,25 @@ const TradingScreen = () => {
 
   // Pre-trade simulator + 2FA
   const [simOrder, setSimOrder] = useState(null);
+  // T-492: live mode state + portfolio aggregate for pre-trade simulator.
+  // Was reading both from localStorage / hardcoded -> wrong cap warnings.
+  // useModeState (from trading-modes.jsx) is window-mounted; defensive guard
+  // in case load order races. Fallback to empty state if hook missing.
+  const liveModes = (typeof window.useModeState === 'function') ? window.useModeState().state : null;
+  const [liveTotalCapital, setLiveTotalCapital] = useState(0);
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await window.fetchApi('/api/me/portfolio/aggregates');
+        if (cancelled) return;
+        if (r && r.ok && r.aggregates && Number.isFinite(r.aggregates.totalValue)) {
+          setLiveTotalCapital(r.aggregates.totalValue);
+        }
+      } catch (_) { /* leave at 0 -> simulator gates breach warnings */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
   const [qty, setQty] = useState(40);
   // T-441 (audit-2026-05-26 frontend M13): initial price was hardcoded
   // ₹2948.50 (RELIANCE-ish). Seed from the live tick on first render so
@@ -466,6 +485,8 @@ const TradingScreen = () => {
         onClose={() => setSimOrder(null)}
         order={simOrder}
         onConfirm={() => { /* would dispatch order to broker */ }}
+        modesState={liveModes}
+        totalCapital={liveTotalCapital}
       />
     </>
   );

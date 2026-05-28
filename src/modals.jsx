@@ -75,7 +75,7 @@ const Modal = ({ open, onClose, title, sub, children, width = 560, footer }) => 
 
 // === Pre-trade simulator ===
 // Shows margin, risk, mode cap impact, slippage estimate before order placement
-const PreTradeSimulator = ({ open, onClose, order, onConfirm }) => {
+const PreTradeSimulator = ({ open, onClose, order, onConfirm, modesState, totalCapital }) => {
   if (!order) return null;
 
   // Compute impact (would come from broker margin API in production)
@@ -83,25 +83,30 @@ const PreTradeSimulator = ({ open, onClose, order, onConfirm }) => {
   const margin = order.product === "MIS" ? notional * 0.20 : notional * 1.0; // 5x leverage for intraday
   const modeId = order.modeId || "intraday";
   const modeMeta = window.MODE_META[modeId];
-  const modeState = window.useModeState ? null : null; // read directly from localStorage
-  // T-487: was reading from the wrong key ("rc_modes") -- the canonical key
-  // is "rsk.trading_modes.v1" (defined in trading-modes.jsx as MODE_STORAGE_KEY).
-  // Wrong key meant this modal always got {} and fell back to dummy defaults,
-  // making the pre-trade simulator cap-breach warning meaningless.
-  const modesRaw = (() => { try { return JSON.parse(localStorage.getItem("rsk.trading_modes.v1") || "{}"); } catch { return {}; } })();
-  const modeStateData = modesRaw[modeId] || { capitalPct: 30, deployedPct: 45, dailyLossPct: 1.2 };
-  const totalCapital = 4500000;
-  const modeCap = totalCapital * (modeStateData.capitalPct || 30) / 100;
-  const modeDeployed = modeCap * (modeStateData.deployedPct || 45) / 100;
-  const newDeployedPct = ((modeDeployed + margin) / modeCap) * 100;
-  const newRiskPct = (margin / totalCapital) * 100;
+
+  // T-492: was reading from localStorage directly (modesRaw line) AND using
+  // hardcoded totalCapital = 4500000. Both replaced with live props from the
+  // caller (screen-trading.jsx). If a prop is missing (e.g. caller hasn't
+  // wired it yet) we fall back to safe defaults and DISABLE the breach
+  // warnings -- showing wrong red warnings is worse than showing none.
+  const haveLiveModes = modesState && typeof modesState === 'object' && modesState[modeId];
+  const haveLiveCapital = Number.isFinite(totalCapital) && totalCapital > 0;
+  const modeStateData = haveLiveModes ? modesState[modeId] : { capitalPct: 0, deployedPct: 0, dailyLossPct: 0 };
+  const capitalForCalc = haveLiveCapital ? totalCapital : 0;
+  const modeCap = capitalForCalc * (modeStateData.capitalPct || 0) / 100;
+  const modeDeployed = modeCap * (modeStateData.deployedPct || 0) / 100;
+  const newDeployedPct = modeCap > 0 ? ((modeDeployed + margin) / modeCap) * 100 : 0;
+  const newRiskPct = capitalForCalc > 0 ? (margin / capitalForCalc) * 100 : 0;
   const slippage = (order.qty * order.price * 0.0005); // 5bps estimate
   const brokerage = Math.min(20, order.qty * order.price * 0.0003);
   const stt = order.side === "SELL" ? notional * 0.001 : 0;
   const totalCost = brokerage + stt + slippage * 0.4;
 
-  const willBreachMode = newDeployedPct > 100;
-  const willBreachRisk = newRiskPct > 2;
+  // T-492: only enforce breach warnings when we have live data. Without
+  // live capital + modes, the percentages are meaningless and we don't want
+  // to falsely block the operator.
+  const willBreachMode = haveLiveCapital && haveLiveModes && newDeployedPct > 100;
+  const willBreachRisk = haveLiveCapital && newRiskPct > 2;
 
   const Row = ({ label, value, sub, kind, mono = true }) => (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
@@ -139,7 +144,7 @@ const PreTradeSimulator = ({ open, onClose, order, onConfirm }) => {
         <div style={{ width: 8, height: 32, borderRadius: 4, background: modeMeta ? modeMeta.color : "var(--accent)" }}/>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 12, fontWeight: 500 }}>{modeMeta ? modeMeta.label : "Intraday"} mode</div>
-          <div className="muted" style={{ fontSize: 11 }}>Max ₹{(modeCap/100000).toFixed(1)}L · {modeStateData.deployedPct}% deployed</div>
+          <div className="muted" style={{ fontSize: 11 }}>{haveLiveCapital && haveLiveModes ? `Max ₹${(modeCap/100000).toFixed(1)}L · ${modeStateData.deployedPct||0}% deployed` : 'Live cap data unavailable'}</div>
         </div>
         {willBreachMode && <span className="pill pill--down">Cap exceeded</span>}
       </div>
@@ -150,14 +155,14 @@ const PreTradeSimulator = ({ open, onClose, order, onConfirm }) => {
         <Row label="Margin required" value={window.inrCompact(margin)} sub={order.product === "MIS" ? "5x intraday leverage" : "Full payment (CNC)"}/>
         <Row
           label="Mode cap impact"
-          value={`${modeStateData.deployedPct}% → ${newDeployedPct.toFixed(0)}%`}
-          sub={`Of ₹${(modeCap/100000).toFixed(1)}L allocated to ${modeMeta ? modeMeta.label : modeId}`}
-          kind={willBreachMode ? "down" : newDeployedPct > 80 ? "warn" : undefined}
+          value={haveLiveCapital && haveLiveModes ? `${modeStateData.deployedPct||0}% → ${newDeployedPct.toFixed(0)}%` : '—'}
+          sub={haveLiveCapital && haveLiveModes ? `Of ₹${(modeCap/100000).toFixed(1)}L allocated to ${modeMeta ? modeMeta.label : modeId}` : 'No live capital/mode data'}
+          kind={willBreachMode ? "down" : (haveLiveCapital && haveLiveModes && newDeployedPct > 80) ? "warn" : undefined}
         />
         <Row
           label="Per-trade risk"
-          value={`${newRiskPct.toFixed(2)}%`}
-          sub="Of total capital · cap is 2%"
+          value={haveLiveCapital ? `${newRiskPct.toFixed(2)}%` : '—'}
+          sub={haveLiveCapital ? "Of total capital · cap is 2%" : 'No live capital data'}
           kind={willBreachRisk ? "down" : undefined}
         />
       </div>
