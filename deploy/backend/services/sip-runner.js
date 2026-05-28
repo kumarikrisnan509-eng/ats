@@ -62,7 +62,8 @@ function _isWeekday(dateStr) {
   return dow !== 0 && dow !== 6; // 0=Sun 6=Sat
 }
 
-function createSipRunner({ db, riskConfigService, paper, audit, notify, getLastTick }) {
+// T-496: marketMeta is optional (only used for the holiday gate in plan()).
+function createSipRunner({ db, riskConfigService, paper, audit, notify, getLastTick, marketMeta }) {
   if (!db || !db._conn) throw new Error('createSipRunner: db with _conn required');
   if (!riskConfigService) throw new Error('createSipRunner: riskConfigService required');
   if (!paper) throw new Error('createSipRunner: paper required');
@@ -105,8 +106,16 @@ function createSipRunner({ db, riskConfigService, paper, audit, notify, getLastT
     const fireMonth = _monthISTKey();
     const dayOfMonth = Number(today.slice(8));
 
-    if (!_isWeekday(today)) {
-      return { result: 'non_market_day', today, eligible: [], skipped: [] };
+    // T-496: prefer marketMeta.isHolidayOrWeekend() so SIP defers on Diwali
+    // etc., not just weekends. Falls back to _isWeekday() if marketMeta is
+    // unavailable (boot race) so SIP never silently runs on every day.
+    if (marketMeta && typeof marketMeta.isHolidayOrWeekend === 'function') {
+      const day = marketMeta.isHolidayOrWeekend(today);
+      if (day && day.closed) {
+        return { result: 'non_market_day', today, reason: day.reason, holidayName: day.holidayName, eligible: [], skipped: [] };
+      }
+    } else if (!_isWeekday(today)) {
+      return { result: 'non_market_day', today, reason: 'weekend_fallback', eligible: [], skipped: [] };
     }
     if (dayOfMonth < cfg.sipDayOfMonth) {
       return { result: 'too_early', today, sipDayOfMonth: cfg.sipDayOfMonth, eligible: [], skipped: [] };

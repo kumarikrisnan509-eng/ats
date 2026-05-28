@@ -72,7 +72,51 @@ function createMarketMeta({ db, broker }) {
     }, 24 * 60 * 60 * 1000);
   }
 
-  return { getHolidays, refreshFromBroker, scheduleDailyRefresh };
+  // T-496 (audit-2026-05-28): live trading gates need a single source of truth
+  // for "is the market open right now". Pure functions on top of the holiday
+  // cache + hardcoded NSE session (09:15-15:30 IST). Both return shapes that
+  // are safe to inline into HTTP/JSON responses with reason codes.
+
+  function _istNow(now) {
+    const d = now instanceof Date ? now : new Date();
+    return new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
+  }
+
+  function _istDateISO(ist) { return ist.toISOString().slice(0, 10); }
+
+  // Pure date check. Use for cron scheduling decisions (SIP, EOD jobs).
+  function isHolidayOrWeekend(dateISO) {
+    if (!dateISO) dateISO = _istDateISO(_istNow());
+    const ist = new Date(dateISO + 'T00:00:00.000Z');
+    const dow = ist.getUTCDay();
+    if (dow === 0) return { closed: true, reason: 'weekend_sunday', date: dateISO };
+    if (dow === 6) return { closed: true, reason: 'weekend_saturday', date: dateISO };
+    try {
+      const { holidays } = getHolidays();
+      if (Array.isArray(holidays)) {
+        const hit = holidays.find(x => x && x.date === dateISO);
+        if (hit) return { closed: true, reason: 'holiday', date: dateISO, holidayName: hit.name || 'NSE holiday' };
+      }
+    } catch (e) { /* permissive — bubble up below */ }
+    return { closed: false, date: dateISO };
+  }
+
+  // Full open-now check (date + hours). Use for live order gating.
+  function isMarketOpenNow(now) {
+    const ist = _istNow(now);
+    const dateISO = _istDateISO(ist);
+    const day = isHolidayOrWeekend(dateISO);
+    if (day.closed) return { open: false, reason: day.reason, date: dateISO, holidayName: day.holidayName };
+    const mins = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+    const OPEN  = 9 * 60 + 15;
+    const CLOSE = 15 * 60 + 30;
+    const hhmm = ist.toISOString().slice(11, 16);
+    if (mins < OPEN)  return { open: false, reason: 'pre_open',   date: dateISO, time_ist: hhmm };
+    if (mins > CLOSE) return { open: false, reason: 'post_close', date: dateISO, time_ist: hhmm };
+    return { open: true, date: dateISO, time_ist: hhmm };
+  }
+
+  return { getHolidays, refreshFromBroker, scheduleDailyRefresh, isHolidayOrWeekend, isMarketOpenNow };
 }
 
 module.exports = { createMarketMeta, STATIC_FALLBACK_HOLIDAYS };

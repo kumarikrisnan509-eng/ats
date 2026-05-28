@@ -35,6 +35,8 @@ const { mountAuthRoutes } = require('./routes/auth');
 const { mountRiskConfigRoutes } = require('./routes/risk-config');
 // T-484: soft-kill endpoints (UI Kill button backing).
 const { mountAdminKillRoutes } = require('./routes/admin-kill');
+// T-496: panic square-off endpoint (flatten all open broker positions).
+const { mountAdminSquareOffRoutes } = require('./routes/admin-square-off');
 const { createRiskConfigService } = require('./services/risk-config');
 // T-264: tax-aware trade economics service (per-trade STT/GST/SEBI/brokerage math).
 const { createTradeEconomics } = require('./services/trade-economics');
@@ -409,6 +411,9 @@ async function init() {
     // skipped with 'skipped_wrong_regime'. Permissive on detector failure.
     getRegime: async () => regimeDetector ? regimeDetector.cachedDetect() : null,
     isStrategyEligibleInRegime,
+    // T-496: market-hours/holiday gate for autorun.runOnce. Getter form so
+    // AutoRunner is robust to _marketMeta being assigned later in init().
+    getMarketMeta: () => _marketMeta,
     // T-298b: SHADOW-only options scanner. Passed by reference but unused
     // until OPTIONS_AUTORUN_ENABLED=true at scan() call time. autorun's
     // shadow-runner is fire-and-forget after the existing 8-gate chain.
@@ -541,6 +546,9 @@ async function init() {
           const hit = arr.find(t => t.symbol === sym);
           return hit ? hit.ltp : null;
         },
+        // T-496: SIP plan() consults marketMeta.isHolidayOrWeekend() so SIPs
+        // defer on Diwali/Holi etc., not just weekends.
+        marketMeta: _marketMeta,
       });
       sipRunner.start(1);   // operator account; multi-user comes with T-272+
       console.log('[server] SIP runner armed (09:30 IST daily + boot catch-up)');
@@ -625,6 +633,9 @@ async function init() {
       KILL_SWITCH, LIVE_TRADING,
       getRiskConfig: (userId) => riskConfigService ? riskConfigService.cachedGet(userId) : null,
       getPortfolioAggregates: () => portfolioAggregates ? portfolioAggregates.compute() : null,
+      // T-496: market-hours/holiday gate. Getter form so preTrade can be
+      // constructed before _marketMeta is initialised lower in init().
+      getMarketMeta: () => _marketMeta,
       audit,
     });
     console.log('[server] pre-trade pipeline armed (3 legacy + 2 new gates)');
@@ -2074,6 +2085,9 @@ mountAuthRoutes(app, { getAuth: () => auth, getEmailAlerts: () => emailAlerts })
 mountRiskConfigRoutes(app, { getRiskConfig: () => riskConfigService, getAuth: () => auth, getNotify: () => _notifyModule, getAudit: () => audit });
 // T-484: soft-kill endpoints. Backs the UI top-right Kill button.
 mountAdminKillRoutes(app, { getAuth: () => auth, getAudit: () => audit, getNotify: () => _notifyModule, getRiskConfig: () => riskConfigService });  // T-490: getRiskConfig added so soft-kill can pause/restore activeModes
+// T-496: panic-square-off route. Auth-gated POST that walks broker.getPositions(),
+// places reverse MARKET orders, and engages soft-kill so autorun won't re-enter.
+mountAdminSquareOffRoutes(app, { getBroker: () => broker, getMarketMeta: () => _marketMeta, notify: _notifyModule, audit });
 // T-290e: option-chain READ routes + ops-key gated manual refresh.
 // fetcher may be null if init failed; the route checks for that.
 app.use((req, res, next) => {

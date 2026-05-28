@@ -39,6 +39,9 @@ function createPreTradeCheck({
   LIVE_TRADING,
   getRiskConfig,
   getPortfolioAggregates,
+  // T-496: getter for the marketMeta singleton (avoids circular boot
+  // ordering — server.js can construct preTradeCheck before marketMeta).
+  getMarketMeta,
   audit,
 }) {
   const _audit = audit || (() => {});
@@ -64,6 +67,32 @@ function createPreTradeCheck({
         message: 'Live orders are disabled by operator soft-kill (fired from UI). Reset via POST /api/admin/soft-kill-reset. The persistent KILL_SWITCH env var is separate and unaffected.',
         detail: softKill.state(),
       };
+    }
+
+    // ----------- GATE 0.5 (T-496): market hours / holiday -----------
+    // NSE is closed Sat/Sun, on the holiday calendar, and outside
+    // 09:15-15:30 IST. Block live orders here so a wired-up KILL_SWITCH=false
+    // can't accidentally fire orders on Diwali / a weekend. Permissive if
+    // marketMeta isn't initialised yet (boot race) -- audited bypass.
+    try {
+      const mm = (typeof getMarketMeta === 'function') ? getMarketMeta() : null;
+      if (mm && typeof mm.isMarketOpenNow === 'function') {
+        const st = mm.isMarketOpenNow();
+        if (st && st.open === false) {
+          _audit('preTrade.blocked.marketClosed', { userId, payload, state: st });
+          return {
+            ok: false,
+            status: 503,
+            reason: 'MARKET_CLOSED',
+            message: `NSE is closed (${st.reason}${st.holidayName ? ' — ' + st.holidayName : ''}${st.time_ist ? ' at ' + st.time_ist + ' IST' : ''}). Live orders accepted only during 09:15-15:30 IST on trading days.`,
+            detail: st,
+          };
+        }
+      } else {
+        _audit('preTrade.marketMeta.unavailable', { userId });
+      }
+    } catch (e) {
+      _audit('preTrade.marketMeta.failed', { userId, msg: e.message });
     }
 
     // ----------- GATE 1: KILL_SWITCH env -----------

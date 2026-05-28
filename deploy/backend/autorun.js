@@ -66,6 +66,9 @@ class AutoRunner {
   constructor({ broker, paper, computeSignal, audit, storePath,
                 getRiskConfig, tradeEconomics, notify, userId,
                 getRegime, isStrategyEligibleInRegime,
+                // T-496: market-hours/holiday gate. Optional -- if absent,
+                // engine behaves as pre-T-496 (no calendar check).
+                getMarketMeta,
                 getOptionsScanner, getHoldings, optionsUnderlyings }) {
     if (!broker)        throw new Error('broker required');
     if (!paper)         throw new Error('paper required');
@@ -87,6 +90,10 @@ class AutoRunner {
     this.getRegime      = (typeof getRegime === 'function') ? getRegime : null;
     this.isStrategyEligibleInRegime = (typeof isStrategyEligibleInRegime === 'function')
       ? isStrategyEligibleInRegime : null;
+    // T-496: market-hours/holiday gate. autorun.runOnce returns 'skipped' (not
+    // an error) when the market is closed so the timer can keep firing without
+    // polluting the audit chain with "blocked" events every tick.
+    this.getMarketMeta  = (typeof getMarketMeta === 'function') ? getMarketMeta : null;
     // T-298b: options scanner SHADOW MODE -- no orders fired from this path.
     // getOptionsScanner is a function returning the scanner instance (or null)
     // -- using a getter so server.js can construct autorun before scanner.
@@ -222,6 +229,31 @@ class AutoRunner {
     }
     // Reset the throttle once soft-kill is cleared so the next halt audits again.
     if (this._softKillNotifiedAt) this._softKillNotifiedAt = 0;
+    // T-496: market-hours / holiday gate. autorun fires every N min regardless
+    // of clock; without this check it would compute signals + (in paper) fake
+    // a trade on weekends / Diwali / pre-open hours, polluting paper stats and
+    // creating a foot-gun for the day LIVE_TRADING flips on. Same throttle
+    // pattern as softKill -- audit once per closed-market burst.
+    if (this.getMarketMeta) {
+      try {
+        const mm = this.getMarketMeta();
+        if (mm && typeof mm.isMarketOpenNow === 'function') {
+          const st = mm.isMarketOpenNow();
+          if (st && st.open === false) {
+            if (!this._marketClosedNotifiedAt || (Date.now() - this._marketClosedNotifiedAt) > 60_000) {
+              this.audit('autorun.skipped.marketClosed', { source: source || 'manual', state: st });
+              this._marketClosedNotifiedAt = Date.now();
+            }
+            return { result: 'skipped', reason: 'market_closed', state: st };
+          }
+        }
+      } catch (e) {
+        // Permissive: a marketMeta failure should not stop the engine.
+        this.audit('autorun.marketMeta.failed', { msg: e.message });
+      }
+    }
+    // Reset throttle once the market opens again.
+    if (this._marketClosedNotifiedAt) this._marketClosedNotifiedAt = 0;
     this._inflight = true;
     const t0 = Date.now();
     const run = {
