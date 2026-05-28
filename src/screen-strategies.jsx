@@ -509,7 +509,53 @@ const StrategiesScreen = () => {
           </div>
           <div className="row" style={{ gap: 6, flexShrink: 0 }}>
             <PerStrategyAutorunButton strategy={s.id} gated={gated}/>
-            <button className="btn btn--sm" disabled={gated} style={gated ? { opacity: 0.5 } : null}>
+            <button
+              className="btn btn--sm"
+              disabled={gated}
+              style={gated ? { opacity: 0.5 } : null}
+              onClick={async () => {
+                /* T-517: toggle enabled on every multi-config for this strategy.
+                   /api/autorun/configs POST upserts by id (T-511), so we re-POST each
+                   matching config with the flipped enabled flag. Shows a toast for
+                   feedback. If no configs exist yet, prompt the user to add one via
+                   the ⚡ Auto-runner button. */
+                try {
+                  const r = await window.fetchApi('/api/autorun/configs');
+                  const mine = ((r && r.configs) || []).filter(c => c.strategy === s.id);
+                  if (mine.length === 0) {
+                    window.toast && window.toast({ kind: 'info', title: `No auto-runner config for ${s.n}`, sub: 'Add one via the ⚡ Auto-runner button on this card.' });
+                    return;
+                  }
+                  const anyEnabled = mine.some(c => c.enabled);
+                  const target     = !anyEnabled;
+                  let ok = 0;
+                  for (const c of mine) {
+                    const body = {
+                      strategy: c.strategy, symbol: c.symbol, qty: c.qty,
+                      interval: c.interval, intervalMinutes: c.intervalMinutes,
+                      candleLookbackDays: c.candleLookbackDays,
+                      params: c.params,
+                      enabled: target,
+                    };
+                    if (Number.isFinite(c.stopLossPct))     body.stopLossPct     = c.stopLossPct;
+                    if (Number.isFinite(c.targetPct))       body.targetPct       = c.targetPct;
+                    if (Number.isFinite(c.trailingStopPct)) body.trailingStopPct = c.trailingStopPct;
+                    const rr = await window.fetchApi('/api/autorun/configs', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(body),
+                    });
+                    if (rr && rr.ok) ok++;
+                  }
+                  window.toast && window.toast({
+                    kind: ok === mine.length ? 'ok' : 'warn',
+                    title: `${s.n}: ${target ? 'started' : 'paused'} ${ok}/${mine.length} config(s)`,
+                  });
+                } catch (e) {
+                  window.toast && window.toast({ kind: 'error', title: 'Toggle failed', sub: e.message || String(e) });
+                }
+              }}
+            >
               {s.st === "paused" || s.st === "draft" ? <><I.play size={12}/> Start</> : <><I.pause size={12}/> Pause</>}
             </button>
             <button className="iconbtn" style={{ width: 32, height: 32 }}><I.more size={14}/></button>
