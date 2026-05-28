@@ -280,7 +280,16 @@ class AutoRunner {
     };
     if (!out.strategy) throw new Error('strategy required');
     if (!out.symbol)   throw new Error('symbol required');
-    const valid = ['rsi_mean_revert','ema_cross','macd_cross','bollinger'];
+    // T-518: extended whitelist to match every strategy implemented in
+    // backtest.js computeSignal (22 total). Previously only 4 were accepted
+    // even though the engine had handlers for all of them, which made
+    // 18 of the 22 catalog strategies un-configurable via the UI.
+    const valid = [
+      'rsi_mean_revert', 'ema_cross', 'macd_cross', 'bollinger',
+      'supertrend', 'adx_trend', 'donchian', 'stochastic', 'williams_r',
+      'heikin_ashi', 'cci', 'keltner', 'obv', 'psar', 'aroon', 'cmf',
+      'atr_trail', 'ichimoku', 'vwap', 'pivot', 'mfi', 'trix',
+    ];
     if (!valid.includes(out.strategy)) throw new Error(`strategy must be one of: ${valid.join(', ')}`);
     return out;
   }

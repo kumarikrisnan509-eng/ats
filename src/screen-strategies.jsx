@@ -374,6 +374,134 @@ const PerStrategyAutorunButton = ({ strategy, gated }) => {
   );
 };
 
+/* T-519: per-strategy kebab dropdown.
+   Replaces the no-op "..." iconbtn with a real action menu. Three actions
+   that map cleanly to existing /api/autorun and /api/autorun/configs
+   endpoints. No new backend wiring needed.
+     - Run now           -> POST /api/autorun/run (triggers immediate evaluation
+                            of ALL enabled configs, not just this strategy)
+     - View last 25 runs -> opens modal showing autorun history filtered to
+                            this strategy
+     - Remove all configs -> DELETE every /api/autorun/configs entry where
+                            strategy === s.id (with confirm) */
+const KebabMenu = ({ strategy }) => {
+  const [open, setOpen] = React.useState(false);
+  const [historyOpen, setHistoryOpen] = React.useState(false);
+  const [history, setHistory] = React.useState([]);
+  const [busy, setBusy] = React.useState(false);
+  const ref = React.useRef(null);
+
+  // Close on outside click
+  React.useEffect(() => {
+    if (!open) return;
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+
+  const runNow = async () => {
+    setOpen(false); setBusy(true);
+    try {
+      const r = await window.fetchApi('/api/autorun/run', { method: 'POST' });
+      window.toast && window.toast({
+        kind: r && r.ok ? 'ok' : 'warn',
+        title: r && r.ok ? `${strategy.n}: evaluation triggered` : `Run failed: ${(r && r.reason) || 'unknown'}`,
+      });
+    } catch (e) { window.toast && window.toast({ kind: 'error', title: 'Run failed', sub: e.message }); }
+    finally { setBusy(false); }
+  };
+
+  const viewHistory = async () => {
+    setOpen(false); setBusy(true);
+    try {
+      const r = await window.fetchApi('/api/autorun');
+      const all = (r && r.history) || [];
+      // Filter to runs where the run\'s strategy matches this card\'s strategy
+      const mine = all.filter(h => h.strategy === strategy.id);
+      setHistory(mine);
+      setHistoryOpen(true);
+    } catch (e) { window.toast && window.toast({ kind: 'error', title: 'History load failed', sub: e.message }); }
+    finally { setBusy(false); }
+  };
+
+  const removeAll = async () => {
+    setOpen(false);
+    if (!window.confirm(`Remove ALL auto-runner configs for "${strategy.n}"?\nThis disables future autorun fires for this strategy until you add new configs.`)) return;
+    setBusy(true);
+    try {
+      const r = await window.fetchApi('/api/autorun/configs');
+      const mine = ((r && r.configs) || []).filter(c => c.strategy === strategy.id);
+      let removed = 0;
+      for (const c of mine) {
+        const rr = await window.fetchApi('/api/autorun/configs/' + encodeURIComponent(c.id), { method: 'DELETE' });
+        if (rr && rr.ok) removed++;
+      }
+      window.toast && window.toast({
+        kind: removed === mine.length ? 'ok' : 'warn',
+        title: `${strategy.n}: removed ${removed}/${mine.length} configs`,
+      });
+    } catch (e) { window.toast && window.toast({ kind: 'error', title: 'Remove failed', sub: e.message }); }
+    finally { setBusy(false); }
+  };
+
+  const itemStyle = { display: 'block', width: '100%', padding: '8px 12px', textAlign: 'left', fontSize: 13, background: 'none', border: 'none', cursor: 'pointer' };
+
+  return (
+    <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        className="iconbtn"
+        style={{ width: 32, height: 32 }}
+        title="More actions for this strategy"
+        aria-label="More actions"
+        onClick={() => setOpen(v => !v)}
+        disabled={busy}
+      >
+        <I.more size={14}/>
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', right: 0, marginTop: 4, zIndex: 1000,
+          background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6,
+          minWidth: 220, boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+        }}>
+          <button style={itemStyle} onClick={runNow}>⚡ Run all configs once</button>
+          <button style={itemStyle} onClick={viewHistory}>🕓 View recent runs</button>
+          <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }}/>
+          <button style={{ ...itemStyle, color: 'var(--down)' }} onClick={removeAll}>🗑 Remove all configs</button>
+        </div>
+      )}
+      {historyOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 16, width: '100%', maxWidth: 720, maxHeight: '90vh', overflow: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <h3 style={{ margin: 0, fontSize: 15 }}>Recent runs · {strategy.n}</h3>
+              <button className="iconbtn" onClick={() => setHistoryOpen(false)}>✕</button>
+            </div>
+            {history.length === 0 ? (
+              <div style={{ fontSize: 12, color: 'var(--text-3)', padding: '24px 0', textAlign: 'center' }}>No runs recorded yet for this strategy.</div>
+            ) : (
+              <table className="tbl" style={{ width: '100%', fontSize: 11 }}>
+                <thead><tr><th>time</th><th>symbol</th><th>signal</th><th>result</th><th>note</th></tr></thead>
+                <tbody>
+                  {history.slice(-25).reverse().map((h, i) => (
+                    <tr key={i}>
+                      <td className="mono">{String(h.ts || '').slice(0, 19).replace('T', ' ')}</td>
+                      <td className="mono">{h.symbol || '—'}</td>
+                      <td className="mono">{h.signal || '—'}</td>
+                      <td>{h.result || '—'}</td>
+                      <td style={{ fontSize: 10, color: 'var(--text-3)' }}>{h.reason || h.error || h.dedupeKey || ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const StrategiesScreen = () => {
   // T-470 (audit-2026-05-26 frontend M8): surface fetch failures.
   const [loadErr, setLoadErr] = React.useState(null);
@@ -558,7 +686,7 @@ const StrategiesScreen = () => {
             >
               {s.st === "paused" || s.st === "draft" ? <><I.play size={12}/> Start</> : <><I.pause size={12}/> Pause</>}
             </button>
-            <button className="iconbtn" style={{ width: 32, height: 32 }}><I.more size={14}/></button>
+            <KebabMenu strategy={s}/>
           </div>
         </div>
 
