@@ -537,12 +537,68 @@ const SpanMarginPanel = () => {
 
 const PaperScreen = () => {
   const [demo] = (window.useDemoMode ? window.useDemoMode() : [false]);
-  const [account, setAccount] = useState("50L");
+  // T-529/T-530: default virtual-account tier and inferred-from-backend tier.
+  // On mount we GET /api/me/paper and infer the tier from state.initial_capital,
+  // so a refresh restores the user's last selection. setAccount writes to the
+  // backend via PUT /api/me/paper/capital with { initialCapital, tier, reset:false }.
+  const [account, setAccountRaw] = useState("50K");
+  const [accountSaving, setAccountSaving] = useState(false);
+  const [accountError, setAccountError] = useState(null);
   const [, bump] = useState(0);
   React.useEffect(() => {
     const h = () => bump(n => n + 1);
     window.addEventListener("modes-changed", h);
     return () => window.removeEventListener("modes-changed", h);
+  }, []);
+  // T-530: setAccount wrapper — persists the tier change to backend and
+  // optimistically updates local state.
+  const persistAccountTier = React.useCallback(async (tierId) => {
+    const sizes = { "50K": 50000, "1L": 100000, "5L": 500000, "10L": 1000000, "25L": 2500000, "50L": 5000000 };
+    const cap = sizes[tierId];
+    if (!cap) { console.warn("[T-530] unknown tier:", tierId); return; }
+    setAccountSaving(true);
+    setAccountError(null);
+    try {
+      const csrfResp = await window.fetchApi("/api/csrf-token");
+      const csrf = csrfResp && (csrfResp.csrfToken || csrfResp.token);
+      const res = await window.fetchApi("/api/me/paper/capital", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
+        body: JSON.stringify({ initialCapital: cap, tier: tierId, reset: false }),
+      });
+      if (!res || res.ok === false) {
+        setAccountError((res && (res.reason || res.detail)) || "save failed");
+      }
+    } catch (e) {
+      setAccountError(e.message || "network error");
+    } finally {
+      setAccountSaving(false);
+    }
+  }, []);
+  const setAccount = React.useCallback((tierId) => {
+    setAccountRaw(tierId);
+    persistAccountTier(tierId);
+  }, [persistAccountTier]);
+  // T-530: on mount, load the persisted tier from backend.
+  React.useEffect(() => {
+    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
+    (async () => {
+      try {
+        const res = await window.fetchApi("/api/me/paper");
+        if (res && res.ok && res.state) {
+          const cap = Number(res.state.initial_capital || res.state.cash || 0);
+          const tier = String(res.state.tier || "").trim();
+          const sizes = { "50K": 50000, "1L": 100000, "5L": 500000, "10L": 1000000, "25L": 2500000, "50L": 5000000 };
+          // Prefer the explicit tier label if it matches; else infer from capital.
+          if (sizes[tier]) {
+            setAccountRaw(tier);
+          } else {
+            const match = Object.entries(sizes).find(([_id, v]) => v === cap);
+            if (match) setAccountRaw(match[0]);
+          }
+        }
+      } catch (e) { /* keep default */ }
+    })();
   }, []);
   // ---- live paper trading state from /api/paper, /paper/positions, /paper/orders ----
   const [livePaper, setLivePaper] = React.useState(null);
@@ -571,9 +627,15 @@ const PaperScreen = () => {
   // from the account-id label (₹10L / ₹25L / ₹50L) and shows zeros for
   // P&L/trades/winR until /api/paper data fills in. The Live-paper-account
   // strip above already shows the real cash/equity/pnl from /api/paper.
-  const __accountSizes = { "10L": 1000000, "25L": 2500000, "50L": 5000000 };
+  // T-529: extended virtual-capital tiers to start from INR 50K.
+  // Lower tiers are useful for beginners doing small-account paper trading
+  // (~1 NIFTY lot fits in INR 50K margin). Highest tier preserved for HNI testing.
+  const __accountSizes = { "50K": 50000, "1L": 100000, "5L": 500000, "10L": 1000000, "25L": 2500000, "50L": 5000000 };
   const accounts = demo
     ? [
+        { id: "50K", cap: 50000,   used: 18400,   pnl: 1240,   trades: 6,   winR: 50 },
+        { id: "1L",  cap: 100000,  used: 42000,   pnl: 3120,   trades: 11,  winR: 55 },
+        { id: "5L",  cap: 500000,  used: 188000,  pnl: 9420,   trades: 22,  winR: 59 },
         { id: "10L", cap: 1000000, used: 412000,  pnl: 18420,  trades: 34,  winR: 62 },
         { id: "25L", cap: 2500000, used: 1180000, pnl: 52840,  trades: 67,  winR: 66 },
         { id: "50L", cap: 5000000, used: 2140000, pnl: 148320, trades: 142, winR: 71 },
@@ -584,6 +646,8 @@ const PaperScreen = () => {
   // T-346: gate the 6 hardcoded paper-order fixtures behind demo so live
   // mode shows no fake history. Real fills come from /api/paper/orders
   // (already used elsewhere in this screen).
+  // T-524: when live, normalize liveOrders (from /api/paper/orders) into
+  // the same shape the order-book table expects.
   const paperOrders = demo ? [
     { t: "14:41:08", s: "RELIANCE",   side: "BUY",  qty: 80,  req: 2948.50, fill: 2948.85, slip: 0.35, strat: "Momentum AI",   st: "filled" },
     { t: "14:32:19", s: "HDFCBANK",   side: "BUY",  qty: 50,  req: 1582.00, fill: 1582.15, slip: 0.15, strat: "Mean Rev. v2",  st: "filled" },
@@ -591,7 +655,24 @@ const PaperScreen = () => {
     { t: "13:58:02", s: "TATASTEEL", side: "SELL", qty: 200, req: 148.40, fill: 148.28, slip: 0.12, strat: "Breakout",      st: "filled" },
     { t: "13:44:30", s: "INFY",      side: "BUY",  qty: 40,  req: 1472.00, fill: 1472.00, slip: 0.00, strat: "Momentum AI",   st: "pending" },
     { t: "13:22:15", s: "SBIN",      side: "SELL", qty: 150, req: 782.50,  fill: 782.32,  slip: 0.18, strat: "Grid Trader",   st: "filled" },
-  ] : [];
+  ] : (Array.isArray(liveOrders) ? liveOrders.slice(-50).reverse().map(o => {
+    const filledPrice = Number(o.filledPrice || o.fill || o.price || 0);
+    const reqPrice = Number(o.price || o.filledPrice || 0);
+    const slip = reqPrice && filledPrice ? Math.abs(filledPrice - reqPrice) : 0;
+    const time = o.filledAt || o.createdAt || "";
+    return {
+      t: time ? new Date(time).toLocaleTimeString("en-IN", { hour12: false }) : "—",
+      s: o.symbol || "—",
+      side: o.side || "",
+      qty: o.qty || 0,
+      req: reqPrice || filledPrice || 0,
+      fill: filledPrice || 0,
+      slip: slip,
+      strat: o.strategy || "manual",
+      st: (o.status || "").toLowerCase(),
+      _id: o.id,
+    };
+  }) : []);
 
   // T-346: synthetic PnL series only in demo mode.
   const pnlSeries = demo ? seriesRandom(9, 40, -8000, 160000, 3500) : [];
@@ -612,7 +693,11 @@ const PaperScreen = () => {
       {livePaper && (
         <div className="card" style={{ marginBottom: 16, background: "var(--info-soft, #eff6ff)", padding: 14, borderRadius: 12 }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "center" }}>
-            <div style={{ fontSize: 11, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>Live paper account</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ fontSize: 11, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700 }}>Live paper account</div>
+              {/* T-532: explicit badge so users know this row is REAL DB-backed data, not demo */}
+              <span title="Real per-user state from /api/me/paper backed by SQLite paper_singleton_state" style={{ fontSize: 9, padding: "2px 5px", borderRadius: 3, background: "var(--up, #16a34a)", color: "white", fontWeight: 700, letterSpacing: 0.5 }}>REAL</span>
+            </div>
             <div className="mono" style={{ fontSize: 15, fontWeight: 700 }}>cash INR {Number(livePaper.cash).toLocaleString("en-IN")}</div>
             <div className="mono" style={{ fontSize: 13 }}>equity INR {Number(livePaper.totalEquity).toLocaleString("en-IN")}</div>
             <div className="mono" style={{ fontSize: 13, color: livePaper.realizedPnl >= 0 ? "var(--up)" : "var(--down)" }}>realized INR {livePaper.realizedPnl}</div>
@@ -678,6 +763,9 @@ const PaperScreen = () => {
             <Segmented value={account} onChange={setAccount}
               options={accounts.map(a => ({ value: a.id, label: "₹" + a.id }))}/>
             <Pill kind="acc" dot>Paper · identical to live layout</Pill>
+            {/* T-530: surface save status */}
+            {accountSaving && <span className="muted" style={{ fontSize: 11 }}>saving…</span>}
+            {accountError && <span style={{ fontSize: 11, color: "var(--down)" }}>save failed: {accountError}</span>}
           </div>
           <div className="row" style={{ gap: 8 }}>
             {/* T-429 (audit-2026-05-26 frontend H1): the "48 trading days"
@@ -688,11 +776,29 @@ const PaperScreen = () => {
           </div>
         </div>
         <div className="grid grid-4">
-          <Stat label="Virtual capital" value={inrCompact(acc.cap)} delta={`${((acc.used/acc.cap)*100).toFixed(0)}% deployed`} deltaKind="muted"/>
-          <Stat label="Paper P&L" value={inr(acc.pnl)} delta={pct((acc.pnl/acc.cap)*100)} deltaKind={acc.pnl >= 0 ? "up" : "down"}/>
-          <Stat label="Trades" value={acc.trades} delta={`${acc.winR}% win rate`} deltaKind="muted"/>
-          {/* T99-T90: dropped fake Sharpe 1.84 — needs daily-equity series */}
-          <Stat label="Sharpe (ann.)" value="—" sub="needs daily equity series"/>
+          {/* T-523: when livePaper is loaded (live mode, not demo), prefer the
+              real DB-backed numbers from /api/paper over the fixture. The
+              ₹10L/25L/50L tier is just a label; the actual cash balance and
+              P&L come from paper_singleton_state in SQLite. */}
+          {(() => {
+            const lp = livePaper && !demo;
+            const cap = lp ? Number(livePaper.totalEquity) : acc.cap;
+            const cash = lp ? Number(livePaper.cash) : acc.cap;
+            const realized = lp ? Number(livePaper.realizedPnl) : acc.pnl;
+            const unrealized = lp ? Number(livePaper.unrealizedPnl) : 0;
+            const pnl = realized + unrealized;
+            const trades = lp ? Number(livePaper.closedTrades || 0) : acc.trades;
+            const winR = lp ? Number(livePaper.winRate || 0) : acc.winR;
+            const deployedPct = lp && cap ? Math.max(0, Math.min(100, ((cap - cash) / cap) * 100)) : ((acc.used/acc.cap)*100);
+            return (
+              <>
+                <Stat label="Virtual capital" value={inrCompact(cap)} delta={`${deployedPct.toFixed(0)}% deployed`} deltaKind="muted"/>
+                <Stat label="Paper P&L" value={inr(pnl)} delta={cap ? pct((pnl/cap)*100) : "—"} deltaKind={pnl > 0 ? "up" : pnl < 0 ? "down" : "muted"}/>
+                <Stat label="Trades" value={trades} delta={`${winR}% win rate`} deltaKind="muted"/>
+                <Stat label="Sharpe (ann.)" value="—" sub="needs daily equity series"/>
+              </>
+            );
+          })()}
         </div>
       </Card>
 

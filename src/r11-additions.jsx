@@ -62,25 +62,10 @@ const formatNumber = (value, opts = {}) => {
 // Wrap the paper-trading screen body in <PaperChrome>...</PaperChrome>.
 const PaperChrome = ({ children }) => (
   <div style={{ position: "relative" }}>
-    {/* Watermark — fixed to scroll container, low-contrast */}
-    <div aria-hidden="true" style={{
-      position: "absolute", inset: 0,
-      pointerEvents: "none", zIndex: 0,
-      overflow: "hidden",
-    }}>
-      <div style={{
-        position: "absolute",
-        top: "30%", left: "50%",
-        transform: "translate(-50%, -50%) rotate(-18deg)",
-        fontSize: 180, fontWeight: 900,
-        color: "oklch(90% 0.08 80)",
-        opacity: 0.25,
-        letterSpacing: "0.1em",
-        fontFamily: "var(--mono)",
-        whiteSpace: "nowrap",
-        userSelect: "none",
-      }}>PAPER · PAPER · PAPER</div>
-    </div>
+    {/* T-531: removed the rotated "PAPER · PAPER · PAPER" watermark.
+        It rendered as a faint cropped string ("DAFT") that confused users
+        and bled through tables. The yellow PAPER strip below is sufficient
+        to communicate the paper-trading context. */}
     {/* Top strip */}
     <div style={{
       display: "flex", alignItems: "center", gap: 10,

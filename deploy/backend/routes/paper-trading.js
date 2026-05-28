@@ -145,6 +145,25 @@ function mountPaperTradingRoutes(app, deps) {
     }
   }));
 
+  // ---------- GET /api/me/paper/capital (T-530 / follow-on #48) ----------
+  // Returns just the capital + tier label, so the frontend can restore
+  // the user's last virtual-account selection on page mount without
+  // pulling the full /api/me/paper payload.
+  app.get('/api/me/paper/capital', withAuth((req, res) => {
+    try {
+      const db = getDb();
+      const s = db.paper.getState(req.user.id) || {};
+      res.json({
+        ok: true,
+        initialCapital: Number(s.initial_capital || s.cash || 0),
+        cash:           Number(s.cash || 0),
+        tier:           String(s.tier || ''),
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: 'capital_get_failed', detail: e.message });
+    }
+  }));
+
   // ---------- PUT /api/me/paper/capital (Tier 66) ----------
   app.put('/api/me/paper/capital', withAuth((req, res) => {
     try {
