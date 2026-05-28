@@ -83,9 +83,11 @@ jobs:
           short=$(echo "${GITHUB_SHA}" | cut -c1-12)
           owner_lc=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           ref="${{ env.REGISTRY }}/${owner_lc}/${{ env.IMAGE_NAME }}"
+          build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           echo "short_sha=${short}"             >> "$GITHUB_OUTPUT"
           echo "owner_lc=${owner_lc}"           >> "$GITHUB_OUTPUT"
           echo "image_ref=${ref}"               >> "$GITHUB_OUTPUT"
+          echo "build_time=${build_time}"       >> "$GITHUB_OUTPUT"
           echo "tags=${ref}:${short},${ref}:latest" >> "$GITHUB_OUTPUT"
 
       - name: Build & push (linux/amd64)
@@ -99,6 +101,12 @@ jobs:
           cache-from: type=gha
           cache-to:   type=gha,mode=max
           provenance: false
+          # T-494 (audit-follow-up): bake the git SHA + build time into the
+          # image so /api/version can return them. Lets one curl reveal which
+          # commit is running -- closes the drift-check loop after a deploy.
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            BUILD_TIME=${{ steps.meta.outputs.build_time }}
 
   deploy:
     needs: build-and-push

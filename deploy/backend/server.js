@@ -1147,7 +1147,8 @@ function getClientIp(req) {
 // T-411 stored '/api/health' and the check always returned false, leaving the
 // rate-limit firing. CI proof (T-412d diagnostic): runner saw HTTP 429 with
 // body {"reason":"rate_limit"}. Fix: store paths WITHOUT /api prefix.
-const RATE_LIMIT_BYPASS = new Set(['/health', '/health-deep', '/status']);
+// T-494: /version added so post-deploy drift-check polling can't be throttled.
+const RATE_LIMIT_BYPASS = new Set(['/health', '/health-deep', '/status', '/version']);
 
 app.use('/api', (req, res, next) => {
   if (RATE_LIMIT_BYPASS.has(req.path)) return next();

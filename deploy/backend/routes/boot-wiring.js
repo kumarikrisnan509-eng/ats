@@ -10,6 +10,7 @@
 //   - GET  /api/csrf-token    (returns HMAC(SESSION_SECRET, 'csrf:' + sid))
 //   - GET  /api/summary       (dashboard one-shot: holdings/positions/orders/...)
 //   - GET  /api/system/info   (ops panel: process/components/riskCaps/audit/config)
+//   - GET  /api/version       (T-494 -- build SHA + time for drift checks)
 //   - GET  /metrics           (Prometheus text format; internal-IP or token-gated)
 //
 // Mount placement: at the very end of routes setup so all singletons have been
@@ -444,6 +445,24 @@ function mountBootWiringRoutes(app, deps) {
         lastError: audit.lastError,
         lastAt: audit.lastAt,
       },
+    });
+  });
+
+  // ---------- /api/version (T-494 — drift check) ----------
+  // ATS_GIT_SHA and ATS_BUILD_TIME are injected at build time by the
+  // Docker image (see deploy/docker/Dockerfile + .github/workflows/deploy.yml).
+  // For local-dev runs (no Docker build), they fall back to 'unknown'.
+  // Cheap and unauthenticated by design -- this exists so one curl can
+  // answer "which commit is actually running?" against any environment.
+  app.get('/api/version', (_req, res) => {
+    const sha = process.env.ATS_GIT_SHA || 'unknown';
+    res.json({
+      ok: true,
+      sha,
+      shaShort: sha === 'unknown' ? 'unknown' : sha.slice(0, 12),
+      buildTime: process.env.ATS_BUILD_TIME || 'unknown',
+      node: process.version,
+      startedAt: new Date(Date.now() - Math.floor(process.uptime() * 1000)).toISOString(),
     });
   });
 }

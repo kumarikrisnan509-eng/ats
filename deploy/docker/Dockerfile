@@ -75,6 +75,15 @@ USER ats
 ENV NODE_ENV=production
 ENV PORT=8080
 
+# T-494 (audit-follow-up): build-arg-injected metadata for /api/version
+# drift checks. Lets one curl tell you exactly which commit is running.
+# Defaults to 'unknown' so a non-CI build (local docker build with no args)
+# still works -- /api/version just reports 'unknown' instead of the SHA.
+ARG GIT_SHA=unknown
+ARG BUILD_TIME=unknown
+ENV ATS_GIT_SHA=${GIT_SHA}
+ENV ATS_BUILD_TIME=${BUILD_TIME}
+
 EXPOSE 8080
 
 # Healthcheck — surfaces in `docker ps` and `docker compose ps`.
@@ -95,3 +104,7 @@ LABEL org.opencontainers.image.title="ats-backend"
 LABEL org.opencontainers.image.description="ATS (rajasekarselvam.com) — Node backend + static cockpit prototype."
 LABEL org.opencontainers.image.source="https://github.com/kumarikrisnan509-eng/ats"
 LABEL org.opencontainers.image.licenses="UNLICENSED"
+# T-494: pin commit + build time into OCI labels too, so `docker inspect`
+# answers "what's in this image" without booting the container.
+LABEL org.opencontainers.image.revision="${GIT_SHA}"
+LABEL org.opencontainers.image.created="${BUILD_TIME}"
