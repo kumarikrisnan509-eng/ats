@@ -512,6 +512,13 @@ function _confirmAsyncImpl(opts) {
         confirmLabel: opts && opts.confirmLabel || 'Confirm',
         cancelLabel: opts && opts.cancelLabel || 'Cancel',
         tone: opts && opts.tone || 'warn',
+        // T-541 followup: forward the rest of ConfirmModal's documented props.
+        // Without these, callers passing typeToConfirm/facts got silently
+        // ignored — the "Type X to confirm" input never rendered, defeating
+        // the whole point of the friction layer.
+        typeToConfirm: opts && opts.typeToConfirm,
+        facts:         opts && opts.facts,
+        busy:          opts && opts.busy,
       });
       // React 18 createRoot path; fall back to render() for older runtimes.
       if (typeof window.ReactDOM !== 'undefined' && window.ReactDOM.createRoot) {
