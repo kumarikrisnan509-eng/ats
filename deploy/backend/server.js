@@ -49,6 +49,9 @@ const { createDisconnectWatchdog } = require('./services/disconnect-watchdog');
 // T-510 (Phase 5): nightly EOD reconcile + 08:30 morning digest.
 const { createEodReconcile } = require('./services/eod-reconcile');
 const { createMorningDigest } = require('./services/morning-digest');
+// T-512 (Phase 4): retry-with-backoff wrapper + order-status watcher.
+const { withRetry: _withOrderRetry } = require('./services/order-retry');
+const { createOrderWatcher } = require('./services/order-watcher');
 // T-272: unified position view aggregator (Phase 2).
 const { createPortfolioAggregates } = require('./services/portfolio-aggregates');
 // T-280: market regime detector (Phase 3).
@@ -314,7 +317,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, db, auth, rebalance, replay, emailAlerts, whatsAppAlerts, riskConfigService, sipRunner, portfolioAggregates, regimeDetector, attribution, slippageTracker, preTradeCheck, optionChainFetcher, optionsScanner, signalCalibration, nseMacroFetcher, promoteScheduler, disconnectWatchdog, eodReconcile, morningDigest;  // T-381: nseMacroFetcher was previously assigned without declaration -> created an implicit global (works only because CommonJS files arent strict mode). ESLint no-undef caught this.
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, db, auth, rebalance, replay, emailAlerts, whatsAppAlerts, riskConfigService, sipRunner, portfolioAggregates, regimeDetector, attribution, slippageTracker, preTradeCheck, optionChainFetcher, optionsScanner, signalCalibration, nseMacroFetcher, promoteScheduler, disconnectWatchdog, eodReconcile, morningDigest, orderWatcher;  // T-381: nseMacroFetcher was previously assigned without declaration -> created an implicit global (works only because CommonJS files arent strict mode). ESLint no-undef caught this.
 
 async function init() {
   // T-447 (audit-2026-05-26 backend M9): wormAudit MUST come first so
@@ -674,6 +677,36 @@ async function init() {
   } catch (e) {
     console.error('!! morningDigest init failed:', e.message);
     morningDigest = null;
+  }
+
+  // T-512 (Phase 4): wrap broker.placeOrder in retry/backoff and start the
+  // order-status watcher. The retry wrapper is monkey-patched onto the broker
+  // instance so EVERY caller (routes/orders.js, autorun.js, square-off,
+  // watchdog) benefits transparently with no code change.
+  try {
+    if (broker && typeof broker.placeOrder === 'function') {
+      const _origPlace = broker.placeOrder.bind(broker);
+      broker.placeOrder = _withOrderRetry(_origPlace, { audit, notify: _notifyModule });
+      console.log('[server] broker.placeOrder wrapped in retry/backoff (3 attempts, 2s/4s/8s)');
+    }
+  } catch (e) {
+    console.error('!! broker.placeOrder retry-wrap failed:', e.message);
+  }
+  try {
+    if (db && broker) {
+      orderWatcher = createOrderWatcher({
+        db,
+        getBroker:     () => broker,
+        getMarketMeta: () => _marketMeta,
+        notify:        _notifyModule,
+        audit,
+      });
+      orderWatcher.start();
+      console.log('[server] order-watcher armed (60s poll during market hours)');
+    }
+  } catch (e) {
+    console.error('!! orderWatcher init failed:', e.message);
+    orderWatcher = null;
   }
 
   // T-272: portfolio aggregator (Phase 2). Pure read service -- consults
