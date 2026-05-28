@@ -642,8 +642,31 @@ const PaperScreen = () => {
           <div className="page-header__sub">Virtual capital, real market fills. Stage 2 of the pipeline — build confidence before live.</div>
         </div>
         <div className="page-header__right">
-          <button className="btn"><I.refresh size={14}/> Reset account</button>
-          <button className="btn btn--accent"><I.play size={14}/> Replay historical day</button>
+          <button className="btn" onClick={async () => {
+            if (!window.confirm('Reset paper account?\n\nThis CLEARS all paper positions, all closed paper trades, and resets the realized P&L. Capital + tier are preserved. This cannot be undone.')) return;
+            try {
+              const cur = await window.fetchApi('/api/me/paper/capital');
+              const initialCapital = (cur && cur.state && cur.state.initial_capital) || 50000;
+              const tier = (cur && cur.state && cur.state.tier) || 'STARTER';
+              const r = await window.fetchApi('/api/me/paper/capital', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ initialCapital, tier, reset: true }),
+              });
+              window.toast && window.toast({ kind: r && r.ok ? 'ok' : 'error', title: r && r.ok ? `Paper account reset to ₹${initialCapital.toLocaleString('en-IN')}` : 'Reset failed', sub: r && r.ok ? null : (r && r.reason) });
+              // Soft reload of page data
+              setTimeout(() => window.location.reload(), 800);
+            } catch (e) { window.toast && window.toast({ kind: 'error', title: 'Reset failed', sub: e.message }); }
+          }}>
+            <I.refresh size={14}/> Reset account
+          </button>
+          <button className="btn btn--accent" onClick={() => {
+            // T-521: scroll to the existing ReplayPanel (mounted further down the page).
+            const heading = Array.from(document.querySelectorAll('*')).find(el => el.textContent && el.textContent.trim().startsWith('Replay mode'));
+            if (heading) { heading.scrollIntoView({ behavior: 'smooth', block: 'start' }); window.toast && window.toast({ kind: 'info', title: 'Scrolled to Replay panel', sub: 'Configure strategy + date range below to replay a historical day.' }); }
+            else { window.toast && window.toast({ kind: 'warn', title: 'Replay panel not found on this view' }); }
+          }}>
+            <I.play size={14}/> Replay historical day
+          </button>
         </div>
       </div>
 
@@ -899,7 +922,17 @@ const PaperScreen = () => {
                   </td>
                   <td>
                     {allPass ? (
-                      <button className="btn btn--sm btn--primary" style={{ whiteSpace: "nowrap" }}>→ Promote to live</button>
+                      <button className="btn btn--sm btn--primary" style={{ whiteSpace: "nowrap" }} onClick={() => {
+                          window.toast && window.toast({
+                            kind: 'info',
+                            title: 'Promote to live trading from the Strategies page',
+                            sub: 'Use ⚡ Auto-runner on the strategy card (gated by per-strategy budget cap, T-509 2FA policy, T-499 promotion criteria). This Promote button intentionally does NOT fire orders directly.',
+                          });
+                          // T-521: deliberately no fetch here -- live order placement
+                          // must go through the proper /api/orders/place pipeline
+                          // with explicit 2FA + budget cap + audit. Routing the
+                          // operator to the correct gated workflow.
+                        }}>→ Promote to live</button>
                     ) : (
                       <button className="btn btn--sm" disabled style={{ opacity: 0.5, whiteSpace: "nowrap" }}>
                         Blocked: {failingGate.id}
