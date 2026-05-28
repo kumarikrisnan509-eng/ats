@@ -44,6 +44,8 @@ const { createTradeEconomics } = require('./services/trade-economics');
 const { createSipRunner } = require('./services/sip-runner');
 // T-499: nightly paper->live promotion scheduler (uses promotion-policy).
 const { createPromoteScheduler } = require('./services/promote-scheduler');
+// T-504: auto-square-off on extended broker disconnect during market hours.
+const { createDisconnectWatchdog } = require('./services/disconnect-watchdog');
 // T-272: unified position view aggregator (Phase 2).
 const { createPortfolioAggregates } = require('./services/portfolio-aggregates');
 // T-280: market regime detector (Phase 3).
@@ -294,7 +296,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, db, auth, rebalance, replay, emailAlerts, whatsAppAlerts, riskConfigService, sipRunner, portfolioAggregates, regimeDetector, attribution, slippageTracker, preTradeCheck, optionChainFetcher, optionsScanner, signalCalibration, nseMacroFetcher, promoteScheduler;  // T-381: nseMacroFetcher was previously assigned without declaration -> created an implicit global (works only because CommonJS files arent strict mode). ESLint no-undef caught this.
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, db, auth, rebalance, replay, emailAlerts, whatsAppAlerts, riskConfigService, sipRunner, portfolioAggregates, regimeDetector, attribution, slippageTracker, preTradeCheck, optionChainFetcher, optionsScanner, signalCalibration, nseMacroFetcher, promoteScheduler, disconnectWatchdog;  // T-381: nseMacroFetcher was previously assigned without declaration -> created an implicit global (works only because CommonJS files arent strict mode). ESLint no-undef caught this.
 
 async function init() {
   // T-447 (audit-2026-05-26 backend M9): wormAudit MUST come first so
@@ -585,6 +587,25 @@ async function init() {
   } catch (e) {
     console.error('!! promoteScheduler init failed:', e.message);
     promoteScheduler = null;
+  }
+
+  // T-504: disconnect watchdog. Polls broker.health() every minute during
+  // market hours; if disconnected for >ATS_DISCONNECT_AUTOSQUARE_MIN minutes
+  // AND positions are open, engages soft-kill + flattens the book.
+  // OFF BY DEFAULT -- set ATS_DISCONNECT_AUTOSQUARE_ENABLED=true to arm.
+  try {
+    disconnectWatchdog = createDisconnectWatchdog({
+      getBroker: () => broker,
+      getMarketMeta: () => _marketMeta,
+      notify: _notifyModule,
+      audit,
+    });
+    disconnectWatchdog.start();
+    const enabled = String(process.env.ATS_DISCONNECT_AUTOSQUARE_ENABLED || '').toLowerCase() === 'true';
+    console.log(`[server] disconnect-watchdog armed (${enabled ? 'ENABLED' : 'observer-only mode'})`);
+  } catch (e) {
+    console.error('!! disconnectWatchdog init failed:', e.message);
+    disconnectWatchdog = null;
   }
 
   // T-272: portfolio aggregator (Phase 2). Pure read service -- consults

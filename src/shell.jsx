@@ -164,6 +164,121 @@ const KillSwitchButton = () => {
   );
 };
 
+// T-504 (P2 #16): Square-off button next to Kill. POSTs to /api/admin/square-off-all
+// which flattens every open broker position + engages soft-kill. Same hold-to-confirm
+// UX as Kill so accidental clicks can't flatten a real book. Visible only when
+// connected to a live broker (broker.connected === true).
+const SquareOffButton = () => {
+  const [holding, setHolding] = React.useState(false);
+  const [progress, setProgress] = React.useState(0);
+  const [firing, setFiring] = React.useState(false);
+  const [open, setOpen] = React.useState(false);
+  const [preview, setPreview] = React.useState(null);
+  const timerRef = React.useRef(null);
+  const rafRef = React.useRef(null);
+  const startRef = React.useRef(0);
+  const HOLD_MS = 1500;   // a hair longer than Kill -- this is more destructive
+
+  const fire = async () => {
+    setFiring(true);
+    try {
+      const r = await fetch('/api/admin/square-off-all', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: 'SQUARE-OFF-ALL' }),
+      }).then(r => r.json()).catch(e => ({ ok: false, reason: 'network', message: e && e.message }));
+      if (r && r.ok) {
+        alert(`Square-off fired. ${r.squared}/${r.total_positions} flattened (${r.failed} failed). Soft-kill engaged.`);
+      } else {
+        alert('Square-off FAILED: ' + ((r && (r.message || r.reason)) || 'unknown error'));
+      }
+    } finally { setFiring(false); setOpen(false); }
+  };
+
+  const previewFirst = async () => {
+    try {
+      const r = await fetch('/api/admin/square-off-all/preview', { credentials: 'include' }).then(r => r.json());
+      if (r && r.ok) {
+        setPreview(r);
+        setOpen(true);
+      } else {
+        alert('Could not preview: ' + ((r && (r.message || r.reason)) || 'unknown error'));
+      }
+    } catch (e) { alert('Preview failed: ' + (e && e.message ? e.message : String(e))); }
+  };
+
+  const begin = () => {
+    if (firing) return;
+    setHolding(true);
+    startRef.current = Date.now();
+    const animate = () => {
+      const elapsed = Date.now() - startRef.current;
+      const p = Math.min(100, (elapsed / HOLD_MS) * 100);
+      setProgress(p);
+      if (elapsed < HOLD_MS) rafRef.current = requestAnimationFrame(animate);
+    };
+    rafRef.current = requestAnimationFrame(animate);
+    timerRef.current = setTimeout(() => { setHolding(false); setProgress(0); previewFirst(); }, HOLD_MS);
+  };
+  const end = () => {
+    setHolding(false);
+    setProgress(0);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+  };
+
+  return (
+    <>
+      <button
+        className="iconbtn ghost"
+        onMouseDown={begin}
+        onMouseUp={end}
+        onMouseLeave={end}
+        onTouchStart={begin}
+        onTouchEnd={end}
+        style={{
+          position: 'relative',
+          background: holding ? `linear-gradient(to right, #b54708 ${progress}%, transparent ${progress}%)` : undefined,
+          color: holding ? 'white' : undefined,
+          overflow: 'hidden',
+          userSelect: 'none',
+        }}
+        title="Hold 1.5s to preview square-off (flatten ALL open positions)"
+      >
+        ⛔ {holding ? 'Hold…' : firing ? 'Firing…' : 'Square-off'}
+      </button>
+      {open && preview && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 16, minWidth: 360, maxWidth: 520 }}>
+            <h3 style={{ margin: '0 0 8px', color: 'var(--down)' }}>⛔ Square-off all positions</h3>
+            <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 12 }}>
+              {preview.total === 0
+                ? 'No open positions. Nothing to do.'
+                : `This will place MARKET orders reversing all ${preview.total} open position(s). Soft-kill will engage so autorun cannot re-enter. Cannot be undone.`}
+            </div>
+            {preview.total > 0 && (
+              <ul style={{ fontSize: 12, fontFamily: 'monospace', maxHeight: 200, overflow: 'auto', margin: '0 0 12px', padding: '6px 12px', background: 'var(--bg-soft)', borderRadius: 4 }}>
+                {preview.plan.map((p, i) => (
+                  <li key={i}>{p.exchange}:{p.symbol} — {p.side} {p.qty}</li>
+                ))}
+              </ul>
+            )}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="iconbtn" onClick={() => setOpen(false)} disabled={firing}>Cancel</button>
+              {preview.total > 0 && (
+                <button className="iconbtn" style={{ background: 'var(--down)', color: 'white' }} onClick={fire} disabled={firing}>
+                  {firing ? 'Firing…' : `Yes, square off ${preview.total}`}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
 const NAV_GROUPS = [
   {
     // T100 (v9 IA reduction): spine is Dashboard + 4-step wealth loop.
@@ -475,6 +590,7 @@ const TopBar = ({ title, crumb, theme, setTheme, setRoute }) => {
         {window.DensityToggle && <window.DensityToggle/>}
         <NotificationsBell setRoute={setRoute}/>
         <KillSwitchButton/>
+        <SquareOffButton/>
         <div style={{ width: 1, height: 24, background: "var(--border)", margin: "0 4px" }}/>
         <ProfileMenu setRoute={setRoute}/>
       </div>
