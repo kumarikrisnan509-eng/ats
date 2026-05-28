@@ -105,6 +105,10 @@ const { runBacktest, computeSignal } = require('./backtest');
 const { PaperTrading } = require('./paper');
 const { PnlAttribution } = require('./pnl-attribution');
 const { AutoRunner }   = require('./autorun');
+// T-497: strategy id -> mode lookup so AutoRunner can gate on user_risk_config.activeModes.
+const { STRATEGIES: _ALL_STRATEGIES } = require('./routes/strategies');
+const _strategyModeMap = new Map((_ALL_STRATEGIES || []).map(x => [x.id, x.mode || 'intraday']));
+function _getStrategyMode(strategyId) { return _strategyModeMap.get(strategyId) || 'intraday'; }
 const { NewsFeed }     = require('./news');
 const { TaxPlanner }   = require('./tax');
 const { ClaudeAI }     = require('./ai');
@@ -414,6 +418,8 @@ async function init() {
     // T-496: market-hours/holiday gate for autorun.runOnce. Getter form so
     // AutoRunner is robust to _marketMeta being assigned later in init().
     getMarketMeta: () => _marketMeta,
+    // T-497: strategy -> mode lookup so autorun gates on user_risk_config.activeModes.
+    getStrategyMode: _getStrategyMode,
     // T-298b: SHADOW-only options scanner. Passed by reference but unused
     // until OPTIONS_AUTORUN_ENABLED=true at scan() call time. autorun's
     // shadow-runner is fire-and-forget after the existing 8-gate chain.

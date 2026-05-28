@@ -69,6 +69,9 @@ class AutoRunner {
                 // T-496: market-hours/holiday gate. Optional -- if absent,
                 // engine behaves as pre-T-496 (no calendar check).
                 getMarketMeta,
+                // T-497: per-strategy mode lookup (strategy id -> 'intraday'|'swing'|'options'|'futures').
+                // Optional -- if absent, the mode gate is a no-op and engine behaves as pre-T-497.
+                getStrategyMode,
                 getOptionsScanner, getHoldings, optionsUnderlyings }) {
     if (!broker)        throw new Error('broker required');
     if (!paper)         throw new Error('paper required');
@@ -94,6 +97,12 @@ class AutoRunner {
     // an error) when the market is closed so the timer can keep firing without
     // polluting the audit chain with "blocked" events every tick.
     this.getMarketMeta  = (typeof getMarketMeta === 'function') ? getMarketMeta : null;
+    // T-497: trading-mode gate. Closes the bug where "modes" (intraday / swing /
+    // options / futures) were frontend-only -- disabling Options in the UI did
+    // not stop an Options strategy from firing. Now: if user has any modes
+    // configured (activeModes !== {}), the strategy's mode must be enabled.
+    // Empty activeModes ({}) preserves legacy behaviour -- gate is a no-op.
+    this.getStrategyMode = (typeof getStrategyMode === 'function') ? getStrategyMode : null;
     // T-298b: options scanner SHADOW MODE -- no orders fired from this path.
     // getOptionsScanner is a function returning the scanner instance (or null)
     // -- using a getter so server.js can construct autorun before scanner.
@@ -254,6 +263,39 @@ class AutoRunner {
     }
     // Reset throttle once the market opens again.
     if (this._marketClosedNotifiedAt) this._marketClosedNotifiedAt = 0;
+    // T-497: trading-mode gate. Look up the running strategy's mode and
+    // confirm the operator has it enabled in their risk_config.activeModes.
+    // Fail-open when activeModes is empty {} (legacy users who never set
+    // modes via the UI keep firing as before); fail-closed when the user
+    // has populated activeModes (= they expect the toggle to mean something).
+    if (this.getStrategyMode && this.getRiskConfig && this._config && this._config.strategy) {
+      try {
+        const stratMode = this.getStrategyMode(this._config.strategy);
+        const cfg = this.getRiskConfig(this.userId);
+        const activeModes = (cfg && cfg.activeModes && typeof cfg.activeModes === 'object' && !Array.isArray(cfg.activeModes))
+          ? cfg.activeModes
+          : {};
+        const hasAnyModeConfig = Object.keys(activeModes).length > 0;
+        if (stratMode && hasAnyModeConfig) {
+          const entry = activeModes[stratMode];
+          // enabled defaults to true ONLY if there's an entry and it doesn't
+          // say enabled:false. Missing entries = disabled (fail-closed once
+          // the user has shown they're using the toggle).
+          const isEnabled = !!(entry && entry.enabled !== false && entry.enabled != null ? entry.enabled : (entry ? true : false));
+          if (!isEnabled) {
+            if (!this._modeDisabledNotifiedAt || (Date.now() - this._modeDisabledNotifiedAt) > 60_000) {
+              this.audit('autorun.skipped.modeDisabled', { strategy: this._config.strategy, mode: stratMode, activeModes });
+              this._modeDisabledNotifiedAt = Date.now();
+            }
+            return { result: 'skipped', reason: 'mode_disabled', strategy: this._config.strategy, mode: stratMode };
+          }
+        }
+        if (this._modeDisabledNotifiedAt) this._modeDisabledNotifiedAt = 0;
+      } catch (e) {
+        // Permissive: a config-read failure should not stop the engine.
+        this.audit('autorun.modeGate.failed', { msg: e.message });
+      }
+    }
     this._inflight = true;
     const t0 = Date.now();
     const run = {
