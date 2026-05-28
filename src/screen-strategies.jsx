@@ -316,7 +316,6 @@ const StrategiesScreen = () => {
     return (
       <Card key={`${s.mode}-${i}`} style={gated ? { opacity: 0.55, background: "repeating-linear-gradient(135deg, var(--bg-soft) 0 10px, var(--bg-sunk) 10px 11px)" } : null}>
         <div className="between" style={{ marginBottom: 10 }}>
-      <AutorunPanel />
           <div style={{ minWidth: 0 }}>
             <div className="row" style={{ marginBottom: 4, flexWrap: "wrap", gap: 6 }}>
               <strong style={{ fontSize: 15, letterSpacing: "-0.01em" }}>{s.n}</strong>
@@ -410,6 +409,14 @@ const StrategiesScreen = () => {
           sub={riskMetrics && Number.isFinite(riskMetrics.maxDrawdownDays) ? `${riskMetrics.maxDrawdownDays} day drawdown` : "needs equity peak/trough"}
         /></Card>
       </div>
+
+      {/* T-515: ONE global AutorunPanel — moved here from inside renderCard
+          where it was being instantiated 22 times (one per strategy card), all
+          bound to the same global /api/autorun config. That caused every card's
+          form to show identical values (rsi_mean_revert / RELIANCE / ...).
+          Per-strategy multi-config is shipped server-side via T-511
+          (/api/autorun/configs) and is the next UI feature. */}
+      <AutorunPanel />
 
       {/* Filter bar — mode filter is primary */}
       <div className="row" style={{ marginBottom: 14, justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
