@@ -42,34 +42,16 @@ class PaperTrading {
    * @param {(event, data) => void} [opts.audit]
    * @param {() => Map<string,number>} [opts.lastTicks]  function returning current last-tick map for mark-to-market
    */
-  constructor({ storePath, startingCash, audit, lastTicks, getTslConfig, db } = {}) {
+  constructor({ storePath, startingCash, audit, lastTicks, getTslConfig, getDb, db } = {}) {
     this.storePath     = storePath     || DEFAULT_STORE;
-    // T-522 (streamline): if `db` is passed, persist state to SQLite instead
-    // of the JSON file. Same on-disk shape (JSON blob in a TEXT column), just
-    // a different storage target. Unifies the source of truth with db.paper
-    // (per-user table) and removes the JSON-file dependency for production.
-    // Backward compatible: if no db, fall back to file (used by tests + dev).
-    this.db = db || null;
-    if (this.db && this.db._conn) {
-      try {
-        this.db._conn.exec(`
-          CREATE TABLE IF NOT EXISTS paper_singleton_state (
-            key         TEXT PRIMARY KEY,
-            json        TEXT NOT NULL,
-            updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
-          );
-        `);
-        this._dbGetState = this.db._conn.prepare(
-          "SELECT json, updated_at FROM paper_singleton_state WHERE key = ?"
-        );
-        this._dbUpsertState = this.db._conn.prepare(
-          "INSERT OR REPLACE INTO paper_singleton_state (key, json, updated_at) VALUES (?, ?, datetime('now'))"
-        );
-      } catch (e) {
-        console.error('[paper] T-522 db init failed, falling back to JSON file:', e.message);
-        this.db = null;
-      }
-    }
+    // T-522 (streamline): SQLite-backed state via getDb() getter so the
+    // resolve is lazy. server.js constructs PaperTrading at module-top time
+    // before its `db` variable is initialised, so passing db directly
+    // would always see undefined. The getter is called at load()/_persist()
+    // time, when db is fully wired.
+    // Backward compat: also accept a direct `db` (tests, dev).
+    this.getDb = (typeof getDb === 'function') ? getDb : (db ? (() => db) : null);
+    this._dbReady = false;
     this.startingCash  = startingCash  || DEFAULT_CASH;
     this.audit         = audit         || (() => {});
     this.lastTicks     = lastTicks     || (() => new Map());
@@ -84,6 +66,33 @@ class PaperTrading {
     this.getTslConfig = (typeof getTslConfig === 'function') ? getTslConfig : (() => null);
   }
 
+  _ensureDb() {
+    // T-522: lazy DB init. Returns true if DB is usable, false if we should
+    // fall back to JSON-file storage. Called on every load() and _persist().
+    if (this._dbReady) return !!this.db;
+    if (!this.getDb) { this.db = null; this._dbReady = true; return false; }
+    const d = this.getDb();
+    if (!d || !d._conn) { this.db = null; this._dbReady = true; return false; }
+    try {
+      d._conn.exec(`
+        CREATE TABLE IF NOT EXISTS paper_singleton_state (
+          key         TEXT PRIMARY KEY,
+          json        TEXT NOT NULL,
+          updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `);
+      this._dbGetState    = d._conn.prepare("SELECT json, updated_at FROM paper_singleton_state WHERE key = ?");
+      this._dbUpsertState = d._conn.prepare("INSERT OR REPLACE INTO paper_singleton_state (key, json, updated_at) VALUES (?, ?, datetime('now'))");
+      this.db = d;
+      this._dbReady = true;
+      return true;
+    } catch (e) {
+      console.error('[paper] T-522 db init failed, falling back to JSON file:', e.message);
+      this.db = null; this._dbReady = true;
+      return false;
+    }
+  }
+
   load() {
     // T-522: prefer DB-backed state. If DB is empty AND legacy JSON file
     // exists, migrate the file into the DB once (one-shot). After migration,
@@ -91,7 +100,7 @@ class PaperTrading {
     let raw = null;
     let source = 'none';
 
-    if (this.db) {
+    if (this._ensureDb() && this.db) {
       try {
         const row = this._dbGetState.get('legacy_singleton');
         if (row && row.json) {
@@ -135,7 +144,7 @@ class PaperTrading {
       trades: this._trades.slice(-2000),   // last 2000 trades
       cash: this._cash,
     };
-    if (this.db) {
+    if (this._ensureDb() && this.db) {
       try {
         this._dbUpsertState.run('legacy_singleton', JSON.stringify(payload));
         return;
