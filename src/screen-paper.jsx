@@ -666,10 +666,13 @@ const PaperScreen = () => {
     { t: "13:44:30", s: "INFY",      side: "BUY",  qty: 40,  req: 1472.00, fill: 1472.00, slip: 0.00, strat: "Momentum AI",   st: "pending" },
     { t: "13:22:15", s: "SBIN",      side: "SELL", qty: 150, req: 782.50,  fill: 782.32,  slip: 0.18, strat: "Grid Trader",   st: "filled" },
   ] : (Array.isArray(liveOrders) ? liveOrders.slice(-50).reverse().map(o => {
-    const filledPrice = Number(o.filledPrice || o.fill || o.price || 0);
-    const reqPrice = Number(o.price || o.filledPrice || 0);
-    const slip = reqPrice && filledPrice ? Math.abs(filledPrice - reqPrice) : 0;
-    const time = o.filledAt || o.createdAt || "";
+    // T-536: db.paper returns snake_case columns (fill_price, req_price, filled_at, created_at).
+    // The old paper.js singleton returned camelCase. Support both so the
+    // table renders correctly regardless of which engine produced the row.
+    const filledPrice = Number(o.fill_price || o.filledPrice || o.fill || o.price || 0);
+    const reqPrice    = Number(o.req_price || o.price || o.filledPrice || o.fill_price || 0);
+    const slip        = reqPrice && filledPrice ? Math.abs(filledPrice - reqPrice) : Number(o.slippage || 0);
+    const time        = o.filled_at || o.created_at || o.filledAt || o.createdAt || "";
     return {
       t: time ? new Date(time).toLocaleTimeString("en-IN", { hour12: false }) : "—",
       s: o.symbol || "—",
@@ -678,7 +681,7 @@ const PaperScreen = () => {
       req: reqPrice || filledPrice || 0,
       fill: filledPrice || 0,
       slip: slip,
-      strat: o.strategy || "manual",
+      strat: o.strategy_tag || o.strategy || "manual",
       st: (o.status || "").toLowerCase(),
       _id: o.id,
     };
