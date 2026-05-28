@@ -312,8 +312,8 @@ const SignalsScreen = () => {
           <div className="page-header__sub">Signals flow left→right. Promote or reject at each stage. Profits sweep into long-term.</div>
         </div>
         <div className="page-header__right">
-          <button className="btn"><I.refresh size={14}/> Rescan</button>
-          <button className="btn btn--primary"><I.plus size={14}/> Add source</button>
+          <button className="btn" onClick={triggerScan} title="Trigger an immediate scanner pass — POST /api/scanner/run"><I.refresh size={14}/> Rescan</button>
+          <button className="btn btn--primary" onClick={() => window.toast && window.toast({ kind: 'info', title: 'Adding custom signal sources is on the roadmap', sub: 'Today\'s sources are configured server-side. UI hook coming in a future release.' })} title="Custom signal sources — coming soon"><I.plus size={14}/> Add source</button>
         </div>
       </div>
 
@@ -498,8 +498,8 @@ const SignalsScreen = () => {
                       ) : (
                         <>
                           <button className="btn btn--sm" onClick={() => setExplainSig({ symbol: c.sym, action: c.act, source: c.src, confidence: c.conf, price: parseFloat(c.tgt) || 1715 })}>Why?</button>
-                          <button className="btn btn--sm">→ Promote</button>
-                          <button className="btn btn--sm btn--ghost">Skip</button>
+                          <button className="btn btn--sm" onClick={() => window.toast && window.toast({ kind: 'info', title: 'Promote to live trading from the Strategies page', sub: 'Use the ⚡ Auto-runner button on the strategy card -> set symbol + SL/TP. This avoids silent one-shot orders from a preview row.' })} title="Promote a signal to live trading — see Strategies → ⚡ Auto-runner">→ Promote</button>
+                          <button className="btn btn--sm btn--ghost" onClick={() => { window.toast && window.toast({ kind: 'ok', title: `Skipped ${c.sym} ${c.act}`, sub: 'Hidden from this view. Refresh to see it again if it re-fires.' }); /* T-520: future: persist a "skipped" flag via /api/signals/skip when that endpoint exists */ }} title="Skip this signal (visual only — future: persist server-side)">Skip</button>
                         </>
                       )}
                     </div>
