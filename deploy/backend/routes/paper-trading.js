@@ -14,6 +14,11 @@
 
 'use strict';
 
+// T-499/T-500: canonical paper->live promotion criteria. Single source of
+// truth shared with the nightly promote-scheduler so UI and backend can't
+// disagree on "is this strategy ready to go live".
+const promotionPolicy = require('../services/promotion-policy');
+
 function mountPaperTradingRoutes(app, deps) {
   const {
     withAuth,
@@ -182,14 +187,14 @@ function mountPaperTradingRoutes(app, deps) {
     const b = req.body || {};
     const strategy = (b.strategy || '').toString().trim();
     const symbol = (b.symbol || '').toString().toUpperCase().trim();
-    const minTrades = Math.max(5, Math.min(200, parseInt(b.min_trades || '20', 10)));
-    const minWinRate = Math.max(0.3, Math.min(0.9, parseFloat(b.min_win_rate) || 0.55));
 
     if (!strategy) return res.status(400).json({ ok: false, reason: 'bad_request', detail: 'strategy required' });
 
     try {
-      // === Gate 1: win-rate over last 30 days ===
-      const cutoff = new Date(Date.now() - 30 * 86400_000).toISOString();
+      // T-499/T-500: pull trades for the policy window, hand off to canonical
+      // promotion-policy module. Symbol-narrowed query if symbol provided
+      // (per-symbol promotion); otherwise strategy-wide.
+      const cutoff = new Date(Date.now() - promotionPolicy.DEFAULTS.window_days * 86400_000).toISOString();
       // T-434 (audit-2026-05-26 backend M6): split into two fixed prepared
       // statements instead of string-interpolating `where`. Eliminates the
       // future-contributor footgun where someone adds an `if (extra) where +=
@@ -203,13 +208,19 @@ function mountPaperTradingRoutes(app, deps) {
             'SELECT pnl FROM paper_closed_trades '
             + 'WHERE user_id = ? AND strategy_tag = ? AND exited_at > ?'
           ).all(req.user.id, strategy, cutoff);
-      const trades = rows.length;
-      const wins = rows.filter(r => Number(r.pnl) > 0).length;
-      const winRate = trades > 0 ? +(wins / trades).toFixed(4) : 0;
-      const grossPnl = rows.reduce((s, r) => s + Number(r.pnl || 0), 0);
-      const winRateGate = { pass: trades >= minTrades && winRate >= minWinRate, trades, wins, win_rate: winRate, gross_pnl_inr: +grossPnl.toFixed(2), min_trades: minTrades, min_win_rate: minWinRate };
+      // === Telegram-2FA readiness (operational gate inside policy) ===
+      let telegram2faReady = false;
+      try {
+        const n = db.notif.get(req.user.id);
+        telegram2faReady = !!(n && n.telegram_enabled && n.telegram_bot_token && n.telegram_chat_id);
+      } catch (e) { console.warn('[paper-trading] swallowed:', e && e.message); }
 
-      // === Gate 2: surveillance ===
+      const report = promotionPolicy.evaluate(rows, { telegram2faReady });
+
+      // === Symbol-specific gates layered on top of policy ===
+      // (Surveillance + earnings blackout are symbol-scoped; the policy
+      // module is symbol-agnostic so it can also run from the nightly
+      // promote-scheduler against the full strategy.)
       let surveillanceGate = { pass: true, reason: 'no_symbol_check' };
       if (symbol && _surveillance) {
         const v = _surveillance.classifySync(symbol);
@@ -217,18 +228,6 @@ function mountPaperTradingRoutes(app, deps) {
           ? { pass: false, reason: v.reason, list: v.list, stage: v.stage }
           : { pass: true, reason: 'clean' };
       }
-
-      // === Gate 3: 2FA reachable ===
-      let twofaGate = { pass: false, reason: 'no_notif_row' };
-      try {
-        const n = db.notif.get(req.user.id);
-        const ready = !!(n && n.telegram_enabled && n.telegram_bot_token && n.telegram_chat_id);
-        twofaGate = ready
-          ? { pass: true, reason: 'telegram_ready' }
-          : { pass: false, reason: 'telegram_not_configured', detail: 'Enable Telegram alerts in Settings so the 2FA confirm-before-trade challenge can reach you.' };
-      } catch (e) { console.warn('[paper-trading] swallowed:', e && e.message); }
-
-      // === Gate 4: earnings blackout ===
       let earningsGate = { pass: true, reason: 'no_symbol_check' };
       if (symbol && _earningsCal && typeof _earningsCal.inResultsBlackout === 'function') {
         const v = _earningsCal.inResultsBlackout(symbol, { windowDays: 3 });
@@ -237,13 +236,14 @@ function mountPaperTradingRoutes(app, deps) {
           : { pass: true, reason: 'no_event_in_window' };
       }
 
-      const can_promote = winRateGate.pass && surveillanceGate.pass && twofaGate.pass && earningsGate.pass;
+      const can_promote = report.can_promote && surveillanceGate.pass && earningsGate.pass;
       res.json({
         ok: true,
         can_promote,
         strategy, symbol: symbol || null,
-        gates: { win_rate: winRateGate, surveillance: surveillanceGate, twofa: twofaGate, earnings: earningsGate },
-        window: '30d',
+        policy: report,
+        symbol_gates: { surveillance: surveillanceGate, earnings: earningsGate },
+        window: `${report.window_days}d`,
         ts: new Date().toISOString(),
       });
     } catch (e) {

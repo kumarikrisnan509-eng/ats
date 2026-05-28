@@ -35,6 +35,12 @@ const DEFAULTS = Object.freeze({
     MOM100: 0.0078,
   }),
   activeStrategies: Object.freeze(['supertrend', 'rsi_mean_revert', 'vwap']),
+  // T-501: per-strategy live/paper toggle. Strategies listed here are eligible
+  // for LIVE orders (subject to tradingMode != paper + KILL_SWITCH=false +
+  // LIVE_TRADING=true). Strategies NOT here go to paper even when the global
+  // tradingMode is micro_live / full_live. Promote-scheduler (T-499) writes
+  // this nightly based on paper performance vs promotion-policy.
+  liveEnabledStrategies: Object.freeze([]),
   votingThreshold: 2,
   tradingMode: 'paper',
   // T-276: SIP firing day-of-month (1..28). 5 = post-salary default.
@@ -150,6 +156,9 @@ function _rowToConfig(row) {
   try { strategies = JSON.parse(row.active_strategies_json); } catch (_) { strategies = null; }
   // T-487: activeModes is optional (may be NULL on pre-migration rows).
   try { if (row.active_modes_json) modes = JSON.parse(row.active_modes_json); } catch (_) { modes = null; }
+  // T-501: live-enabled subset (sidecar to activeStrategies).
+  let liveEnabled = null;
+  try { if (row.live_enabled_strategies_json) liveEnabled = JSON.parse(row.live_enabled_strategies_json); } catch (_) { liveEnabled = null; }
   return {
     capital: row.capital,
     maxPositionPct: row.max_position_pct,
@@ -171,6 +180,7 @@ function _rowToConfig(row) {
     maxSectorWeight: Number.isFinite(row.max_sector_weight)   ? row.max_sector_weight   : DEFAULTS.maxSectorWeight,
     // T-487
     activeModes:     (modes && typeof modes === 'object' && !Array.isArray(modes)) ? modes : {},
+    liveEnabledStrategies: Array.isArray(liveEnabled) ? liveEnabled : [],
     updatedAt: row.updated_at,
   };
 }
@@ -196,6 +206,7 @@ function _defaultsForUser() {
     maxSectorWeight: DEFAULTS.maxSectorWeight,
     // T-487
     activeModes: { ...DEFAULTS.activeModes },
+    liveEnabledStrategies: [...DEFAULTS.liveEnabledStrategies],
     updatedAt: null,
   };
 }
@@ -218,6 +229,8 @@ function createRiskConfigService(db) {
     ['max_sector_weight',   'REAL NOT NULL DEFAULT 0.30'],
     // T-487
     ['active_modes_json',   "TEXT NOT NULL DEFAULT '{}'"],
+    // T-501: per-strategy live toggle (subset of active_strategies_json).
+    ['live_enabled_strategies_json', "TEXT NOT NULL DEFAULT '[]'"],
   ];
   for (const [col, ddl] of MIGRATION_COLS) {
     try {
@@ -235,14 +248,14 @@ function createRiskConfigService(db) {
   const stmtUpsert = conn.prepare(`
     INSERT INTO user_risk_config (
       user_id, capital, max_position_pct, max_daily_loss_pct, max_open_positions,
-      dca_allocation_json, active_strategies_json, voting_threshold, trading_mode,
+      dca_allocation_json, active_strategies_json, live_enabled_strategies_json, voting_threshold, trading_mode,
       max_daily_trades, golden_start_hhmm, golden_end_hhmm, tsl_activate_pct, tsl_gap_pct,
       sip_day_of_month, max_leverage, max_sector_weight,
       active_modes_json,
       updated_at
     ) VALUES (
       @user_id, @capital, @max_position_pct, @max_daily_loss_pct, @max_open_positions,
-      @dca_allocation_json, @active_strategies_json, @voting_threshold, @trading_mode,
+      @dca_allocation_json, @active_strategies_json, @live_enabled_strategies_json, @voting_threshold, @trading_mode,
       @max_daily_trades, @golden_start_hhmm, @golden_end_hhmm, @tsl_activate_pct, @tsl_gap_pct,
       @sip_day_of_month, @max_leverage, @max_sector_weight,
       @active_modes_json,
@@ -255,6 +268,7 @@ function createRiskConfigService(db) {
       max_open_positions     = @max_open_positions,
       dca_allocation_json    = @dca_allocation_json,
       active_strategies_json = @active_strategies_json,
+      live_enabled_strategies_json = @live_enabled_strategies_json,
       voting_threshold       = @voting_threshold,
       trading_mode           = @trading_mode,
       max_daily_trades       = @max_daily_trades,
@@ -307,6 +321,10 @@ function createRiskConfigService(db) {
       maxOpenPositions: partial.maxOpenPositions != null ? Math.trunc(Number(partial.maxOpenPositions)) : current.maxOpenPositions,
       dcaAllocation: partial.dcaAllocation != null ? partial.dcaAllocation : current.dcaAllocation,
       activeStrategies: partial.activeStrategies != null ? partial.activeStrategies : current.activeStrategies,
+      // T-501: per-strategy live toggle. Accepts arrays only; null/undefined preserves current.
+      liveEnabledStrategies: (Array.isArray(partial.liveEnabledStrategies))
+        ? partial.liveEnabledStrategies.filter(x => typeof x === 'string' && x)
+        : (Array.isArray(current.liveEnabledStrategies) ? current.liveEnabledStrategies : []),
       votingThreshold: partial.votingThreshold != null ? Math.trunc(Number(partial.votingThreshold)) : current.votingThreshold,
       tradingMode: partial.tradingMode != null ? String(partial.tradingMode) : current.tradingMode,
       // T-265..T-267
@@ -335,6 +353,7 @@ function createRiskConfigService(db) {
       max_open_positions: merged.maxOpenPositions,
       dca_allocation_json: JSON.stringify(merged.dcaAllocation),
       active_strategies_json: JSON.stringify(merged.activeStrategies),
+      live_enabled_strategies_json: JSON.stringify(merged.liveEnabledStrategies || []),
       voting_threshold: merged.votingThreshold,
       trading_mode: merged.tradingMode,
       max_daily_trades: merged.maxDailyTrades,
