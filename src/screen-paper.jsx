@@ -741,19 +741,75 @@ const PaperScreen = () => {
         </div>
         <div className="page-header__right">
           <button className="btn" onClick={async () => {
-            if (!window.confirm('Reset paper account?\n\nThis CLEARS all paper positions, all closed paper trades, and resets the realized P&L. Capital + tier are preserved. This cannot be undone.')) return;
+            // T-538: use styled ConfirmModal (window.confirmAsync) instead of
+            // native window.confirm — matches the rest of the app's UX.
+            // T-539: include CSRF token in PUT (was missing -> backend rejected
+            // with 403, then the setTimeout(reload) hard-refreshed and the
+            // user saw a white page while the SPA re-bootstrapped).
+            // Also: no more window.location.reload — re-fetch /api/me/paper in
+            // place and update React state.
+            const confirmed = window.confirmAsync
+              ? await window.confirmAsync({
+                  title: 'Reset paper account?',
+                  sub: 'This action is destructive.',
+                  detail: 'This CLEARS all paper positions, all closed paper trades, and resets realized P&L to ₹0. Your selected virtual capital tier is preserved. This cannot be undone.',
+                  confirmLabel: 'Reset account',
+                  cancelLabel: 'Cancel',
+                  tone: 'danger',
+                  typeToConfirm: 'RESET',
+                })
+              : window.confirm('Reset paper account? This CLEARS all positions, trades, and realized P&L.');
+            if (!confirmed) return;
             try {
+              // Get current capital + tier (preserve them through the reset).
               const cur = await window.fetchApi('/api/me/paper/capital');
-              const initialCapital = (cur && cur.state && cur.state.initial_capital) || 50000;
-              const tier = (cur && cur.state && cur.state.tier) || 'STARTER';
+              const initialCapital = Number(
+                (cur && cur.initialCapital) ||
+                (cur && cur.state && cur.state.initial_capital) ||
+                50000
+              );
+              const tier = String(
+                (cur && cur.tier) ||
+                (cur && cur.state && cur.state.tier) ||
+                '50K'
+              );
+              // CSRF (PUT writes require it).
+              const csrfResp = await window.fetchApi('/api/csrf-token');
+              const csrf = (csrfResp && (csrfResp.csrfToken || csrfResp.token)) || '';
               const r = await window.fetchApi('/api/me/paper/capital', {
-                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
                 body: JSON.stringify({ initialCapital, tier, reset: true }),
               });
-              window.toast && window.toast({ kind: r && r.ok ? 'ok' : 'error', title: r && r.ok ? `Paper account reset to ₹${initialCapital.toLocaleString('en-IN')}` : 'Reset failed', sub: r && r.ok ? null : (r && r.reason) });
-              // Soft reload of page data
-              setTimeout(() => window.location.reload(), 800);
-            } catch (e) { window.toast && window.toast({ kind: 'error', title: 'Reset failed', sub: e.message }); }
+              if (r && r.ok) {
+                // Re-fetch the live paper snapshot so KPIs/orders/positions
+                // re-render in-place. No reload, no white flash.
+                try {
+                  const p = await window.fetchApi('/api/me/paper');
+                  if (p && p.ok) {
+                    setLivePaper(p.stats || null);
+                    setLivePositions(Array.isArray(p.positions) ? p.positions : []);
+                    setLiveOrders(Array.isArray(p.orders) ? p.orders : []);
+                  }
+                } catch (_) { /* ignore — toast below still confirms success */ }
+                window.toast && window.toast({
+                  kind: 'ok',
+                  title: `Paper account reset to ₹${initialCapital.toLocaleString('en-IN')}`,
+                  sub: 'Positions, closed trades, and realized P&L cleared.',
+                });
+              } else {
+                window.toast && window.toast({
+                  kind: 'error',
+                  title: 'Reset failed',
+                  sub: (r && (r.detail || r.reason)) || 'Backend did not confirm reset.',
+                });
+              }
+            } catch (e) {
+              // fetchApi throws on non-2xx. Show the request id when available
+              // so support can grep for it.
+              if (window.toastError) window.toastError('Reset failed', e);
+              else window.toast && window.toast({ kind: 'error', title: 'Reset failed', sub: (e && (e.detail || e.reason || e.message)) || 'Unknown error' });
+            }
           }}>
             <I.refresh size={14}/> Reset account
           </button>
