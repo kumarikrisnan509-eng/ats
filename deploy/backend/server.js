@@ -395,7 +395,11 @@ async function init() {
   scanner.scheduleDaily();
 
   paper = new PaperTrading({
-      db,
+    // T-522 hotfix v5: lazy getter -- db is still undefined at this point in init().
+    // The closure captures the LIVE binding, so by the time paper._ensureDb() runs
+    // (post openDb()), this returns the real db object. Passing raw `db` here
+    // would pass undefined and permanently break the DB-backed paper storage.
+    getDb: () => db,
     storePath:    process.env.PAPER_PATH || '/var/lib/ats/tokens/_paper.json',
     startingCash: parseInt(process.env.PAPER_STARTING_CASH || '1000000', 10),
     audit,
