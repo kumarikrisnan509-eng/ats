@@ -194,6 +194,186 @@ const AutorunPanel = () => {
   );
 };
 
+/* ============================================================
+ * T-516 (Phase 2 frontend): per-strategy auto-runner UI.
+ *
+ * Each strategy card on the Strategies screen now has a "+ Auto-runner"
+ * button (rendered by <PerStrategyAutorunButton strategy={s.id}/>). On
+ * click it opens an inline modal that:
+ *   - Lists existing configs for this strategy (id = `${strategy}:${symbol}`)
+ *   - Each entry shows symbol/qty/interval/SL%/TP%/TSL%/enabled with
+ *     Enable/Disable + Remove buttons
+ *   - At the bottom a small form (symbol + qty + interval + SL/TP/TSL%) to
+ *     add a new (strategy, symbol) registry entry
+ *
+ * Backend wiring (T-511):
+ *   GET    /api/autorun/configs                  -> list all
+ *   POST   /api/autorun/configs                  -> add (body matches PUT /api/autorun)
+ *   DELETE /api/autorun/configs/:id              -> remove by id
+ *
+ * Defensive: every action goes through window.fetchApi + try/catch; failures
+ * surface inline (no destructive UI behaviour on error).
+ * ============================================================ */
+const PerStrategyAutorunButton = ({ strategy, gated }) => {
+  const [open, setOpen] = React.useState(false);
+  const [configs, setConfigs] = React.useState([]);
+  const [busy, setBusy] = React.useState(false);
+  const [msg, setMsg] = React.useState(null);
+  const [form, setForm] = React.useState({
+    symbol: '',
+    qty: 1,
+    interval: 'day',
+    intervalMinutes: 60,
+    candleLookbackDays: 60,
+    stopLossPct: '',
+    targetPct: '',
+    trailingStopPct: '',
+    enabled: true,
+  });
+
+  const reload = React.useCallback(async () => {
+    try {
+      const r = await window.fetchApi('/api/autorun/configs');
+      const all = (r && r.configs) || [];
+      setConfigs(all.filter(c => c.strategy === strategy));
+    } catch (e) { setMsg('✗ load: ' + e.message); }
+  }, [strategy]);
+
+  React.useEffect(() => { if (open) reload(); }, [open, reload]);
+
+  const addOne = async () => {
+    if (!form.symbol) { setMsg('✗ symbol required'); return; }
+    setBusy(true); setMsg(null);
+    const body = {
+      strategy,
+      symbol: form.symbol.toUpperCase(),
+      qty: Number(form.qty) || 1,
+      interval: form.interval,
+      intervalMinutes: Number(form.intervalMinutes) || 60,
+      candleLookbackDays: Number(form.candleLookbackDays) || 60,
+      enabled: !!form.enabled,
+    };
+    if (form.stopLossPct !== '')     body.stopLossPct     = Number(form.stopLossPct);
+    if (form.targetPct !== '')       body.targetPct       = Number(form.targetPct);
+    if (form.trailingStopPct !== '') body.trailingStopPct = Number(form.trailingStopPct);
+    try {
+      const r = await window.fetchApi('/api/autorun/configs', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (r && r.ok) {
+        setMsg('✓ added ' + r.config.id);
+        setForm(f => ({ ...f, symbol: '' }));
+        await reload();
+      } else {
+        setMsg('✗ ' + (r && r.reason));
+      }
+    } catch (e) { setMsg('✗ ' + e.message); }
+    finally { setBusy(false); }
+  };
+
+  const removeOne = async (id) => {
+    if (!id) return;
+    setBusy(true); setMsg(null);
+    try {
+      const r = await window.fetchApi('/api/autorun/configs/' + encodeURIComponent(id), { method: 'DELETE' });
+      if (r && r.ok) { setMsg('✓ removed ' + id); await reload(); }
+      else setMsg('✗ ' + (r && r.reason));
+    } catch (e) { setMsg('✗ ' + e.message); }
+    finally { setBusy(false); }
+  };
+
+  const labelStyle = { fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2, display: 'block' };
+  const inputStyle = { width: '100%', padding: '4px 6px', background: 'var(--bg-sunk)', border: '1px solid var(--border)', borderRadius: 4, fontFamily: 'var(--mono)', fontSize: 11 };
+
+  return (
+    <>
+      <button
+        className="btn btn--sm"
+        disabled={gated}
+        style={gated ? { opacity: 0.5 } : { background: 'var(--accent-soft)', color: 'var(--accent)', border: '1px solid var(--accent)' }}
+        title={configs.length > 0 ? `${configs.length} config(s) for this strategy` : 'Configure auto-runner for this strategy'}
+        onClick={() => setOpen(true)}
+      >
+        <I.zap size={12}/> Auto-runner{configs.length > 0 ? ` (${configs.length})` : ''}
+      </button>
+
+      {open && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 16, width: '100%', maxWidth: 640, maxHeight: '90vh', overflow: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 16 }}>Auto-runner · {strategy}</h3>
+              <button className="iconbtn" onClick={() => setOpen(false)}>✕</button>
+            </div>
+
+            {/* Existing configs for this strategy */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+                Active configs ({configs.length})
+              </div>
+              {configs.length === 0 ? (
+                <div style={{ fontSize: 12, color: 'var(--text-3)', padding: '10px 0' }}>None yet. Add one below.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {configs.map(c => (
+                    <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', background: 'var(--bg-soft)', borderRadius: 4, fontSize: 12 }}>
+                      <span className="mono" style={{ fontWeight: 600 }}>{c.symbol}</span>
+                      <span className="muted">qty {c.qty} · {c.interval} · every {c.intervalMinutes}m</span>
+                      {c.stopLossPct ? <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 999, background: 'var(--down-soft)', color: 'var(--down)' }}>SL {c.stopLossPct}%</span> : null}
+                      {c.targetPct ? <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 999, background: 'var(--up-soft)', color: 'var(--up)' }}>TP {c.targetPct}%</span> : null}
+                      {c.trailingStopPct ? <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 999, background: 'var(--info-soft)', color: 'var(--info)' }}>TSL {c.trailingStopPct}%</span> : null}
+                      <span style={{ marginLeft: 'auto', fontSize: 10, padding: '2px 8px', borderRadius: 999, background: c.enabled ? 'var(--up-soft)' : 'var(--bg-sunk)', color: c.enabled ? 'var(--up)' : 'var(--text-3)', fontWeight: 600 }}>
+                        {c.enabled ? 'ENABLED' : 'DISABLED'}
+                      </span>
+                      <button className="btn btn--sm" disabled={busy} onClick={() => removeOne(c.id)} style={{ color: 'var(--down)' }}>Remove</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Add new config */}
+            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Add new</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 8 }}>
+                <label><span style={labelStyle}>Symbol</span><input style={inputStyle} value={form.symbol} placeholder="e.g. RELIANCE" onChange={e => setForm({ ...form, symbol: e.target.value })}/></label>
+                <label><span style={labelStyle}>Qty</span><input style={inputStyle} type="number" min="1" value={form.qty} onChange={e => setForm({ ...form, qty: e.target.value })}/></label>
+                <label><span style={labelStyle}>Bar interval</span>
+                  <select style={inputStyle} value={form.interval} onChange={e => setForm({ ...form, interval: e.target.value })}>
+                    <option value="day">day</option><option value="60minute">60m</option><option value="15minute">15m</option><option value="5minute">5m</option>
+                  </select>
+                </label>
+                <label><span style={labelStyle}>Schedule (min)</span><input style={inputStyle} type="number" min="1" value={form.intervalMinutes} onChange={e => setForm({ ...form, intervalMinutes: e.target.value })}/></label>
+                <label><span style={labelStyle}>Lookback (d)</span><input style={inputStyle} type="number" min="30" value={form.candleLookbackDays} onChange={e => setForm({ ...form, candleLookbackDays: e.target.value })}/></label>
+                <label style={{ display: 'flex', alignItems: 'flex-end' }}>
+                  <label style={{ display: 'flex', gap: 4, alignItems: 'center', fontSize: 12 }}>
+                    <input type="checkbox" checked={form.enabled} onChange={e => setForm({ ...form, enabled: e.target.checked })}/> Enabled
+                  </label>
+                </label>
+              </div>
+
+              {/* T-508 protective orders */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
+                <label><span style={labelStyle}>Stop loss %</span><input style={inputStyle} type="number" step="0.1" min="0.1" max="20" placeholder="e.g. 1.0" value={form.stopLossPct} onChange={e => setForm({ ...form, stopLossPct: e.target.value })}/></label>
+                <label><span style={labelStyle}>Target %</span><input style={inputStyle} type="number" step="0.1" min="0.1" max="50" placeholder="e.g. 2.0" value={form.targetPct} onChange={e => setForm({ ...form, targetPct: e.target.value })}/></label>
+                <label><span style={labelStyle}>Trailing stop %</span><input style={inputStyle} type="number" step="0.1" min="0.1" max="20" placeholder="optional" value={form.trailingStopPct} onChange={e => setForm({ ...form, trailingStopPct: e.target.value })}/></label>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button className="btn btn--primary" disabled={busy} onClick={addOne}>+ Add config</button>
+                {msg && <span style={{ fontSize: 11, color: msg.startsWith('✓') ? 'var(--up)' : 'var(--down)' }}>{msg}</span>}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 8 }}>
+                T-508: when both Stop loss% AND Target% are set, the engine uses a BRACKET order in paper. Live route uses MARKET for now (Phase 4 GTT integration pending).
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
 const StrategiesScreen = () => {
   // T-470 (audit-2026-05-26 frontend M8): surface fetch failures.
   const [loadErr, setLoadErr] = React.useState(null);
@@ -328,6 +508,7 @@ const StrategiesScreen = () => {
             <div className="muted" style={{ fontSize: 12 }}>{s.k} · {s.mkt}</div>
           </div>
           <div className="row" style={{ gap: 6, flexShrink: 0 }}>
+            <PerStrategyAutorunButton strategy={s.id} gated={gated}/>
             <button className="btn btn--sm" disabled={gated} style={gated ? { opacity: 0.5 } : null}>
               {s.st === "paused" || s.st === "draft" ? <><I.play size={12}/> Start</> : <><I.pause size={12}/> Pause</>}
             </button>
