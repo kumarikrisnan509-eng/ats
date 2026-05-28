@@ -38,12 +38,58 @@ function mountPaperTradingRoutes(app, deps) {
   if (typeof runBacktest       !== 'function') throw new Error('paper-trading: runBacktest required');
 
   // ---------- GET /api/me/paper ----------
+  // T-536: expanded payload — now includes stats + trades so the React paper
+  // screen can derive every KPI (Virtual capital, P&L, Trades, win rate, etc.)
+  // from a SINGLE API call. Previously the UI made 3 separate calls to the
+  // legacy /api/paper endpoints (which read from the global singleton) and
+  // mixed that data with per-user data, causing inconsistency.
   app.get('/api/me/paper', withAuth((req, res) => {
     const db = getDb();
-    res.json({ ok: true,
-      state:     db.paper.getState(req.user.id),
-      orders:    db.paper.listOrders(req.user.id),
-      positions: db.paper.listPositions(req.user.id),
+    const uid = req.user.id;
+    const state     = db.paper.getState(uid);
+    const orders    = db.paper.listOrders(uid);
+    const positions = db.paper.listPositions(uid);
+    const trades    = db._conn.prepare('SELECT * FROM paper_closed_trades WHERE user_id = ? ORDER BY exited_at DESC LIMIT 200').all(uid);
+
+    const totalOrders     = orders.length;
+    const filledOrders    = orders.filter(o => String(o.status || '').toUpperCase() === 'FILLED').length;
+    const pendingOrders   = orders.filter(o => String(o.status || '').toUpperCase() === 'PENDING' || String(o.status || '').toUpperCase() === 'OPEN').length;
+    const cancelledOrders = orders.filter(o => String(o.status || '').toUpperCase() === 'CANCELLED').length;
+    const closedTrades    = trades.length;
+    const wins            = trades.filter(t => Number(t.pnl) > 0).length;
+    const losses          = trades.filter(t => Number(t.pnl) < 0).length;
+    const winRate         = closedTrades > 0 ? Math.round((wins / closedTrades) * 100) : 0;
+    const realizedPnl     = trades.reduce((s, t) => s + Number(t.pnl || 0), 0);
+    // Unrealized P&L would need LTP per position; without a tick cache here,
+    // we approximate as 0. The /api/me/paper consumer can hydrate via /api/ticks.
+    const unrealizedPnl   = 0;
+    const positionsValue  = positions.reduce((s, p) => s + Number(p.avg_price || 0) * Number(p.qty || 0), 0);
+    const totalEquity     = Number(state.cash || 0) + positionsValue + unrealizedPnl;
+
+    res.json({
+      ok: true,
+      state,
+      orders,
+      positions,
+      trades,
+      stats: {
+        cash:           Number(state.cash || 0),
+        initialCapital: Number(state.initial_capital || 0),
+        tier:           String(state.tier || ''),
+        openPositions:  positions.length,
+        totalOrders,
+        filledOrders,
+        pendingOrders,
+        cancelledOrders,
+        closedTrades,
+        wins,
+        losses,
+        winRate,
+        realizedPnl,
+        unrealizedPnl,
+        positionsValue,
+        totalEquity,
+      },
     });
   }));
 

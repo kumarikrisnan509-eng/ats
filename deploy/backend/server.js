@@ -521,14 +521,115 @@ async function init() {
     // Force it now: paper._ensureDb() lazily resolves db via the getter
     // we wired in T-522 v2, then _persist() commits the in-memory state to
     // the paper_singleton_state SQLite row. After this, every subsequent
-    // load/persist is DB-backed. This is the one-shot that completes the
-    // streamline.
+    // load/persist is DB-backed.
     try {
       if (paper && typeof paper._ensureDb === 'function') {
         const ok = paper._ensureDb();
         if (ok) { paper._persist(); console.log('[paper] T-522: state persisted to DB post-init'); }
       }
     } catch (e) { console.error('[paper] T-522 post-init persist failed:', e.message); }
+
+    // ========== T-536: Engine A -> Engine B (per-user) migration ==========
+    // T-522 made the LEGACY GLOBAL paper engine DB-backed but it still lives
+    // in a separate row (paper_singleton_state) from the per-user db.paper
+    // tables (paper_state / paper_orders / paper_positions / paper_closed_trades).
+    // This caused the Paper UI to show two inconsistent views:
+    //   - LIVE PAPER ACCOUNT bar + KPI tiles + order book read from /api/paper
+    //     (global singleton) -> showed ₹10L, 2 RELIANCE orders
+    //   - Virtual account selector read from /api/me/paper (per-user)
+    //     -> showed user's chosen ₹50K
+    // T-536 unifies the UI: read everything from per-user db.paper. The
+    // global singleton is still the WRITE path for autorun (Phase 2 work),
+    // but we migrate its historical orders/trades to the per-user tables
+    // so the UI shows the correct full history.
+    //
+    // ATS_AUTORUN_USER_ID env var: explicit owner for autorun-generated
+    // paper orders. If unset, we use the first admin user (or user 1).
+    try {
+      const adminRow = db._conn.prepare("SELECT id FROM users WHERE is_admin = 1 ORDER BY id LIMIT 1").get();
+      const autorunUid = Number(process.env.ATS_AUTORUN_USER_ID) || (adminRow && adminRow.id) || 1;
+      console.log(`[paper] T-536: autorun user_id resolved to ${autorunUid}`);
+
+      // Only migrate if the per-user paper_orders for that uid is empty
+      // (idempotent: re-running boot is a no-op).
+      const existingPerUserOrders = db._conn.prepare("SELECT COUNT(*) AS n FROM paper_orders WHERE user_id = ?").get(autorunUid);
+      const singletonRow = db._conn.prepare("SELECT json FROM paper_singleton_state WHERE key = 'legacy_singleton'").get();
+
+      if (existingPerUserOrders.n === 0 && singletonRow && singletonRow.json) {
+        const singleton = JSON.parse(singletonRow.json);
+        const insertOrder = db._conn.prepare(
+          "INSERT INTO paper_orders (user_id, client_order_id, strategy_tag, symbol, side, qty, order_type, product, req_price, fill_price, slippage, status, filled_at, created_at) " +
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        );
+        const insertTrade = db._conn.prepare(
+          "INSERT INTO paper_closed_trades (user_id, symbol, side, qty, entry_price, exit_price, pnl, strategy_tag, entered_at, exited_at) " +
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        );
+        const insertPosition = db._conn.prepare(
+          "INSERT INTO paper_positions (user_id, symbol, qty, avg_price, opened_at) VALUES (?, ?, ?, ?, ?)"
+        );
+
+        let migrated = { orders: 0, trades: 0, positions: 0 };
+        const xact = db._conn.transaction(() => {
+          (singleton.orders || []).forEach(o => {
+            insertOrder.run(
+              autorunUid,
+              o.id || ('legacy-' + Math.random().toString(36).slice(2)),
+              o.strategy || null,
+              o.symbol,
+              o.side,
+              o.qty,
+              o.type || 'MARKET',
+              o.product || null,
+              o.price !== undefined && o.price !== null ? o.price : (o.filledPrice || null),
+              o.filledPrice || null,
+              0, // slippage not tracked in old payload
+              o.status || 'FILLED',
+              o.filledAt || null,
+              o.createdAt || new Date().toISOString()
+            );
+            migrated.orders++;
+          });
+          (singleton.trades || []).forEach(t => {
+            insertTrade.run(
+              autorunUid,
+              t.symbol,
+              t.side || 'BUY',
+              t.qty,
+              t.entryPrice || t.entry || 0,
+              t.exitPrice || t.exit || 0,
+              t.pnl || 0,
+              t.strategy || null,
+              t.enteredAt || t.openedAt || new Date().toISOString(),
+              t.exitedAt || t.closedAt || new Date().toISOString()
+            );
+            migrated.trades++;
+          });
+          const positions = singleton.positions || {};
+          Object.keys(positions).forEach(sym => {
+            const p = positions[sym];
+            if (!p || !p.qty) return;
+            insertPosition.run(
+              autorunUid,
+              sym,
+              p.qty,
+              p.avgPrice || p.avg || 0,
+              p.openedAt || new Date().toISOString()
+            );
+            migrated.positions++;
+          });
+        });
+        xact();
+        console.log(`[paper] T-536: migrated singleton -> uid ${autorunUid}: ${migrated.orders} orders, ${migrated.trades} trades, ${migrated.positions} positions`);
+      } else if (existingPerUserOrders.n > 0) {
+        console.log(`[paper] T-536: per-user uid ${autorunUid} already has ${existingPerUserOrders.n} orders, skipping migration`);
+      }
+
+      // Expose for other modules to read.
+      app.locals.autorunUserId = autorunUid;
+    } catch (e) {
+      console.error('[paper] T-536 migration failed (non-fatal):', e.message);
+    }
     auth = createUsers({ db, emailAlerts: null, audit, secureCookie: ENV_NAME === 'prod' });
     console.log(`db: ${db.users.count()} users registered`);
 
@@ -1744,7 +1845,7 @@ mountBacktestToolsRoutes(app, {
 // T-405 (god-object split #30): /api/paper + 7 deprecated /api/paper/* routes
 // extracted to routes/legacy-paper.js.
 const { mountLegacyPaperRoutes } = require('./routes/legacy-paper');
-mountLegacyPaperRoutes(app, { getPaper: () => paper, withDeprecation });
+mountLegacyPaperRoutes(app, { getPaper: () => paper, withDeprecation, getDb: () => db });
 
 // T-416: /api/me/paper/promote-check moved to routes/paper-trading.js or routes/admin-internal.js.
 

@@ -30,30 +30,88 @@ function mountLegacyPaperRoutes(app, deps) {
   if (typeof getPaper         !== 'function') throw new Error('legacy-paper: getPaper required');
   if (typeof withDeprecation  !== 'function') throw new Error('legacy-paper: withDeprecation required');
 
-  // NOT deprecated (no wrapper) -- public stats endpoint
-  app.get('/api/paper', (_req, res) => {
+  // T-536: When the request is from an authenticated user, return THAT
+  // user's per-user paper stats (computed from db.paper). Falls back to
+  // the legacy global-singleton stats for unauthenticated/probe callers.
+  // This makes the LIVE PAPER ACCOUNT bar in the UI show consistent data
+  // with the virtual-account selector (both now Engine B).
+  app.get('/api/paper', (req, res) => {
     const paper = getPaper();
+    const getDb = deps.getDb;
+    if (req.user && req.user.id && typeof getDb === 'function') {
+      try {
+        const db = getDb();
+        const uid = req.user.id;
+        const state     = db.paper.getState(uid);
+        const orders    = db.paper.listOrders(uid);
+        const positions = db.paper.listPositions(uid);
+        const trades    = db._conn.prepare('SELECT * FROM paper_closed_trades WHERE user_id = ? ORDER BY exited_at DESC LIMIT 200').all(uid);
+
+        const filledOrders = orders.filter(o => String(o.status||'').toUpperCase() === 'FILLED').length;
+        const closedTrades = trades.length;
+        const wins         = trades.filter(t => Number(t.pnl) > 0).length;
+        const realizedPnl  = trades.reduce((s, t) => s + Number(t.pnl||0), 0);
+        const positionsValue = positions.reduce((s, p) => s + Number(p.avg_price||0) * Number(p.qty||0), 0);
+        return res.json({ ok: true, stats: {
+          cash:           Number(state.cash || 0),
+          openPositions:  positions.length,
+          totalOrders:    orders.length,
+          filledOrders,
+          pendingOrders:  orders.filter(o => ['PENDING','OPEN'].includes(String(o.status||'').toUpperCase())).length,
+          cancelledOrders: orders.filter(o => String(o.status||'').toUpperCase() === 'CANCELLED').length,
+          closedTrades,
+          wins,
+          losses: closedTrades - wins,
+          winRate: closedTrades > 0 ? Math.round((wins / closedTrades) * 100) : 0,
+          realizedPnl,
+          unrealizedPnl: 0,
+          totalEquity: Number(state.cash || 0) + positionsValue,
+        }});
+      } catch (e) { /* fall through to legacy below */ }
+    }
+    // Legacy fallback (anonymous probes, /api/health-deep etc.)
     if (!paper) return res.status(503).json({ ok: false, reason: 'paper_not_initialized' });
     res.json({ ok: true, stats: paper.stats() });
   });
 
   // The rest are auth-gated + Deprecation-tagged via withDeprecation('/api/me/paper', ...)
-  app.get('/api/paper/orders', withDeprecation('/api/me/paper', (_req, res) => {
+  app.get('/api/paper/orders', withDeprecation('/api/me/paper', (req, res) => {
+    // T-536: per-user when authed (Engine B), legacy fallback otherwise.
+    const getDb = deps.getDb;
+    if (req.user && req.user.id && typeof getDb === 'function') {
+      try { return res.json({ ok: true, orders: getDb().paper.listOrders(req.user.id) }); }
+      catch (e) { /* fall through */ }
+    }
     const paper = getPaper();
     if (!paper) return res.status(503).json({ ok: false, reason: 'paper_not_initialized' });
     res.json({ ok: true, orders: paper.list() });
   }));
 
-  app.get('/api/paper/positions', withDeprecation('/api/me/paper', (_req, res) => {
+  app.get('/api/paper/positions', withDeprecation('/api/me/paper', (req, res) => {
+    // T-536: per-user when authed.
+    const getDb = deps.getDb;
+    if (req.user && req.user.id && typeof getDb === 'function') {
+      try { return res.json({ ok: true, positions: getDb().paper.listPositions(req.user.id) }); }
+      catch (e) { /* fall through */ }
+    }
     const paper = getPaper();
     if (!paper) return res.status(503).json({ ok: false, reason: 'paper_not_initialized' });
     res.json({ ok: true, positions: paper.positions() });
   }));
 
   app.get('/api/paper/trades', withDeprecation('/api/me/paper', (req, res) => {
+    // T-536: per-user when authed.
+    const lim = parseInt(req.query.limit || '50', 10) || 50;
+    const getDb = deps.getDb;
+    if (req.user && req.user.id && typeof getDb === 'function') {
+      try {
+        const db = getDb();
+        const rows = db._conn.prepare('SELECT * FROM paper_closed_trades WHERE user_id = ? ORDER BY exited_at DESC LIMIT ?').all(req.user.id, lim);
+        return res.json({ ok: true, trades: rows });
+      } catch (e) { /* fall through */ }
+    }
     const paper = getPaper();
     if (!paper) return res.status(503).json({ ok: false, reason: 'paper_not_initialized' });
-    const lim = parseInt(req.query.limit || '50', 10) || 50;
     res.json({ ok: true, trades: paper.trades(lim) });
   }));
 

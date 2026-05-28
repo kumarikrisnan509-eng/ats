@@ -537,11 +537,10 @@ const SpanMarginPanel = () => {
 
 const PaperScreen = () => {
   const [demo] = (window.useDemoMode ? window.useDemoMode() : [false]);
-  // T-529/T-530: default virtual-account tier and inferred-from-backend tier.
-  // On mount we GET /api/me/paper and infer the tier from state.initial_capital,
-  // so a refresh restores the user's last selection. setAccount writes to the
-  // backend via PUT /api/me/paper/capital with { initialCapital, tier, reset:false }.
-  const [account, setAccountRaw] = useState("50K");
+  // T-535: initialize as null so we don't flash the default tier before the
+  // persisted tier arrives. The selector renders a tiny placeholder while loading.
+  // setAccount wraps both the local state and the PUT /api/me/paper/capital call.
+  const [account, setAccountRaw] = useState(null);
   const [accountSaving, setAccountSaving] = useState(false);
   const [accountError, setAccountError] = useState(null);
   const [, bump] = useState(0);
@@ -600,25 +599,35 @@ const PaperScreen = () => {
       } catch (e) { /* keep default */ }
     })();
   }, []);
-  // ---- live paper trading state from /api/paper, /paper/positions, /paper/orders ----
+  // ---- T-536: SINGLE source of truth — /api/me/paper returns state + orders
+  // + positions + trades + stats for the authenticated user. Previously this
+  // screen made 3 calls (/api/paper, /api/paper/positions, /api/paper/orders)
+  // that hit the legacy global singleton — which held DIFFERENT data than the
+  // per-user db.paper that the virtual-account selector reads from. That
+  // disagreement caused the user-reported flash (₹50K → ₹10L) and made the
+  // "LIVE PAPER ACCOUNT" bar disagree with the selector.
   const [livePaper, setLivePaper] = React.useState(null);
   const [livePositions, setLivePositions] = React.useState(null);
   const [liveOrders, setLiveOrders] = React.useState(null);
+  const [paperLoading, setPaperLoading] = React.useState(true);
   React.useEffect(() => {
-    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
+    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) {
+      setPaperLoading(false);
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
-        const [s, p, o] = await Promise.all([
-          window.fetchApi('/api/paper'),
-          window.fetchApi('/api/paper/positions'),
-          window.fetchApi('/api/paper/orders'),
-        ]);
+        const r = await window.fetchApi('/api/me/paper');
         if (cancelled) return;
-        if (s && s.ok) setLivePaper(s.stats);
-        if (p && p.ok) setLivePositions(p.positions || []);
-        if (o && o.ok) setLiveOrders(o.orders || o.list || []);
+        if (r && r.ok) {
+          // r.stats has the shape the UI expects: cash, totalEquity, realizedPnl, etc.
+          setLivePaper(r.stats || null);
+          setLivePositions(Array.isArray(r.positions) ? r.positions : []);
+          setLiveOrders(Array.isArray(r.orders) ? r.orders : []);
+        }
       } catch (e) { /* fall back to mock */ }
+      finally { if (!cancelled) setPaperLoading(false); }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -641,7 +650,8 @@ const PaperScreen = () => {
         { id: "50L", cap: 5000000, used: 2140000, pnl: 148320, trades: 142, winR: 71 },
       ]
     : Object.keys(__accountSizes).map(id => ({ id, cap: __accountSizes[id], used: 0, pnl: 0, trades: 0, winR: 0 }));
-  const acc = accounts.find(a => a.id === account) || accounts[0];
+  // T-535: when account hasn't loaded yet, fall back to the default tier shape
+  const acc = accounts.find(a => a.id === account) || accounts.find(a => a.id === '10L') || accounts[0];
 
   // T-346: gate the 6 hardcoded paper-order fixtures behind demo so live
   // mode shows no fake history. Real fills come from /api/paper/orders
@@ -760,8 +770,12 @@ const PaperScreen = () => {
         <div className="between" style={{ marginBottom: 18 }}>
           <div className="row" style={{ gap: 12 }}>
             <div className="muted" style={{ fontSize: 12 }}>Virtual account</div>
-            <Segmented value={account} onChange={setAccount}
-              options={accounts.map(a => ({ value: a.id, label: "₹" + a.id }))}/>
+            {account === null ? (
+              <span className="muted" style={{ fontSize: 12 }}>loading…</span>
+            ) : (
+              <Segmented value={account} onChange={setAccount}
+                options={accounts.map(a => ({ value: a.id, label: "₹" + a.id }))}/>
+            )}
             <Pill kind="acc" dot>Paper · identical to live layout</Pill>
             {/* T-530: surface save status */}
             {accountSaving && <span className="muted" style={{ fontSize: 11 }}>saving…</span>}
@@ -776,11 +790,22 @@ const PaperScreen = () => {
           </div>
         </div>
         <div className="grid grid-4">
-          {/* T-523: when livePaper is loaded (live mode, not demo), prefer the
-              real DB-backed numbers from /api/paper over the fixture. The
-              ₹10L/25L/50L tier is just a label; the actual cash balance and
-              P&L come from paper_singleton_state in SQLite. */}
+          {/* T-536: KPI cards now read from /api/me/paper (Engine B, per-user).
+              T-535 flash-fix: while loading, render '…' placeholders so the
+              tile doesn't show the default-tier value and then flash to the
+              real one. Once loaded, EVERY number reflects the same source as
+              the virtual-account selector — no more inconsistency. */}
           {(() => {
+            if (paperLoading && !demo) {
+              return (
+                <>
+                  <Stat label="Virtual capital" value="…" delta="loading" deltaKind="muted"/>
+                  <Stat label="Paper P&L"       value="…" delta="loading" deltaKind="muted"/>
+                  <Stat label="Trades"          value="…" delta="loading" deltaKind="muted"/>
+                  <Stat label="Sharpe (ann.)"   value="—" sub="needs daily equity series"/>
+                </>
+              );
+            }
             const lp = livePaper && !demo;
             const cap = lp ? Number(livePaper.totalEquity) : acc.cap;
             const cash = lp ? Number(livePaper.cash) : acc.cap;
