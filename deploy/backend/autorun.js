@@ -229,6 +229,11 @@ class AutoRunner {
       interval:           String(cfg.interval || 'day'),
       intervalMinutes:    Math.max(1, parseInt(cfg.intervalMinutes || DEFAULT_INTERVAL_MIN, 10) || DEFAULT_INTERVAL_MIN),
       candleLookbackDays: Math.max(7, Math.min(800, parseInt(cfg.candleLookbackDays || DEFAULT_LOOKBACK_DAYS, 10) || DEFAULT_LOOKBACK_DAYS)),
+      // T-508 (Phase 1): per-fire protective orders. Null = no SL/TP (legacy
+      // behaviour, naked MARKET). Set as percentages of entry price.
+      stopLossPct:        cfg.stopLossPct        != null && Number.isFinite(Number(cfg.stopLossPct))        ? Math.max(0.1, Math.min(20, Number(cfg.stopLossPct)))        : null,
+      targetPct:          cfg.targetPct          != null && Number.isFinite(Number(cfg.targetPct))          ? Math.max(0.1, Math.min(50, Number(cfg.targetPct)))          : null,
+      trailingStopPct:    cfg.trailingStopPct    != null && Number.isFinite(Number(cfg.trailingStopPct))    ? Math.max(0.1, Math.min(20, Number(cfg.trailingStopPct)))    : null,
     };
     if (!out.strategy) throw new Error('strategy required');
     if (!out.symbol)   throw new Error('symbol required');
@@ -584,6 +589,32 @@ class AutoRunner {
               // AND preTradeCheck is wired -- three locks before live.
               const route = this._pickRoute(this._config.strategy);
               run.route = route;
+              // T-508 (Phase 1): compute SL/TP prices from the last bar's close.
+              // BUY = entry, gets a BRACKET if SL+TP configured. SELL = exit,
+              // always MARKET (existing position's protective orders already in
+              // flight from the matching BUY's bracket). Live path keeps MARKET
+              // for now -- Zerodha BRACKET is deprecated for equity; live SL
+              // requires GTT placement which ships in Phase 4.
+              const entryPx = (lastBar && Number.isFinite(lastBar.close)) ? lastBar.close : null;
+              const wantsBracket = lastSig === 'BUY'
+                && entryPx != null && entryPx > 0
+                && Number.isFinite(this._config.stopLossPct) && Number.isFinite(this._config.targetPct);
+              const paperPayload = {
+                symbol:   this._config.symbol,
+                side:     lastSig,
+                qty:      effectiveQty,
+                type:     wantsBracket ? 'BRACKET' : 'MARKET',
+                strategy: this._config.strategy,
+              };
+              if (wantsBracket) {
+                paperPayload.price       = entryPx;
+                paperPayload.stopLoss    = +(entryPx * (1 - this._config.stopLossPct / 100)).toFixed(2);
+                paperPayload.targetPrice = +(entryPx * (1 + this._config.targetPct   / 100)).toFixed(2);
+                if (Number.isFinite(this._config.trailingStopPct)) {
+                  paperPayload.trailingStopPct = this._config.trailingStopPct;
+                }
+                run.bracket = { stopLoss: paperPayload.stopLoss, targetPrice: paperPayload.targetPrice, trailingStopPct: paperPayload.trailingStopPct || null };
+              }
               const payload = {
                 symbol:   this._config.symbol,
                 side:     lastSig,
@@ -593,6 +624,41 @@ class AutoRunner {
               };
               try {
                 if (route === 'live') {
+                  // T-509 (Phase 3): explicit 2FA policy gate for autorun live.
+                  // Today's /api/orders/place enforces 2FA on the first order
+                  // per (user, strategy) per IST day via Telegram OOB confirm.
+                  // autorun.broker.placeOrder bypasses that gate IMPLICITLY
+                  // because autorun doesn't go through the HTTP route.
+                  // Make the bypass EXPLICIT: operator must set
+                  // ATS_AUTORUN_2FA_BYPASS=true to acknowledge that autorun
+                  // is unattended-by-design and 2FA cannot be answered. Default
+                  // fail-closed so an unaware operator can't accidentally enable
+                  // live autorun without facing this decision.
+                  const autorun2faBypass = String(process.env.ATS_AUTORUN_2FA_BYPASS || '').toLowerCase() === 'true';
+                  if (!autorun2faBypass) {
+                    run.result = 'skipped_2fa_policy';
+                    run.message = 'Autorun live route requires ATS_AUTORUN_2FA_BYPASS=true to acknowledge unattended-by-design execution. Set the env var OR keep tradingMode=paper.';
+                    this.audit('autorun.live.2faPolicyBlock', { strategy: this._config.strategy, symbol: this._config.symbol });
+                    return { result: 'skipped', reason: '2fa_policy_block' };
+                  }
+                  // Bypass is explicit -- audit every fire so the operator can
+                  // see this in the WORM chain.
+                  this.audit('autorun.live.2faBypassed', { strategy: this._config.strategy, symbol: this._config.symbol, env: 'ATS_AUTORUN_2FA_BYPASS=true' });
+                  // T-508 (Phase 1) WARNING: Zerodha BRACKET is deprecated for
+                  // equity. Live SL/TP requires GTT placement (Phase 4). Until
+                  // Phase 4 ships, live autorun orders are NAKED MARKET even
+                  // when stopLossPct/targetPct are configured. Surface in the
+                  // run record so operators don't enable live strategies
+                  // without protective stops.
+                  if (wantsBracket) {
+                    run.live_protection_skipped = {
+                      reason: 'GTT_NOT_WIRED_YET',
+                      message: 'Live route fired without SL/TP -- Zerodha BRACKET deprecated; GTT placement scheduled for Phase 4 (T-510).',
+                      configured_sl: paperPayload.stopLoss,
+                      configured_target: paperPayload.targetPrice,
+                    };
+                    this.audit('autorun.live.protectionSkipped', run.live_protection_skipped);
+                  }
                   // Run the 12-gate preTrade stack (kill switch / live trading
                   // flag / mode / leverage / sector / market-hours / etc.)
                   // before touching the broker.
@@ -614,8 +680,8 @@ class AutoRunner {
                     }
                   }
                 } else {
-                  // Paper path -- existing behaviour.
-                  const order = this.paper.placeOrder(payload);
+                  // Paper path -- T-508 may use BRACKET when SL/TP configured.
+                  const order = this.paper.placeOrder(paperPayload);
                   run.result   = 'placed';
                   run.orderId  = order.id;
                   run.firedQty = effectiveQty;

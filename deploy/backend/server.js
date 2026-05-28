@@ -46,6 +46,9 @@ const { createSipRunner } = require('./services/sip-runner');
 const { createPromoteScheduler } = require('./services/promote-scheduler');
 // T-504: auto-square-off on extended broker disconnect during market hours.
 const { createDisconnectWatchdog } = require('./services/disconnect-watchdog');
+// T-510 (Phase 5): nightly EOD reconcile + 08:30 morning digest.
+const { createEodReconcile } = require('./services/eod-reconcile');
+const { createMorningDigest } = require('./services/morning-digest');
 // T-272: unified position view aggregator (Phase 2).
 const { createPortfolioAggregates } = require('./services/portfolio-aggregates');
 // T-280: market regime detector (Phase 3).
@@ -311,7 +314,7 @@ function audit(event, data) {
 }
 
 // ---------- Boot: broker + vault + sessions + alerts ----------
-let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, db, auth, rebalance, replay, emailAlerts, whatsAppAlerts, riskConfigService, sipRunner, portfolioAggregates, regimeDetector, attribution, slippageTracker, preTradeCheck, optionChainFetcher, optionsScanner, signalCalibration, nseMacroFetcher, promoteScheduler, disconnectWatchdog;  // T-381: nseMacroFetcher was previously assigned without declaration -> created an implicit global (works only because CommonJS files arent strict mode). ESLint no-undef caught this.
+let broker, vault, sessions, alerts, watchlist, scanner, paper, pnl, autorun, news, tax, ai, sweep, longterm, wealth, mpt, factorTilt, wormAudit, spanSim, twoFactor, digest, db, auth, rebalance, replay, emailAlerts, whatsAppAlerts, riskConfigService, sipRunner, portfolioAggregates, regimeDetector, attribution, slippageTracker, preTradeCheck, optionChainFetcher, optionsScanner, signalCalibration, nseMacroFetcher, promoteScheduler, disconnectWatchdog, eodReconcile, morningDigest;  // T-381: nseMacroFetcher was previously assigned without declaration -> created an implicit global (works only because CommonJS files arent strict mode). ESLint no-undef caught this.
 
 async function init() {
   // T-447 (audit-2026-05-26 backend M9): wormAudit MUST come first so
@@ -621,6 +624,56 @@ async function init() {
   } catch (e) {
     console.error('!! disconnectWatchdog init failed:', e.message);
     disconnectWatchdog = null;
+  }
+
+  // T-510 (Phase 5): EOD reconcile at 15:45 IST. Compares broker positions
+  // vs paper.positions(); audits + Telegrams every mismatch. Silent on clean
+  // days unless the operator flips the digest opt-in inside the module.
+  try {
+    if (db) {
+      eodReconcile = createEodReconcile({
+        db,
+        getBroker: () => broker,
+        getPaper:  () => paper,
+        notify:    _notifyModule,
+        audit,
+      });
+      eodReconcile.start();
+      console.log('[server] eod-reconcile armed (15:45 IST daily)');
+    }
+  } catch (e) {
+    console.error('!! eodReconcile init failed:', e.message);
+    eodReconcile = null;
+  }
+
+  // T-510 (Phase 5): pre-market digest at 08:30 IST. One Telegram per
+  // trading day with yesterday's P&L, today's open positions, autorun
+  // status, holiday-cache age, degraded counters. Skipped on weekends.
+  try {
+    if (db) {
+      morningDigest = createMorningDigest({
+        db,
+        getBroker:           () => broker,
+        getPaper:            () => paper,
+        getAutorun:          () => autorun,
+        getMarketMeta:       () => _marketMeta,
+        getDegradedRegistry: () => ({
+          snapshot: () => {
+            const out = {};
+            try { Object.assign(out, autorun && autorun.getDegradedSnapshot ? autorun.getDegradedSnapshot() : {}); } catch {}
+            try { Object.assign(out, preTradeCheck && preTradeCheck.getDegradedSnapshot ? preTradeCheck.getDegradedSnapshot() : {}); } catch {}
+            return out;
+          },
+        }),
+        notify: _notifyModule,
+        audit,
+      });
+      morningDigest.start();
+      console.log('[server] morning-digest armed (08:30 IST weekdays)');
+    }
+  } catch (e) {
+    console.error('!! morningDigest init failed:', e.message);
+    morningDigest = null;
   }
 
   // T-272: portfolio aggregator (Phase 2). Pure read service -- consults
