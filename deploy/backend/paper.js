@@ -67,12 +67,14 @@ class PaperTrading {
   }
 
   _ensureDb() {
-    // T-522: lazy DB init. Returns true if DB is usable, false if we should
-    // fall back to JSON-file storage. Called on every load() and _persist().
+    // T-522 v3: lazy DB init that RETRIES on failure. If db isn\'t ready
+    // yet on first call (e.g. load() runs before init() assigns db), we
+    // return false but DON\'T latch -- next call gets another shot.
+    // Only latches _dbReady on SUCCESS.
     if (this._dbReady) return !!this.db;
-    if (!this.getDb) { this.db = null; this._dbReady = true; return false; }
+    if (!this.getDb) return false;
     const d = this.getDb();
-    if (!d || !d._conn) { this.db = null; this._dbReady = true; return false; }
+    if (!d || !d._conn) return false;  // retry next time
     try {
       d._conn.exec(`
         CREATE TABLE IF NOT EXISTS paper_singleton_state (
