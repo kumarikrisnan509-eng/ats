@@ -395,6 +395,7 @@ async function init() {
   scanner.scheduleDaily();
 
   paper = new PaperTrading({
+      db,
     storePath:    process.env.PAPER_PATH || '/var/lib/ats/tokens/_paper.json',
     startingCash: parseInt(process.env.PAPER_STARTING_CASH || '1000000', 10),
     audit,

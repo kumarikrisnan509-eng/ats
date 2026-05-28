@@ -42,8 +42,34 @@ class PaperTrading {
    * @param {(event, data) => void} [opts.audit]
    * @param {() => Map<string,number>} [opts.lastTicks]  function returning current last-tick map for mark-to-market
    */
-  constructor({ storePath, startingCash, audit, lastTicks, getTslConfig } = {}) {
+  constructor({ storePath, startingCash, audit, lastTicks, getTslConfig, db } = {}) {
     this.storePath     = storePath     || DEFAULT_STORE;
+    // T-522 (streamline): if `db` is passed, persist state to SQLite instead
+    // of the JSON file. Same on-disk shape (JSON blob in a TEXT column), just
+    // a different storage target. Unifies the source of truth with db.paper
+    // (per-user table) and removes the JSON-file dependency for production.
+    // Backward compatible: if no db, fall back to file (used by tests + dev).
+    this.db = db || null;
+    if (this.db && this.db._conn) {
+      try {
+        this.db._conn.exec(`
+          CREATE TABLE IF NOT EXISTS paper_singleton_state (
+            key         TEXT PRIMARY KEY,
+            json        TEXT NOT NULL,
+            updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+          );
+        `);
+        this._dbGetState = this.db._conn.prepare(
+          "SELECT json, updated_at FROM paper_singleton_state WHERE key = ?"
+        );
+        this._dbUpsertState = this.db._conn.prepare(
+          "INSERT OR REPLACE INTO paper_singleton_state (key, json, updated_at) VALUES (?, ?, datetime('now'))"
+        );
+      } catch (e) {
+        console.error('[paper] T-522 db init failed, falling back to JSON file:', e.message);
+        this.db = null;
+      }
+    }
     this.startingCash  = startingCash  || DEFAULT_CASH;
     this.audit         = audit         || (() => {});
     this.lastTicks     = lastTicks     || (() => new Map());
@@ -59,28 +85,68 @@ class PaperTrading {
   }
 
   load() {
-    try {
-      if (!fs.existsSync(this.storePath)) return;
-      const raw = JSON.parse(fs.readFileSync(this.storePath, 'utf8'));
-      if (raw && typeof raw === 'object') {
-        this._orders    = Array.isArray(raw.orders)    ? raw.orders    : [];
-        this._positions = (raw.positions && typeof raw.positions === 'object') ? raw.positions : {};
-        this._trades    = Array.isArray(raw.trades)    ? raw.trades    : [];
-        this._cash      = typeof raw.cash === 'number' ? raw.cash      : this.startingCash;
-        console.log(`[paper] loaded: ${this._orders.length} orders, ${Object.keys(this._positions).length} positions, ${this._trades.length} closed trades, cash=INR ${this._cash}`);
+    // T-522: prefer DB-backed state. If DB is empty AND legacy JSON file
+    // exists, migrate the file into the DB once (one-shot). After migration,
+    // the DB row is authoritative and the file is no longer read.
+    let raw = null;
+    let source = 'none';
+
+    if (this.db) {
+      try {
+        const row = this._dbGetState.get('legacy_singleton');
+        if (row && row.json) {
+          raw = JSON.parse(row.json);
+          source = 'db';
+        }
+      } catch (e) { console.warn('[paper] T-522 db read failed:', e.message); }
+    }
+
+    if (!raw) {
+      // No DB row yet. Try the legacy JSON file (one-shot migration).
+      try {
+        if (fs.existsSync(this.storePath)) {
+          raw = JSON.parse(fs.readFileSync(this.storePath, 'utf8'));
+          source = 'json_file_migrated';
+        }
+      } catch (e) { console.warn('[paper] load failed:', e.message); }
+    }
+
+    if (raw && typeof raw === 'object') {
+      this._orders    = Array.isArray(raw.orders)    ? raw.orders    : [];
+      this._positions = (raw.positions && typeof raw.positions === 'object') ? raw.positions : {};
+      this._trades    = Array.isArray(raw.trades)    ? raw.trades    : [];
+      this._cash      = typeof raw.cash === 'number' ? raw.cash      : this.startingCash;
+      console.log(`[paper] loaded from ${source}: ${this._orders.length} orders, ${Object.keys(this._positions).length} positions, ${this._trades.length} closed trades, cash=INR ${this._cash}`);
+      // If we just migrated, write to DB so next load is DB-backed.
+      if (source === 'json_file_migrated' && this.db) {
+        try {
+          this._persist();
+          console.log('[paper] T-522 migration: legacy JSON state copied to DB (paper_singleton_state).');
+        } catch (e) { console.warn('[paper] T-522 migrate-write failed:', e.message); }
       }
-    } catch (e) { console.warn('[paper] load failed:', e.message); }
+    }
   }
 
   _persist() {
+    // T-522: prefer DB-backed write. Falls back to JSON file (tests / dev).
+    const payload = {
+      orders: this._orders.slice(-1000),   // cap at last 1000 orders
+      positions: this._positions,
+      trades: this._trades.slice(-2000),   // last 2000 trades
+      cash: this._cash,
+    };
+    if (this.db) {
+      try {
+        this._dbUpsertState.run('legacy_singleton', JSON.stringify(payload));
+        return;
+      } catch (e) {
+        console.error('[paper] T-522 db persist failed, falling back to file:', e.message);
+        // fall through to file write
+      }
+    }
     try {
       fs.mkdirSync(path.dirname(this.storePath), { recursive: true });
-      fs.writeFileSync(this.storePath, JSON.stringify({
-        orders: this._orders.slice(-1000),   // cap at last 1000 orders
-        positions: this._positions,
-        trades: this._trades.slice(-2000),   // last 2000 trades
-        cash: this._cash,
-      }, null, 2));
+      fs.writeFileSync(this.storePath, JSON.stringify(payload, null, 2));
     } catch (e) { console.error('[paper] persist failed:', e.message); }
   }
 
