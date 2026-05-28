@@ -35,6 +35,11 @@ const DEFAULTS = Object.freeze({
     MOM100: 0.0078,
   }),
   activeStrategies: Object.freeze(['supertrend', 'rsi_mean_revert', 'vwap']),
+  // T-506 (P1 #13): per-strategy notional cap. Object {strategyId: maxNotionalInr}.
+  // Defaults to {} -- no per-strategy limit, the global MAX_AGGREGATE_EXPOSURE
+  // still applies. Once populated, the sum of (open exposure + new order's
+  // notional) for that strategy must not exceed the cap.
+  strategyCaps: Object.freeze({}),
   // T-501: per-strategy live/paper toggle. Strategies listed here are eligible
   // for LIVE orders (subject to tradingMode != paper + KILL_SWITCH=false +
   // LIVE_TRADING=true). Strategies NOT here go to paper even when the global
@@ -159,6 +164,9 @@ function _rowToConfig(row) {
   // T-501: live-enabled subset (sidecar to activeStrategies).
   let liveEnabled = null;
   try { if (row.live_enabled_strategies_json) liveEnabled = JSON.parse(row.live_enabled_strategies_json); } catch (_) { liveEnabled = null; }
+  // T-506: per-strategy notional cap.
+  let stratCaps = null;
+  try { if (row.strategy_caps_json) stratCaps = JSON.parse(row.strategy_caps_json); } catch (_) { stratCaps = null; }
   return {
     capital: row.capital,
     maxPositionPct: row.max_position_pct,
@@ -181,6 +189,7 @@ function _rowToConfig(row) {
     // T-487
     activeModes:     (modes && typeof modes === 'object' && !Array.isArray(modes)) ? modes : {},
     liveEnabledStrategies: Array.isArray(liveEnabled) ? liveEnabled : [],
+    strategyCaps: (stratCaps && typeof stratCaps === 'object' && !Array.isArray(stratCaps)) ? stratCaps : {},
     updatedAt: row.updated_at,
   };
 }
@@ -207,6 +216,7 @@ function _defaultsForUser() {
     // T-487
     activeModes: { ...DEFAULTS.activeModes },
     liveEnabledStrategies: [...DEFAULTS.liveEnabledStrategies],
+    strategyCaps: { ...DEFAULTS.strategyCaps },
     updatedAt: null,
   };
 }
@@ -231,6 +241,8 @@ function createRiskConfigService(db) {
     ['active_modes_json',   "TEXT NOT NULL DEFAULT '{}'"],
     // T-501: per-strategy live toggle (subset of active_strategies_json).
     ['live_enabled_strategies_json', "TEXT NOT NULL DEFAULT '[]'"],
+    // T-506: per-strategy notional cap JSON.
+    ['strategy_caps_json',          "TEXT NOT NULL DEFAULT '{}'"],
   ];
   for (const [col, ddl] of MIGRATION_COLS) {
     try {
@@ -248,14 +260,14 @@ function createRiskConfigService(db) {
   const stmtUpsert = conn.prepare(`
     INSERT INTO user_risk_config (
       user_id, capital, max_position_pct, max_daily_loss_pct, max_open_positions,
-      dca_allocation_json, active_strategies_json, live_enabled_strategies_json, voting_threshold, trading_mode,
+      dca_allocation_json, active_strategies_json, live_enabled_strategies_json, strategy_caps_json, voting_threshold, trading_mode,
       max_daily_trades, golden_start_hhmm, golden_end_hhmm, tsl_activate_pct, tsl_gap_pct,
       sip_day_of_month, max_leverage, max_sector_weight,
       active_modes_json,
       updated_at
     ) VALUES (
       @user_id, @capital, @max_position_pct, @max_daily_loss_pct, @max_open_positions,
-      @dca_allocation_json, @active_strategies_json, @live_enabled_strategies_json, @voting_threshold, @trading_mode,
+      @dca_allocation_json, @active_strategies_json, @live_enabled_strategies_json, @strategy_caps_json, @voting_threshold, @trading_mode,
       @max_daily_trades, @golden_start_hhmm, @golden_end_hhmm, @tsl_activate_pct, @tsl_gap_pct,
       @sip_day_of_month, @max_leverage, @max_sector_weight,
       @active_modes_json,
@@ -269,6 +281,7 @@ function createRiskConfigService(db) {
       dca_allocation_json    = @dca_allocation_json,
       active_strategies_json = @active_strategies_json,
       live_enabled_strategies_json = @live_enabled_strategies_json,
+      strategy_caps_json = @strategy_caps_json,
       voting_threshold       = @voting_threshold,
       trading_mode           = @trading_mode,
       max_daily_trades       = @max_daily_trades,
@@ -325,6 +338,10 @@ function createRiskConfigService(db) {
       liveEnabledStrategies: (Array.isArray(partial.liveEnabledStrategies))
         ? partial.liveEnabledStrategies.filter(x => typeof x === 'string' && x)
         : (Array.isArray(current.liveEnabledStrategies) ? current.liveEnabledStrategies : []),
+      // T-506: per-strategy notional cap. Object form only; null/undefined preserves current.
+      strategyCaps: (partial.strategyCaps != null && typeof partial.strategyCaps === 'object' && !Array.isArray(partial.strategyCaps))
+        ? Object.fromEntries(Object.entries(partial.strategyCaps).filter(([k, v]) => typeof k === 'string' && k && Number.isFinite(Number(v)) && Number(v) > 0).map(([k, v]) => [k, Number(v)]))
+        : (current.strategyCaps && typeof current.strategyCaps === 'object' ? current.strategyCaps : {}),
       votingThreshold: partial.votingThreshold != null ? Math.trunc(Number(partial.votingThreshold)) : current.votingThreshold,
       tradingMode: partial.tradingMode != null ? String(partial.tradingMode) : current.tradingMode,
       // T-265..T-267
@@ -354,6 +371,7 @@ function createRiskConfigService(db) {
       dca_allocation_json: JSON.stringify(merged.dcaAllocation),
       active_strategies_json: JSON.stringify(merged.activeStrategies),
       live_enabled_strategies_json: JSON.stringify(merged.liveEnabledStrategies || []),
+      strategy_caps_json: JSON.stringify(merged.strategyCaps || {}),
       voting_threshold: merged.votingThreshold,
       trading_mode: merged.tradingMode,
       max_daily_trades: merged.maxDailyTrades,

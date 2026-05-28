@@ -60,6 +60,28 @@ function mountAdminMiscRoutes(app, deps) {
       recentErrors: obs.recentErrors(50),
     });
   });
+  // T-505: operator-curated NSE holiday list override. Pastable from the
+  // NSE official calendar PDF when kc.getHolidays() is not returning data
+  // (the T-503 health-surface "static_fallback" finding). Source='manual'
+  // in the cache; isHolidayOrWeekend() reads it identically to kite_api.
+  app.post('/api/admin/market/holidays/manual', (req, res) => {
+    if (!req.user) return res.status(401).json({ ok: false, reason: 'auth_required' });
+    const mm = (typeof deps.getMarketMeta === 'function') ? deps.getMarketMeta() : null;
+    if (!mm || typeof mm.manualSetHolidays !== 'function') {
+      return res.status(503).json({ ok: false, reason: 'marketMeta_unavailable' });
+    }
+    try {
+      const list = Array.isArray(req.body) ? req.body : (req.body && Array.isArray(req.body.holidays) ? req.body.holidays : []);
+      const r = mm.manualSetHolidays(list);
+      if (typeof deps.audit === 'function') {
+        deps.audit('admin.holidays.manualSet', { userId: req.user.id, count: r.count });
+      }
+      res.json(Object.assign({}, r, { source: 'manual', note: 'Cached. /api/health.holidays.source will now report "manual" instead of "static_fallback".' }));
+    } catch (e) {
+      res.status(400).json({ ok: false, reason: 'invalid_input', message: e.message });
+    }
+  });
+
 }
 
 module.exports = { mountAdminMiscRoutes };

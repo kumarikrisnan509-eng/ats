@@ -218,6 +218,48 @@ function createPreTradeCheck({
       }
     }
 
+    // ----------- GATE 6 (NEW T-506): per-strategy budget cap -----------
+    // If the operator has set a strategyCaps entry for this strategy, the
+    // sum of (current per-strategy exposure + this order's notional) must
+    // not exceed the cap. Permissive on aggregator failure (audited, not
+    // blocking) and silent no-op when no cap is set.
+    if (cfg && cfg.strategyCaps && typeof cfg.strategyCaps === 'object'
+        && payload && payload.strategy
+        && Number.isFinite(Number(cfg.strategyCaps[payload.strategy]))
+        && typeof getPortfolioAggregates === 'function') {
+      try {
+        const cap = Number(cfg.strategyCaps[payload.strategy]);
+        const agg = getPortfolioAggregates();
+        let currentExposure = 0;
+        if (agg && Array.isArray(agg.positions)) {
+          for (const p of agg.positions) {
+            if (p && p.strategy === payload.strategy && Number.isFinite(p.notionalInr)) {
+              currentExposure += Math.abs(p.notionalInr);
+            }
+          }
+        }
+        const orderNotional = Number(payload.qty || 0) * Number(payload.estPrice || payload.ltp || 0);
+        // estPrice/ltp may be absent in autorun MARKET orders; if so we skip the
+        // cap check (the global aggregate cap still protects). Audit so it's visible.
+        if (orderNotional > 0 && (currentExposure + orderNotional) > cap) {
+          _audit('preTrade.blocked.strategyCap', { userId, strategy: payload.strategy, currentExposure, orderNotional, cap });
+          return {
+            ok: false,
+            status: 403,
+            reason: 'STRATEGY_BUDGET_EXCEEDED',
+            message: `Strategy '${payload.strategy}' would exceed its per-strategy notional cap of ₹${cap.toLocaleString('en-IN')} (current ₹${currentExposure.toLocaleString('en-IN')} + this order ₹${orderNotional.toLocaleString('en-IN')}).`,
+            detail: { strategy: payload.strategy, currentExposure, orderNotional, cap },
+          };
+        }
+        if (orderNotional <= 0) {
+          _audit('preTrade.strategyCap.skipped', { userId, strategy: payload.strategy, reason: 'no_price_in_payload' });
+        }
+      } catch (e) {
+        _audit('preTrade.strategyCap.failed', { userId, msg: e.message });
+        _gateDegraded('aggregator', e);   // re-uses existing aggregator counter
+      }
+    }
+
     // ----------- ALL GATES PASSED -----------
     return { ok: true };
   }

@@ -279,6 +279,21 @@ function audit(event, data) {
   // Failure here never breaks the primary audit.log stream below.
   try { if (wormAudit && wormAudit._initialized) wormAudit.append(event, data); } catch (_e) {}
   try {
+    // T-507 (P2 #20): rotate audit log when it exceeds 100 MB. Keeps last 5
+    // files as audit.log.1 .. audit.log.5 (rolling). Append-only writes survive
+    // -- rotation is atomic rename + new file create. Stat fails-permissively
+    // (rotation skipped this tick, retried on the next write).
+    try {
+      const st = fs.statSync(AUDIT_LOG);
+      if (st && st.size > 100 * 1024 * 1024) {
+        for (let i = 4; i >= 1; i--) {
+          const cur = AUDIT_LOG + '.' + i;
+          const nxt = AUDIT_LOG + '.' + (i + 1);
+          try { if (fs.existsSync(cur)) fs.renameSync(cur, nxt); } catch (_) { /* permissive */ }
+        }
+        try { fs.renameSync(AUDIT_LOG, AUDIT_LOG + '.1'); } catch (_) { /* permissive */ }
+      }
+    } catch (_) { /* file may not exist yet -- rotation no-op */ }
     fs.mkdirSync(path.dirname(AUDIT_LOG), { recursive: true });
     // T-437 (audit-2026-05-26 backend M7): force mode 0600 on every append so
     // a misconfigured deploy (e.g. /var/log/ats/ with o+rx for nginx) doesn't

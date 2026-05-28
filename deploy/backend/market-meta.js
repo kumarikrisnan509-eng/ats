@@ -131,6 +131,25 @@ function createMarketMeta({ db, broker }) {
     return { open: true, date: dateISO, time_ist: hhmm };
   }
 
+  // T-505: operator-curated override. When kc.getHolidays() returns nothing
+  // (the live finding from T-503), the operator can paste NSE's published
+  // calendar via POST /api/admin/market/holidays/manual. Stored in the same
+  // cache table with source='manual' so isHolidayOrWeekend() reads it the
+  // same way as the broker-fed list. Survives container restarts.
+  function manualSetHolidays(list) {
+    if (!Array.isArray(list)) throw new Error('list must be an array');
+    const norm = list
+      .map(h => ({
+        date: typeof h.date === 'string' ? h.date.slice(0, 10) : null,
+        name: h.name || 'Operator-curated holiday',
+        type: h.type || 'NSE',
+      }))
+      .filter(h => h.date && /^\d{4}-\d{2}-\d{2}$/.test(h.date));
+    if (!norm.length) throw new Error('no valid dates in list (need {date:"YYYY-MM-DD"})');
+    set.run('holidays_nse', JSON.stringify(norm), 'manual');
+    return { ok: true, count: norm.length };
+  }
+
   // T-503: cache freshness for /api/health observability. Lets the operator
   // see whether the holiday gate is running off fresh broker data or a stale
   // (or static_fallback) cache that may miss movable holidays like Diwali.
@@ -151,7 +170,7 @@ function createMarketMeta({ db, broker }) {
     };
   }
 
-  return { getHolidays, refreshFromBroker, scheduleDailyRefresh, isHolidayOrWeekend, isMarketOpenNow, getHolidaysHealth };
+  return { getHolidays, refreshFromBroker, scheduleDailyRefresh, isHolidayOrWeekend, isMarketOpenNow, getHolidaysHealth, manualSetHolidays };
 }
 
 module.exports = { createMarketMeta, STATIC_FALLBACK_HOLIDAYS };

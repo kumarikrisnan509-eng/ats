@@ -283,16 +283,23 @@ const PipelineFlow = () => {
     let cancelled = false;
     const load = async () => {
       try {
-        const [strats, scan, paper, summary, sweep] = await Promise.all([
+        const [strats, scan, paper, summary, sweep, riskCfg] = await Promise.all([
           window.fetchApi('/api/strategies').catch(() => null),
           window.fetchApi('/api/scanner/history?limit=300').catch(() => null),
           window.fetchApi('/api/paper').catch(() => null),
           window.fetchApi('/api/summary').catch(() => null),
           window.fetchApi('/api/sweep').catch(() => null),
+          window.fetchApi('/api/me/risk-config').catch(() => null),
         ]);
         if (cancelled) return;
-        const stratCount = strats && Array.isArray(strats.strategies) ? strats.strategies.length
-                        : strats && strats.ok && Array.isArray(strats.rows) ? strats.rows.length : null;
+        // T-505 (P2 #14): two numbers now. stratRegistry = full catalog from /api/strategies
+        // (was misleadingly called "active"); stratEnabled = user's risk-config.activeStrategies.
+        const stratRegistry = strats && Array.isArray(strats.strategies) ? strats.strategies.length
+                           : strats && strats.ok && Array.isArray(strats.rows) ? strats.rows.length : null;
+        const stratEnabled  = riskCfg && riskCfg.ok && Array.isArray(riskCfg.activeStrategies)
+                              ? riskCfg.activeStrategies.length
+                              : null;
+        const stratCount = stratEnabled != null ? stratEnabled : stratRegistry;
         const startToday = (() => { const d = new Date(); d.setHours(0,0,0,0); return d.getTime(); })();
         const startWeek  = startToday - 6*24*3600*1000;
         const signalsToday = scan && scan.ok && Array.isArray(scan.rows)
@@ -300,7 +307,7 @@ const PipelineFlow = () => {
         const paperTradesWk = paper && paper.stats && paper.stats.tradeCount != null ? paper.stats.tradeCount : null;
         const livePositions = summary && summary.aggregates ? (summary.aggregates.positionsNetCount || 0) : null;
         const sweptMTD = sweep && sweep.stats ? (sweep.stats.totalSweptINR || 0) : null;
-        setPipe({ stratCount, signalsToday, paperTradesWk, livePositions, sweptMTD });
+        setPipe({ stratCount, stratEnabled, stratRegistry, signalsToday, paperTradesWk, livePositions, sweptMTD });
       } catch (_e) {}
     };
     load();
@@ -334,9 +341,14 @@ const PipelineFlow = () => {
     stage({
       id: "strategies",
       title: "Strategies",
+      // T-505 (P2 #14): "value" is enabled count (from risk-config.activeStrategies),
+      // "sub" shows the registry size as a denominator. Pre-fix the same number
+      // was showing in both, which made it look like all 22 were active.
       value: pipe && pipe.stratCount != null ? String(pipe.stratCount) : "—",
-      unit: "registered",
-      sub: pipe && pipe.stratCount != null ? "from /api/strategies" : "loading…",
+      unit: "enabled",
+      sub: pipe && pipe.stratEnabled != null && pipe.stratRegistry != null
+           ? `${pipe.stratEnabled} of ${pipe.stratRegistry} available`
+           : (pipe && pipe.stratCount != null ? "from /api/strategies" : "loading…"),
       color: "var(--info)",
       href: "#strategies",
       desc: "One strategy belongs to exactly one mode",
