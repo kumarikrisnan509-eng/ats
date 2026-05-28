@@ -793,13 +793,13 @@ const PaperScreen = () => {
                   }
                 } catch (_) { /* ignore — toast below still confirms success */ }
                 window.toast && window.toast({
-                  kind: 'ok',
+                  kind: 'up',
                   title: `Paper account reset to ₹${initialCapital.toLocaleString('en-IN')}`,
                   sub: 'Positions, closed trades, and realized P&L cleared.',
                 });
               } else {
                 window.toast && window.toast({
-                  kind: 'error',
+                  kind: 'down',
                   title: 'Reset failed',
                   sub: (r && (r.detail || r.reason)) || 'Backend did not confirm reset.',
                 });
@@ -808,7 +808,7 @@ const PaperScreen = () => {
               // fetchApi throws on non-2xx. Show the request id when available
               // so support can grep for it.
               if (window.toastError) window.toastError('Reset failed', e);
-              else window.toast && window.toast({ kind: 'error', title: 'Reset failed', sub: (e && (e.detail || e.reason || e.message)) || 'Unknown error' });
+              else window.toast && window.toast({ kind: 'down', title: 'Reset failed', sub: (e && (e.detail || e.reason || e.message)) || 'Unknown error' });
             }
           }}>
             <I.refresh size={14}/> Reset account

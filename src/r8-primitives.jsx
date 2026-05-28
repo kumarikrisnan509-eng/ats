@@ -21,12 +21,21 @@ const ToastHost = () => {
   }, []);
   const dismiss = (id) => setItems(prev => prev.filter(x => x.id !== id));
 
-  const kindStyle = (k) => ({
-    up:   { bg: "var(--up-soft)",   fg: "var(--up)",   icon: "✓" },
-    down: { bg: "var(--down-soft)", fg: "var(--down)", icon: "✕" },
-    warn: { bg: "var(--warn-soft)", fg: "oklch(45% 0.13 80)", icon: "!" },
-    info: { bg: "var(--info-soft)", fg: "var(--info)", icon: "i" },
-  })[k || "info"];
+  // T-541: defensive kindStyle — return info-style for ANY unknown kind
+  // instead of `undefined`, which used to crash the toast widget (and the
+  // whole React tree, since it's mounted at app root) when a caller passed
+  // a non-standard kind like 'ok' or 'error'. Also map common aliases.
+  const _kindAlias = { ok: 'up', success: 'up', error: 'down', fail: 'down', danger: 'down', neutral: 'info' };
+  const kindStyle = (k) => {
+    const key = _kindAlias[String(k||'info').toLowerCase()] || String(k||'info').toLowerCase();
+    const map = {
+      up:   { bg: "var(--up-soft)",   fg: "var(--up)",   icon: "✓" },
+      down: { bg: "var(--down-soft)", fg: "var(--down)", icon: "✕" },
+      warn: { bg: "var(--warn-soft)", fg: "oklch(45% 0.13 80)", icon: "!" },
+      info: { bg: "var(--info-soft)", fg: "var(--info)", icon: "i" },
+    };
+    return map[key] || map.info;
+  };
 
   return (
     <div style={{
