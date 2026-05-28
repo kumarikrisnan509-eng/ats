@@ -244,9 +244,13 @@ const SquareOffButton = () => {
           overflow: 'hidden',
           userSelect: 'none',
         }}
-        title="Hold 1.5s to preview square-off (flatten ALL open positions)"
+        title={holding ? 'Hold to confirm square-off (flatten ALL open positions)' : firing ? 'Square-off in flight…' : 'Square-off: hold 1.5s to flatten ALL open positions'}
+        aria-label="Square-off all positions"
       >
-        ⛔ {holding ? 'Hold…' : firing ? 'Firing…' : 'Square-off'}
+        {/* T-513: icon-only to fit the header. Earlier "⛔ Square-off" text was being
+            truncated to "Squa..." on standard viewports. Hold progress is communicated
+            by the gradient background fill (same UX as Kill). */}
+        {firing ? '⏳' : '⛔'}
       </button>
       {open && preview && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
