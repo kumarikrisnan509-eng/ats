@@ -254,7 +254,14 @@ const StrategiesScreen = () => {
         id: s.id || s.name,
         n:  s.name || s.id,                    // renderCard reads s.n
         name: s.name || s.id,
-        mode: 'live',
+        // T-493: was `mode: 'live'` which broke the grouped-by-mode view --
+        // MODE_IDS = ['intraday','swing','options','futures'] so byMode.filter
+        // never matched any of 22 strategies -> "No strategies match the
+        // current filter" while header still said "22 active".
+        // Now reads mode from backend (just added per-strategy mode field in
+        // deploy/backend/routes/strategies.js); falls back to 'intraday' if
+        // the backend payload is missing the field (older deploys).
+        mode: s.mode || 'intraday',
         stage: 'live',
         st: 'live',                            // filters + renderCard read s.st
         k:  s.description || s.name || '',     // renderCard reads s.k (kind/subtitle)

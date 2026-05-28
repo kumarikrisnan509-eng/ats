@@ -14,6 +14,7 @@
 const STRATEGIES = [
   {
     id: 'rsi_mean_revert',
+    mode: 'intraday',
     name: 'RSI mean reversion',
     description: 'Long-only: BUY when RSI(period) < entryRsi; SELL when RSI > exitRsi.',
     bias: 'mean-reverting markets, range-bound',
@@ -25,6 +26,7 @@ const STRATEGIES = [
   },
   {
     id: 'ema_cross',
+    mode: 'intraday',
     name: 'EMA cross',
     description: 'Long-only: BUY when close crosses above N-EMA; SELL when crosses below.',
     bias: 'trending markets',
@@ -34,6 +36,7 @@ const STRATEGIES = [
   },
   {
     id: 'macd_cross',
+    mode: 'intraday',
     name: 'MACD signal cross',
     description: 'Long-only: BUY when MACD(fast,slow) line crosses above signal line; SELL on opposite cross.',
     bias: 'trending markets, momentum',
@@ -45,6 +48,7 @@ const STRATEGIES = [
   },
   {
     id: 'bollinger',
+    mode: 'intraday',
     name: 'Bollinger band mean reversion',
     description: 'Long-only: BUY when close crosses below lower band (oversold); SELL when close crosses above middle band.',
     bias: 'mean-reverting markets, range-bound',
@@ -56,6 +60,7 @@ const STRATEGIES = [
   // ---------- Tier 16: 3 new TA strategies (toward the 22-layer goal) ----------
   {
     id: 'supertrend',
+    mode: 'intraday',
     name: 'Supertrend',
     description: 'Long-only: BUY on Supertrend flip up; SELL on flip down. Uses ATR-based upper/lower bands.',
     bias: 'trending markets',
@@ -66,6 +71,7 @@ const STRATEGIES = [
   },
   {
     id: 'adx_trend',
+    mode: 'swing',
     name: 'ADX trend filter',
     description: 'Long-only: BUY when ADX > threshold and +DI > -DI (strong uptrend); SELL on opposite. Skips trade when ADX < threshold.',
     bias: 'strongly trending markets',
@@ -76,6 +82,7 @@ const STRATEGIES = [
   },
   {
     id: 'donchian',
+    mode: 'intraday',
     name: 'Donchian breakout',
     description: 'Long-only: BUY when close breaks above N-period rolling high; SELL when close breaks below rolling low. Classic Turtle-trader rule.',
     bias: 'trending markets, breakout',
@@ -86,6 +93,7 @@ const STRATEGIES = [
   // ---------- Tier 17: 3 more TA strategies (10 total, building toward 22-layer goal) ----------
   {
     id: 'stochastic',
+    mode: 'intraday',
     name: 'Stochastic %K cross',
     description: 'Long-only: BUY when %K crosses above %D in oversold region; SELL when %K crosses below %D in overbought region.',
     bias: 'mean-reverting markets, oscillating',
@@ -99,6 +107,7 @@ const STRATEGIES = [
   },
   {
     id: 'williams_r',
+    mode: 'intraday',
     name: "Williams %R",
     description: 'Long-only: BUY when %R crosses up through oversold (-80 default); SELL when %R crosses down through overbought (-20).',
     bias: 'mean-reverting markets, oscillating',
@@ -110,6 +119,7 @@ const STRATEGIES = [
   },
   {
     id: 'heikin_ashi',
+    mode: 'intraday',
     name: 'Heikin-Ashi trend',
     description: 'Long-only: BUY after N consecutive bullish Heikin-Ashi candles; SELL after N consecutive bearish ones.',
     bias: 'trending markets, momentum',
@@ -120,6 +130,7 @@ const STRATEGIES = [
   // ---------- Tier 18: 4 more TA strategies (14 total) ----------
   {
     id: 'cci',
+    mode: 'intraday',
     name: 'Commodity Channel Index',
     description: 'Long-only: BUY when CCI crosses up through -threshold (oversold exit); SELL when CCI crosses down through +threshold.',
     bias: 'mean-reverting markets',
@@ -130,6 +141,7 @@ const STRATEGIES = [
   },
   {
     id: 'keltner',
+    mode: 'intraday',
     name: 'Keltner Channels',
     description: 'Long-only: BUY on close break above EMA + k*ATR; SELL on close break below EMA - k*ATR. Breakout strategy.',
     bias: 'trending markets, breakout',
@@ -140,6 +152,7 @@ const STRATEGIES = [
   },
   {
     id: 'obv',
+    mode: 'intraday',
     name: 'OBV divergence',
     description: 'Long-only: BUY on bullish OBV/price divergence (price lower-low + OBV higher-low); SELL on bearish divergence.',
     bias: 'turn-detection, mean-reverting',
@@ -149,6 +162,7 @@ const STRATEGIES = [
   },
   {
     id: 'psar',
+    mode: 'intraday',
     name: 'Parabolic SAR',
     description: 'Long-only: BUY on SAR flip from downtrend to uptrend; SELL on flip back. Trend-following stop-and-reverse.',
     bias: 'trending markets, stop-and-reverse',
@@ -160,6 +174,7 @@ const STRATEGIES = [
   // ---------- Tier 19: 4 more TA strategies (18 total) ----------
   {
     id: 'aroon',
+    mode: 'intraday',
     name: 'Aroon oscillator',
     description: 'Long-only: BUY when Aroon Up crosses above Aroon Down; SELL when crosses below. Trend-strength oscillator.',
     bias: 'trending markets, regime-change',
@@ -169,6 +184,7 @@ const STRATEGIES = [
   },
   {
     id: 'cmf',
+    mode: 'intraday',
     name: 'Chaikin Money Flow',
     description: 'Long-only: BUY when CMF crosses up through +threshold (accumulation); SELL when CMF crosses down through -threshold (distribution).',
     bias: 'volume-confirmation, trending',
@@ -179,6 +195,7 @@ const STRATEGIES = [
   },
   {
     id: 'atr_trail',
+    mode: 'swing',
     name: 'ATR trailing stop',
     description: 'Long-only: enter when close above EMA; exit when close drops below highest-high minus k*ATR trailing stop.',
     bias: 'trending markets, exit-discipline',
@@ -189,6 +206,7 @@ const STRATEGIES = [
   },
   {
     id: 'ichimoku',
+    mode: 'swing',
     name: 'Ichimoku Tenkan/Kijun cross',
     description: 'Long-only: BUY when Tenkan (9-period mid) crosses above Kijun (26-period mid); SELL on opposite cross. Simplified Ichimoku.',
     bias: 'trending markets, momentum',
@@ -200,6 +218,7 @@ const STRATEGIES = [
   // ---------- Tier 20: 4 final TA strategies (22 total -- spec target reached) ----------
   {
     id: 'vwap',
+    mode: 'intraday',
     name: 'VWAP cross (rolling)',
     description: 'Long-only: BUY when close crosses above N-period rolling VWAP; SELL on opposite. Volume-weighted trend filter.',
     bias: 'trending markets, volume-aware',
@@ -209,6 +228,7 @@ const STRATEGIES = [
   },
   {
     id: 'pivot',
+    mode: 'intraday',
     name: 'Pivot Points (R1/S1)',
     description: 'Long-only: BUY when close breaks above prior-day R1 pivot; SELL when close breaks below S1. Classic floor-trader rule.',
     bias: 'breakout markets',
@@ -216,6 +236,7 @@ const STRATEGIES = [
   },
   {
     id: 'mfi',
+    mode: 'intraday',
     name: 'Money Flow Index',
     description: 'Long-only: BUY when MFI crosses up through oversold; SELL when MFI crosses down through overbought. Volume-weighted RSI.',
     bias: 'mean-reverting markets, volume-aware',
@@ -227,6 +248,7 @@ const STRATEGIES = [
   },
   {
     id: 'trix',
+    mode: 'intraday',
     name: 'TRIX',
     description: 'Long-only: BUY when TRIX (triple-smoothed EMA momentum) crosses above its signal line; SELL on opposite. Noise-resistant momentum.',
     bias: 'trending markets, momentum',
