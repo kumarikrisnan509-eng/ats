@@ -295,7 +295,7 @@ const PerStrategyAutorunButton = ({ strategy, gated }) => {
         title={configs.length > 0 ? `${configs.length} config(s) for this strategy` : 'Configure auto-runner for this strategy'}
         onClick={() => setOpen(true)}
       >
-        <I.zap size={12}/> Auto-runner{configs.length > 0 ? ` (${configs.length})` : ''}
+        ⚡ Auto-runner{configs.length > 0 ? ` (${configs.length})` : ''}
       </button>
 
       {open && (
