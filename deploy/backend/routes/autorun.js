@@ -60,6 +60,37 @@ function mountAutorunRoutes(app, deps) {
     autorun.clearConfig();
     res.json({ ok: true, stats: autorun.stats() });
   }));
+
+  // T-511 (Phase 2): multi-config CRUD. Coexists with the single-config
+  // endpoints above -- PUT /api/autorun still replaces "the" config, while
+  // these endpoints manage the multi-config registry.
+
+  // GET /api/autorun/configs -- list all registered configs.
+  app.get('/api/autorun/configs', withAuth((_req, res) => {
+    const autorun = getAutorun();
+    if (!autorun) return res.status(503).json({ ok: false, reason: 'autorun_not_initialized' });
+    res.json({ ok: true, configs: autorun.listConfigs() });
+  }));
+
+  // POST /api/autorun/configs -- add a new config (doesn't clear others).
+  // Body: same shape as PUT /api/autorun. Returns { id, ...config }.
+  app.post('/api/autorun/configs', withAuth((req, res) => {
+    const autorun = getAutorun();
+    if (!autorun) return res.status(503).json({ ok: false, reason: 'autorun_not_initialized' });
+    try {
+      const out = autorun.addConfig(req.body || {});
+      res.json({ ok: true, config: out });
+    } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+  }));
+
+  // DELETE /api/autorun/configs/:id -- remove one by id (`${strategy}:${symbol}`).
+  app.delete('/api/autorun/configs/:id', withAuth((req, res) => {
+    const autorun = getAutorun();
+    if (!autorun) return res.status(503).json({ ok: false, reason: 'autorun_not_initialized' });
+    const removed = autorun.removeConfig(req.params.id);
+    if (!removed) return res.status(404).json({ ok: false, reason: 'not_found' });
+    res.json({ ok: true, removed: req.params.id });
+  }));
 }
 
 module.exports = { mountAutorunRoutes };

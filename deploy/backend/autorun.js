@@ -134,6 +134,23 @@ class AutoRunner {
     // a safety gate. Throttled to one Telegram notify per 60s per branch.
     this._degradedCounts = { regime: 0, economics: 0, runOnceThrows: 0 };
     this._degradedNotifyAt = { regime: 0, economics: 0, runOnceThrows: 0 };
+    // ---- T-511 (Phase 2): multi-config engine ----
+    // _configs is the registry of ALL configs (keyed by `${strategy}:${symbol}`).
+    // _config remains the legacy "primary" pointer (back-compat with single-
+    // config callers, tests, persistence). runOnceAll() context-switches into
+    // each enabled config before delegating to the unchanged runOnce().
+    this._configs           = new Map();
+    this._lastFiredKeys     = new Map();
+    this._tradesPerConfig   = new Map();
+    this._tradeDayPerConfig = new Map();
+  }
+
+  // T-511: stable id for a config. Keying by strategy+symbol means there can
+  // never be two configs for the same (strategy, symbol) pair -- enforces
+  // idempotent add/remove semantics.
+  _configId(cfg) {
+    if (!cfg || !cfg.strategy || !cfg.symbol) return null;
+    return `${cfg.strategy}:${cfg.symbol}`;
   }
 
   // T-503: combined audit + counter + throttled Telegram for a permissive-failure
@@ -185,6 +202,26 @@ class AutoRunner {
         this._config       = raw.config || null;
         this._history      = Array.isArray(raw.history) ? raw.history.slice(-HISTORY_MAX) : [];
         this._lastFiredKey = raw.lastFiredKey || null;
+        // T-511 (Phase 2): restore multi-config registry + per-config state.
+        if (raw.configs && typeof raw.configs === 'object') {
+          for (const [id, cfg] of Object.entries(raw.configs)) this._configs.set(id, cfg);
+        }
+        if (raw.lastFiredKeys && typeof raw.lastFiredKeys === 'object') {
+          for (const [id, key] of Object.entries(raw.lastFiredKeys)) this._lastFiredKeys.set(id, key);
+        }
+        if (raw.tradesPerConfig && typeof raw.tradesPerConfig === 'object') {
+          for (const [id, n] of Object.entries(raw.tradesPerConfig)) this._tradesPerConfig.set(id, Number(n) || 0);
+        }
+        if (raw.tradeDayPerConfig && typeof raw.tradeDayPerConfig === 'object') {
+          for (const [id, d] of Object.entries(raw.tradeDayPerConfig)) this._tradeDayPerConfig.set(id, String(d));
+        }
+        // One-shot migration: legacy persisted state had no `configs` field.
+        // Seed _configs from the singular _config so existing setups upgrade
+        // cleanly without an empty registry.
+        if (this._config && this._configs.size === 0) {
+          const id = this._configId(this._config);
+          if (id) this._configs.set(id, this._config);
+        }
         // T-359: restore the daily trade counter, but rollover if the stored
         // day != today (calendar-day boundary in IST).
         const today = _todayIST();
@@ -212,13 +249,19 @@ class AutoRunner {
         // restarting the backend, intentionally or otherwise).
         tradesToday: this._tradesToday,
         tradeCountDay: this._tradeCountDay,
+        // T-511 (Phase 2): multi-config registry + per-config state.
+        configs:           Object.fromEntries(this._configs),
+        lastFiredKeys:     Object.fromEntries(this._lastFiredKeys),
+        tradesPerConfig:   Object.fromEntries(this._tradesPerConfig),
+        tradeDayPerConfig: Object.fromEntries(this._tradeDayPerConfig),
         updatedAt: new Date().toISOString(),
       }, null, 2));
     } catch (e) { console.error('[autorun] persist failed:', e.message); }
   }
 
-  /** Validate + replace config. Restarts the timer if enabled changes. */
-  setConfig(cfg) {
+  // T-511 (Phase 2): extracted from setConfig so addConfig + setConfig
+  // share the same validation. Returns a fully-shaped config (no side effects).
+  _validateConfig(cfg) {
     if (!cfg || typeof cfg !== 'object') throw new Error('config required');
     const out = {
       enabled:            !!cfg.enabled,
@@ -239,12 +282,60 @@ class AutoRunner {
     if (!out.symbol)   throw new Error('symbol required');
     const valid = ['rsi_mean_revert','ema_cross','macd_cross','bollinger'];
     if (!valid.includes(out.strategy)) throw new Error(`strategy must be one of: ${valid.join(', ')}`);
+    return out;
+  }
 
+  /** Validate + replace config. Restarts the timer if enabled changes. */
+  setConfig(cfg) {
+    const out = this._validateConfig(cfg);
     this._config = out;
+    // T-511 (Phase 2): single-config setConfig REPLACES the entire registry
+    // (matches the existing "PUT /api/autorun = THE config" semantics).
+    // Use addConfig() / removeConfig() for multi-config CRUD.
+    this._configs.clear();
+    this._lastFiredKeys.clear();
+    this._tradesPerConfig.clear();
+    this._tradeDayPerConfig.clear();
+    const id = this._configId(out);
+    if (id) this._configs.set(id, out);
     this._persist();
     this._restartTimer();
     this.audit('autorun.config.set', { ...out, params: out.params });
     return out;
+  }
+
+  // T-511: add a config without disturbing others. Returns validated config + id.
+  addConfig(cfg) {
+    const out = this._validateConfig(cfg);
+    const id = this._configId(out);
+    if (!id) throw new Error('config needs strategy and symbol');
+    this._configs.set(id, out);
+    if (!this._config) this._config = out;
+    this._persist();
+    this._restartTimer();
+    this.audit('autorun.config.added', { id, ...out });
+    return Object.assign({ id }, out);
+  }
+
+  // T-511: remove by id. Returns true if existed.
+  removeConfig(id) {
+    if (!this._configs.has(id)) return false;
+    this._configs.delete(id);
+    this._lastFiredKeys.delete(id);
+    this._tradesPerConfig.delete(id);
+    this._tradeDayPerConfig.delete(id);
+    const primaryId = this._config ? this._configId(this._config) : null;
+    if (primaryId === id) {
+      this._config = Array.from(this._configs.values()).find(c => c.enabled) || null;
+    }
+    this._persist();
+    this._restartTimer();
+    this.audit('autorun.config.removed', { id });
+    return true;
+  }
+
+  listConfigs() {
+    return Array.from(this._configs.entries()).map(([id, cfg]) => ({ id, ...cfg }));
   }
 
   clearConfig() {
@@ -260,11 +351,23 @@ class AutoRunner {
 
   _restartTimer() {
     this._stopTimer();
-    if (!this._config || !this._config.enabled) return;
-    const ms = Math.max(MIN_INTERVAL_MS, this._config.intervalMinutes * 60 * 1000);
+    // T-511 (Phase 2): use the MIN intervalMinutes across all enabled configs
+    // so every config gets at least its requested cadence. With a single config
+    // this equals the legacy behaviour.
+    const enabledFromRegistry = Array.from(this._configs.values()).filter(c => c && c.enabled);
+    const hasLegacySingle = !!(this._config && this._config.enabled);
+    if (!enabledFromRegistry.length && !hasLegacySingle) return;
+    const minInterval = enabledFromRegistry.length
+      ? Math.min(...enabledFromRegistry.map(c => Number(c.intervalMinutes) || DEFAULT_INTERVAL_MIN))
+      : this._config.intervalMinutes;
+    const ms = Math.max(MIN_INTERVAL_MS, minInterval * 60 * 1000);
     this._timer = setInterval(() => {
-      this.runOnce({ source: 'timer' })
-        .then((r) => this.audit('autorun.tick', { result: r.result, signal: r.signal, symbol: r.symbol }))
+      this.runOnceAll({ source: 'timer' })
+        .then((results) => {
+          for (const r of (Array.isArray(results) ? results : [results])) {
+            this.audit('autorun.tick', { configId: r.configId, result: r.result, signal: r.signal, symbol: r.symbol });
+          }
+        })
         .catch((e) => this.audit('autorun.tick.error', { msg: e.message }));
     }, ms);
     this._timer.unref();
@@ -772,6 +875,40 @@ class AutoRunner {
   }
 
   /** Start the timer if config is loaded + enabled. Call at boot after load(). */
+  // T-511 (Phase 2): execute every enabled registered config in series.
+  // Context-switches `this._config` + per-config dedupe/counter scalars before
+  // delegating to the unchanged runOnce() then restores caller context.
+  // Sequential, in registry order; per-config intervals are future work.
+  async runOnceAll({ source } = {}) {
+    const enabled = Array.from(this._configs.entries()).filter(([_, c]) => c && c.enabled);
+    if (!enabled.length) {
+      return [await this.runOnce({ source })];
+    }
+    const results = [];
+    for (const [id, cfg] of enabled) {
+      const prevConfig        = this._config;
+      const prevLastFiredKey  = this._lastFiredKey;
+      const prevTradesToday   = this._tradesToday;
+      const prevTradeCountDay = this._tradeCountDay;
+      this._config        = cfg;
+      this._lastFiredKey  = this._lastFiredKeys.get(id) || null;
+      this._tradesToday   = this._tradesPerConfig.get(id) || 0;
+      this._tradeCountDay = this._tradeDayPerConfig.get(id) || _todayIST();
+      let r;
+      try { r = await this.runOnce({ source }); }
+      catch (e) { r = { result: 'error', error: e.message }; }
+      this._lastFiredKeys.set(id, this._lastFiredKey);
+      this._tradesPerConfig.set(id, this._tradesToday);
+      this._tradeDayPerConfig.set(id, this._tradeCountDay);
+      this._config        = prevConfig;
+      this._lastFiredKey  = prevLastFiredKey;
+      this._tradesToday   = prevTradesToday;
+      this._tradeCountDay = prevTradeCountDay;
+      if (r) results.push(Object.assign({ configId: id }, r));
+    }
+    return results;
+  }
+
   start() { this._restartTimer(); }
   stop()  { this._stopTimer(); }
 }
