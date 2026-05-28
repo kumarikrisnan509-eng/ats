@@ -512,6 +512,19 @@ async function init() {
 // Tier 49 + 50: SQLite-backed user accounts.
   try {
     db = openDb();
+    // T-522 hotfix v4: paper.load() runs at line ~417 BEFORE db is opened
+    // here, so the JSON->DB migration never reaches the DB write step.
+    // Force it now: paper._ensureDb() lazily resolves db via the getter
+    // we wired in T-522 v2, then _persist() commits the in-memory state to
+    // the paper_singleton_state SQLite row. After this, every subsequent
+    // load/persist is DB-backed. This is the one-shot that completes the
+    // streamline.
+    try {
+      if (paper && typeof paper._ensureDb === 'function') {
+        const ok = paper._ensureDb();
+        if (ok) { paper._persist(); console.log('[paper] T-522: state persisted to DB post-init'); }
+      }
+    } catch (e) { console.error('[paper] T-522 post-init persist failed:', e.message); }
     auth = createUsers({ db, emailAlerts: null, audit, secureCookie: ENV_NAME === 'prod' });
     console.log(`db: ${db.users.count()} users registered`);
 
