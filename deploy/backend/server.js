@@ -422,6 +422,9 @@ async function init() {
     getMarketMeta: () => _marketMeta,
     // T-497: strategy -> mode lookup so autorun gates on user_risk_config.activeModes.
     getStrategyMode: _getStrategyMode,
+    // T-502: route paper vs live for strategies in liveEnabledStrategies. The
+    // live path runs payload through preTradeCheck.check() (12-gate stack).
+    preTradeCheck: { check: (args) => preTradeCheck ? preTradeCheck.check(args) : { ok: false, reason: 'preTradeCheck_not_initialized' } },
     // T-298b: SHADOW-only options scanner. Passed by reference but unused
     // until OPTIONS_AUTORUN_ENABLED=true at scan() call time. autorun's
     // shadow-runner is fire-and-forget after the existing 8-gate chain.

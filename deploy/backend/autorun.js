@@ -72,6 +72,9 @@ class AutoRunner {
                 // T-497: per-strategy mode lookup (strategy id -> 'intraday'|'swing'|'options'|'futures').
                 // Optional -- if absent, the mode gate is a no-op and engine behaves as pre-T-497.
                 getStrategyMode,
+                // T-502: pre-trade pipeline (12-gate stack) for the live order path.
+                // Optional -- if absent, autorun behaves as pre-T-502 (paper-only).
+                preTradeCheck,
                 getOptionsScanner, getHoldings, optionsUnderlyings }) {
     if (!broker)        throw new Error('broker required');
     if (!paper)         throw new Error('paper required');
@@ -103,6 +106,12 @@ class AutoRunner {
     // configured (activeModes !== {}), the strategy's mode must be enabled.
     // Empty activeModes ({}) preserves legacy behaviour -- gate is a no-op.
     this.getStrategyMode = (typeof getStrategyMode === 'function') ? getStrategyMode : null;
+    // T-502: pre-trade pipeline. When a strategy is route='live' we run the
+    // payload through preTradeCheck.check() before broker.placeOrder. If
+    // preTradeCheck is missing, autorun is FORCED to paper-only mode for
+    // every strategy -- defensive default that means upgrading without
+    // wiring preTrade can never accidentally fire live orders.
+    this.preTradeCheck = (preTradeCheck && typeof preTradeCheck.check === 'function') ? preTradeCheck : null;
     // T-298b: options scanner SHADOW MODE -- no orders fired from this path.
     // getOptionsScanner is a function returning the scanner instance (or null)
     // -- using a getter so server.js can construct autorun before scanner.
@@ -120,6 +129,25 @@ class AutoRunner {
     // ---- T-266: daily trade counter (resets on calendar-day rollover) ----
     this._tradesToday   = 0;
     this._tradeCountDay = _todayIST();
+  }
+
+  // T-502: paper-vs-live routing decision. A strategy fires LIVE only when
+  // BOTH locks are open: (a) tradingMode != paper, (b) strategy is in
+  // liveEnabledStrategies. Either lock alone keeps the strategy in paper.
+  // Defensive default: if preTradeCheck is missing OR riskConfig lookup
+  // fails, we return 'paper' so a misconfigured engine cannot accidentally
+  // fire real money.
+  _pickRoute(strategy) {
+    if (!this.preTradeCheck) return 'paper';   // defensive: never live without preTrade
+    if (!this.getRiskConfig) return 'paper';
+    let cfg = null;
+    try { cfg = this.getRiskConfig(this.userId); }
+    catch (e) { this.audit('autorun.route.cfgLookupFailed', { msg: e.message }); return 'paper'; }
+    if (!cfg) return 'paper';
+    if (cfg.tradingMode === 'paper' || !cfg.tradingMode) return 'paper';
+    if (!Array.isArray(cfg.liveEnabledStrategies)) return 'paper';
+    if (!cfg.liveEnabledStrategies.includes(strategy)) return 'paper';
+    return 'live';
   }
 
   load() {
@@ -521,28 +549,56 @@ class AutoRunner {
               run.result = 'deduped';
               run.dedupeKey = key;
             } else {
-              // Fire paper order
+              // T-502: route paper vs live. Default is paper unless the
+              // strategy is in liveEnabledStrategies AND tradingMode != paper
+              // AND preTradeCheck is wired -- three locks before live.
+              const route = this._pickRoute(this._config.strategy);
+              run.route = route;
+              const payload = {
+                symbol:   this._config.symbol,
+                side:     lastSig,
+                qty:      effectiveQty,
+                type:     'MARKET',
+                strategy: this._config.strategy,
+              };
               try {
-                const order = this.paper.placeOrder({
-                  symbol:   this._config.symbol,
-                  side:     lastSig,
-                  qty:      effectiveQty,
-                  type:     'MARKET',
-                  strategy: this._config.strategy,
-                });
-                run.result   = 'placed';
-                run.orderId  = order.id;
-                run.firedQty = effectiveQty;
-                this._lastFiredKey = key;
-                this._tradesToday += 1;
-                this.audit('autorun.order.placed', { orderId: order.id, ...run });
-                // T-268: Telegram trade receipt
-                if (this.notify && this.notify.notifyOrderPlaced) {
-                  this.notify.notifyOrderPlaced(order).catch(() => {});
+                if (route === 'live') {
+                  // Run the 12-gate preTrade stack (kill switch / live trading
+                  // flag / mode / leverage / sector / market-hours / etc.)
+                  // before touching the broker.
+                  const pt = this.preTradeCheck.check({ userId: this.userId, payload });
+                  if (!pt.ok) {
+                    run.result    = 'skipped_preTrade';
+                    run.preTrade  = { reason: pt.reason, message: pt.message };
+                    this.audit('autorun.order.preTradeBlocked', { strategy: this._config.strategy, payload, preTrade: pt });
+                  } else {
+                    const liveOrder = await this.broker.placeOrder(Object.assign({}, payload, { orderType: 'MARKET' }));
+                    run.result   = 'placed';
+                    run.orderId  = (liveOrder && (liveOrder.order_id || liveOrder.orderId || liveOrder.id)) || null;
+                    run.firedQty = effectiveQty;
+                    this._lastFiredKey = key;
+                    this._tradesToday += 1;
+                    this.audit('autorun.order.placed.LIVE', { orderId: run.orderId, ...run });
+                    if (this.notify && this.notify.notifyOrderPlaced) {
+                      this.notify.notifyOrderPlaced(Object.assign({}, payload, { id: run.orderId, live: true })).catch(() => {});
+                    }
+                  }
+                } else {
+                  // Paper path -- existing behaviour.
+                  const order = this.paper.placeOrder(payload);
+                  run.result   = 'placed';
+                  run.orderId  = order.id;
+                  run.firedQty = effectiveQty;
+                  this._lastFiredKey = key;
+                  this._tradesToday += 1;
+                  this.audit('autorun.order.placed', { orderId: order.id, ...run });
+                  if (this.notify && this.notify.notifyOrderPlaced) {
+                    this.notify.notifyOrderPlaced(order).catch(() => {});
+                  }
                 }
               } catch (e) {
                 run.result = 'error';
-                run.error  = `placeOrder failed: ${e.message}`;
+                run.error  = `placeOrder (${route}) failed: ${e.message}`;
               }
             }
           }
