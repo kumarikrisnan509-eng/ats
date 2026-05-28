@@ -129,7 +129,34 @@ class AutoRunner {
     // ---- T-266: daily trade counter (resets on calendar-day rollover) ----
     this._tradesToday   = 0;
     this._tradeCountDay = _todayIST();
+    // T-503: silent-degradation counters surfaced on /api/health + tracked so
+    // operator sees when a "permissive on failure" branch silently disables
+    // a safety gate. Throttled to one Telegram notify per 60s per branch.
+    this._degradedCounts = { regime: 0, economics: 0, runOnceThrows: 0 };
+    this._degradedNotifyAt = { regime: 0, economics: 0, runOnceThrows: 0 };
   }
+
+  // T-503: combined audit + counter + throttled Telegram for a permissive-failure
+  // branch. Called from any try/catch inside runOnce where the catch deliberately
+  // lets the trade through despite the gate failing.
+  _gateDegraded(branch, error) {
+    try {
+      if (this._degradedCounts[branch] != null) this._degradedCounts[branch]++;
+      this.audit('autorun.gate.degraded', { branch, msg: error && error.message, count: this._degradedCounts[branch] });
+      const now = Date.now();
+      if (this.notify && typeof this.notify.notify === 'function'
+          && (now - (this._degradedNotifyAt[branch] || 0)) > 60_000) {
+        this._degradedNotifyAt[branch] = now;
+        this.notify.notify({
+          title: '⚠️ ATS — safety gate degraded',
+          body: `autorun.${branch} failed and let the trade through (count today: ${this._degradedCounts[branch]}). ${error ? error.message : ''}`,
+        }).catch(() => {});
+      }
+    } catch { /* never let telemetry crash the engine */ }
+  }
+
+  // T-503: snapshot for /api/health.
+  getDegradedSnapshot() { return Object.assign({}, this._degradedCounts); }
 
   // T-502: paper-vs-live routing decision. A strategy fires LIVE only when
   // BOTH locks are open: (a) tradingMode != paper, (b) strategy is in
@@ -402,8 +429,10 @@ class AutoRunner {
             } catch (e) {
               // Permissive on failure: log but let the trade proceed via the
               // remaining gates. The other risk caps (daily cap, economics,
-              // window) still protect us.
+              // window) still protect us. T-503: also fire degraded-counter
+              // + throttled Telegram so this can't stay silently broken.
               run.regimeError = e.message;
+              this._gateDegraded('regime', e);
             }
           }
 
@@ -455,6 +484,7 @@ class AutoRunner {
             } catch (e) {
               // economics check failed -- log but don't block the signal
               run.economicsError = e.message;
+              this._gateDegraded('economics', e);
             }
           }
 
@@ -607,6 +637,10 @@ class AutoRunner {
     } catch (e) {
       run.result = 'error';
       run.error  = e.message;
+      // T-503: outer throws used to be silent (only on the .placed path did
+      // notify fire). Now surface via the degraded-counter so a stuck engine
+      // is visible in /api/health and Telegram.
+      this._gateDegraded('runOnceThrows', e);
     } finally {
       this._inflight = false;
       run.durationMs = Date.now() - t0;

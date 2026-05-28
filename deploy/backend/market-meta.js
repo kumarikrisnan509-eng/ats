@@ -7,13 +7,28 @@
 
 'use strict';
 
+// T-503: extended fallback covers fixed-date NSE holidays through 2028.
+// Movable holidays (Diwali, Holi, Eid, Muharram, etc.) only enter via the
+// daily kc.getHolidays() refresh -- they shift year to year and would
+// require a hand-curated table here. The /api/health cache-age surface
+// (T-503) lets operators see when refresh last succeeded so a degraded
+// fallback is visible rather than silent.
 const STATIC_FALLBACK_HOLIDAYS = [
-  // Minimal seed used only on cold-start before the first refresh succeeds.
-  // Once refreshFromBroker() runs once, this is overwritten by the cache.
+  // 2026
   { date: '2026-01-26', name: 'Republic Day' },
   { date: '2026-08-15', name: 'Independence Day' },
   { date: '2026-10-02', name: 'Gandhi Jayanti' },
   { date: '2026-12-25', name: 'Christmas' },
+  // 2027
+  { date: '2027-01-26', name: 'Republic Day' },
+  { date: '2027-08-15', name: 'Independence Day' },
+  { date: '2027-10-02', name: 'Gandhi Jayanti' },
+  { date: '2027-12-25', name: 'Christmas' },
+  // 2028
+  { date: '2028-01-26', name: 'Republic Day' },
+  { date: '2028-08-15', name: 'Independence Day' },
+  { date: '2028-10-02', name: 'Gandhi Jayanti' },
+  { date: '2028-12-25', name: 'Christmas' },
 ];
 
 function createMarketMeta({ db, broker }) {
@@ -116,7 +131,27 @@ function createMarketMeta({ db, broker }) {
     return { open: true, date: dateISO, time_ist: hhmm };
   }
 
-  return { getHolidays, refreshFromBroker, scheduleDailyRefresh, isHolidayOrWeekend, isMarketOpenNow };
+  // T-503: cache freshness for /api/health observability. Lets the operator
+  // see whether the holiday gate is running off fresh broker data or a stale
+  // (or static_fallback) cache that may miss movable holidays like Diwali.
+  function getHolidaysHealth() {
+    const { holidays, fetchedAt, source } = getHolidays();
+    let cacheAgeDays = null;
+    if (fetchedAt) {
+      try { cacheAgeDays = Math.round((Date.now() - new Date(fetchedAt + 'Z').getTime()) / 86400000); }
+      catch { cacheAgeDays = null; }
+    }
+    return {
+      ok: source !== 'static_fallback',
+      source: source || 'static_fallback',
+      count: Array.isArray(holidays) ? holidays.length : 0,
+      fetchedAt: fetchedAt || null,
+      cacheAgeDays,
+      stale: cacheAgeDays != null && cacheAgeDays > 7,
+    };
+  }
+
+  return { getHolidays, refreshFromBroker, scheduleDailyRefresh, isHolidayOrWeekend, isMarketOpenNow, getHolidaysHealth };
 }
 
 module.exports = { createMarketMeta, STATIC_FALLBACK_HOLIDAYS };

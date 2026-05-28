@@ -25,6 +25,9 @@ const fs = require('fs');
 
 function mountBootWiringRoutes(app, deps) {
   const {
+    // T-503: holiday-cache health + degraded-gate registry for /api/health.
+    getMarketMeta,
+    getDegradedRegistry,
     // config consts (passed by value -- never reassigned)
     ENV_NAME,
     KILL_SWITCH,
@@ -445,6 +448,24 @@ function mountBootWiringRoutes(app, deps) {
         lastError: audit.lastError,
         lastAt: audit.lastAt,
       },
+      // T-503: holiday-cache freshness so operator sees when the gate is
+      // running off stale data (movable holidays like Diwali would be missed).
+      holidays: (() => {
+        try {
+          const mm = (typeof getMarketMeta === 'function') ? getMarketMeta() : null;
+          return (mm && typeof mm.getHolidaysHealth === 'function') ? mm.getHolidaysHealth() : { ok: false, source: 'unavailable' };
+        } catch (e) { return { ok: false, error: e.message }; }
+      })(),
+      // T-503: silent-degradation counters. autorun + preTrade write to these
+      // whenever a "permissive on failure" branch fires (regime/economics/
+      // aggregator outage where the gate becomes a no-op rather than blocking).
+      // A non-zero count means a safety gate has been disabled silently.
+      degraded: (() => {
+        try {
+          const dr = (typeof getDegradedRegistry === 'function') ? getDegradedRegistry() : null;
+          return dr ? dr.snapshot() : { autorun_regime: 0, autorun_economics: 0, autorun_runOnceThrows: 0, preTrade_aggregator: 0 };
+        } catch { return null; }
+      })(),
     });
   });
 
@@ -456,6 +477,11 @@ function mountBootWiringRoutes(app, deps) {
   // answer "which commit is actually running?" against any environment.
   app.get('/api/version', (_req, res) => {
     const sha = process.env.ATS_GIT_SHA || 'unknown';
+    let holidaysFetchedAt = null;
+    try {
+      const mm = (typeof getMarketMeta === 'function') ? getMarketMeta() : null;
+      if (mm && typeof mm.getHolidaysHealth === 'function') holidaysFetchedAt = mm.getHolidaysHealth().fetchedAt;
+    } catch { /* permissive */ }
     res.json({
       ok: true,
       sha,
@@ -463,6 +489,9 @@ function mountBootWiringRoutes(app, deps) {
       buildTime: process.env.ATS_BUILD_TIME || 'unknown',
       node: process.version,
       startedAt: new Date(Date.now() - Math.floor(process.uptime() * 1000)).toISOString(),
+      // T-503: tied-in drift check for the holiday cache. If fetchedAt is null
+      // the deployed gate is on the static fallback (movable holidays missed).
+      holidaysFetchedAt,
     });
   });
 }

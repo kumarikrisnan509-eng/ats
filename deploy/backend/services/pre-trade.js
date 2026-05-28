@@ -42,8 +42,30 @@ function createPreTradeCheck({
   // T-496: getter for the marketMeta singleton (avoids circular boot
   // ordering — server.js can construct preTradeCheck before marketMeta).
   getMarketMeta,
+  // T-503: optional Telegram notify for permissive-failure branches.
+  // If absent, degraded events are audit-only (pre-T-503 behaviour).
+  notify,
   audit,
 }) {
+  // T-503: silent-degradation counters surfaced via getDegradedSnapshot().
+  // Each entry counts "we let the trade through despite gate X failing".
+  const _degradedCounts = { aggregator: 0, sectorCheck: 0, marketMeta: 0 };
+  const _degradedNotifyAt = { aggregator: 0, sectorCheck: 0, marketMeta: 0 };
+  function _gateDegraded(branch, error) {
+    try {
+      if (_degradedCounts[branch] != null) _degradedCounts[branch]++;
+      _audit('preTrade.gate.degraded', { branch, msg: error && error.message, count: _degradedCounts[branch] });
+      const now = Date.now();
+      if (notify && typeof notify.notify === 'function'
+          && (now - (_degradedNotifyAt[branch] || 0)) > 60_000) {
+        _degradedNotifyAt[branch] = now;
+        notify.notify({
+          title: '⚠️ ATS — preTrade gate degraded',
+          body: `preTrade.${branch} failed and let the order through (count today: ${_degradedCounts[branch]}). ${error ? error.message : ''}`,
+        }).catch(() => {});
+      }
+    } catch { /* never let telemetry crash the gate */ }
+  }
   const _audit = audit || (() => {});
 
   /**
@@ -93,6 +115,7 @@ function createPreTradeCheck({
       }
     } catch (e) {
       _audit('preTrade.marketMeta.failed', { userId, msg: e.message });
+      _gateDegraded('marketMeta', e);
     }
 
     // ----------- GATE 1: KILL_SWITCH env -----------
@@ -157,6 +180,7 @@ function createPreTradeCheck({
       } catch (e) {
         // Permissive: aggregator failure must not block trading.
         _audit('preTrade.aggregateLookup.failed', { userId, msg: e.message });
+        _gateDegraded('aggregator', e);
       }
     }
 
@@ -190,6 +214,7 @@ function createPreTradeCheck({
         }
       } catch (e) {
         _audit('preTrade.sectorCheck.failed', { userId, msg: e.message });
+        _gateDegraded('sectorCheck', e);
       }
     }
 
@@ -197,7 +222,9 @@ function createPreTradeCheck({
     return { ok: true };
   }
 
-  return { check };
+  // T-503: snapshot of permissive-failure counts for /api/health.
+  function getDegradedSnapshot() { return Object.assign({}, _degradedCounts); }
+  return { check, getDegradedSnapshot };
 }
 
 module.exports = { createPreTradeCheck };

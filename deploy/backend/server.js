@@ -665,6 +665,9 @@ async function init() {
       // T-496: market-hours/holiday gate. Getter form so preTrade can be
       // constructed before _marketMeta is initialised lower in init().
       getMarketMeta: () => _marketMeta,
+      // T-503: notify wired so permissive-failure branches fire throttled
+      // Telegram instead of staying silent.
+      notify: _notifyModule,
       audit,
     });
     console.log('[server] pre-trade pipeline armed (3 legacy + 2 new gates)');
@@ -1482,6 +1485,33 @@ mountBootWiringRoutes(app, {
   ENV_NAME, KILL_SWITCH, LIVE_TRADING, SESSION_SECRET,
   MAX_DAILY_LOSS_INR, MAX_ORDERS_PER_MIN, MAX_POSITION_SIZE_INR, MAX_AGGREGATE_EXPOSURE,
   MAX_WS_CLIENTS, DEFAULT_SYMBOLS, AUDIT_LOG,
+  // T-503: holiday-cache health + permissive-failure registry for /api/health
+  // and /api/version. Single aggregator -- callers see one degraded snapshot
+  // covering both autorun and pre-trade rather than having to poll each.
+  getMarketMeta:      () => _marketMeta,
+  getDegradedRegistry: () => ({
+    snapshot: () => {
+      const out = { autorun_regime: 0, autorun_economics: 0, autorun_runOnceThrows: 0,
+                    preTrade_aggregator: 0, preTrade_sectorCheck: 0, preTrade_marketMeta: 0 };
+      try {
+        if (autorun && typeof autorun.getDegradedSnapshot === 'function') {
+          const a = autorun.getDegradedSnapshot();
+          out.autorun_regime         = a.regime || 0;
+          out.autorun_economics      = a.economics || 0;
+          out.autorun_runOnceThrows  = a.runOnceThrows || 0;
+        }
+      } catch { /* permissive */ }
+      try {
+        if (preTradeCheck && typeof preTradeCheck.getDegradedSnapshot === 'function') {
+          const p = preTradeCheck.getDegradedSnapshot();
+          out.preTrade_aggregator   = p.aggregator || 0;
+          out.preTrade_sectorCheck  = p.sectorCheck || 0;
+          out.preTrade_marketMeta   = p.marketMeta || 0;
+        }
+      } catch { /* permissive */ }
+      return out;
+    },
+  }),
   getDb:              () => db,
   getVault:           () => vault,
   getBroker:          () => broker,
