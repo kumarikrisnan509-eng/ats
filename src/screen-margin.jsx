@@ -62,9 +62,9 @@ const MarginScreen = () => {
   return (
     <>
       <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 12, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>
+        <h2 style={{ fontSize: 12, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600, margin: 0 }}>
           Execute · Margin calculator
-        </div>
+        </h2>
         <div style={{ fontSize: 13, color: "var(--text-2)", marginTop: 4, maxWidth: 720 }}>
           SPAN + Exposure breakdown for F&O positions. Margin benefit applied for hedged portfolios (SEBI Peak Margin rules). Estimates only -- final margin is set by Zerodha at order placement. (T-425: previous header claimed values match the Zerodha API; this is not yet wired.)
         </div>

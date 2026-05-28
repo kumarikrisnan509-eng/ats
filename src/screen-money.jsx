@@ -237,7 +237,7 @@ const MoneyScreen = () => {
       {/* heading */}
       <div>
         <div style={{ fontSize: 12, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.6 }}>Wealth loop</div>
-        <div style={{ fontSize: 22, fontWeight: 600, marginTop: 2 }}>Money: profits → long-term</div>
+        <h2 style={{ fontSize: 22, fontWeight: 600, marginTop: 2, marginBottom: 0 }}>Money: profits → long-term</h2>
         <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 4 }}>
           Earned by AI signals + paper/live trades. Excess profit auto-sweeps into your long-term plan (ETF / SIP / Smallcase).
         </div>

@@ -116,9 +116,9 @@ const ReconScreen = () => {
       <_ReconLoadErrPill err={loadErr} />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
         <div>
-          <div style={{ fontSize: 12, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600 }}>
+          <h2 style={{ fontSize: 12, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600, margin: 0 }}>
             Operations · Broker reconciliation
-          </div>
+          </h2>
           <div style={{ fontSize: 13, color: "var(--text-2)", marginTop: 4, maxWidth: 720 }}>
             Daily match between our internal trade log and Zerodha contract notes. Runs automatically at 6 PM IST after market close. Mismatches must be resolved before books are closed for the day.
           </div>

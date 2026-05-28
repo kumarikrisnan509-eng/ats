@@ -354,7 +354,7 @@ const ComplianceScreen = () => {
     <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div>
         <div style={{ fontSize: 12, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.6 }}>System</div>
-        <div style={{ fontSize: 22, fontWeight: 600, marginTop: 2 }}>Compliance & SEBI readiness</div>
+        <h2 style={{ fontSize: 22, fontWeight: 600, marginTop: 2, marginBottom: 0 }}>Compliance & SEBI readiness</h2>
         <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 4 }}>
           Live state of every gate that gets us regulatory-OK for live trading. {greenCount} / {checks.length} green.
         </div>

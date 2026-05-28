@@ -90,7 +90,7 @@ const StpSwpScreen = () => {
     <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div>
         <div style={{ fontSize: 12, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.6 }}>Long-term plans</div>
-        <div style={{ fontSize: 22, fontWeight: 600, marginTop: 2 }}>STP / SWP</div>
+        <h2 style={{ fontSize: 22, fontWeight: 600, marginTop: 2, marginBottom: 0 }}>STP / SWP</h2>
         <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 4 }}>
           Scheduled investments (SIPs) and inflation-adjusted withdrawal simulation (SWP) for retirement planning.
         </div>
