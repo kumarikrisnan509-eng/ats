@@ -175,7 +175,7 @@ const AIReviewScreen = () => {
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <select className="input" value={month} onChange={e => setMonth(e.target.value)} style={{ width: 160 }}>
+          <select className="input" value={month || ''} onChange={e => setMonth(e.target.value)} style={{ width: 160 }}>
             {months.map(m => <option key={m.v} value={m.v}>{m.label}</option>)}
           </select>
           <button className="btn btn-ghost" disabled title="PDF export is not available yet">Export PDF</button>

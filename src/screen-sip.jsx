@@ -19,7 +19,7 @@ const _inrSip = (n) => {
   if (a >= 1e3) return `${sign}₹${(a/1e3).toFixed(1)}K`;
   return `${sign}₹${a.toFixed(0)}`;
 };
-const _fmtDateSip = (s) => { try { return new Date(s).toLocaleString('en-IN', { hour12: false }); } catch { return s || '-'; } };
+const _fmtDateSip = (s) => { if (!s) return '\u2014'; const d = new Date(s); if (isNaN(d.getTime())) return '\u2014'; try { return d.toLocaleString('en-IN', { hour12: false }); } catch { return '\u2014'; } };
 
 const _statusColor = (s) => ({ placed: '#15803d', failed: '#b91c1c', skipped: '#94a3b8' })[s] || '#94a3b8';
 
