@@ -87,14 +87,32 @@ class WormAudit {
 
   /** Read the existing file (if any), advance _lastSeq + _lastHash, validate continuity. */
   init() {
-    try { fs.mkdirSync(path.dirname(this.path), { recursive: true }); } catch (e) { console.warn('[worm-audit] swallowed:', e && e.message); }
+    this._sealed = [];
+    return this._initFrom(this.path, 0);
+  }
 
-    if (!fs.existsSync(this.path)) {
+  /**
+   * T-557: init from a specific segment path. If the segment's chain is broken,
+   * PRESERVE it untouched and SEAL -- switch active writes to a deterministic
+   * `<path>.cont` continuation segment instead of re-appending overlapping seqs
+   * into the broken file. The old behaviour reset _lastSeq to the last-good seq
+   * and resumed appending into the SAME file, producing duplicate sequences, an
+   * ever-growing file, and a chain verify() reported broken forever. Sealing
+   * keeps the broken bytes on disk (for auditors) and resumes a verifiable chain.
+   * The deterministic `.cont` name makes this converge across restarts.
+   */
+  _initFrom(p, depth) {
+    this.path = p;
+    try { fs.mkdirSync(path.dirname(p), { recursive: true }); } catch (e) { console.warn('[worm-audit] swallowed:', e && e.message); }
+
+    if (!fs.existsSync(p)) {
+      this._lastHash = GENESIS_PREV;
+      this._lastSeq  = 0;
       this._initialized = true;
-      return { ok: true, fresh: true, count: 0 };
+      return { ok: true, fresh: true, count: 0, activePath: p, sealed: this._sealed };
     }
 
-    const lines = fs.readFileSync(this.path, 'utf8').split('\n').filter(Boolean);
+    const lines = fs.readFileSync(p, 'utf8').split('\n').filter(Boolean);
     let prev = GENESIS_PREV;
     let seq  = 0;
     let brokenAt = null;
@@ -113,14 +131,25 @@ class WormAudit {
       seq  = entry.seq;
     }
 
+    if (brokenAt !== null) {
+      // Seal the broken segment (left untouched on disk) and continue in a
+      // deterministic continuation file so we never re-append overlapping seqs.
+      this._sealed.push({ path: p, brokenAt, lastGoodSeq: seq, lastGoodHash: prev, count: lines.length });
+      if (depth < 8) {
+        return this._initFrom(p + '.cont', depth + 1);
+      }
+      // Pathological: too many broken continuation segments. Refuse to write
+      // (in-memory only) rather than risk an unbounded chain of .cont files.
+      this._lastHash = GENESIS_PREV;
+      this._lastSeq  = 0;
+      this._initialized = true;
+      return { ok: false, brokenAt, count: lines.length, activePath: p, sealed: this._sealed, gaveUp: true };
+    }
+
     this._lastHash = prev;
     this._lastSeq  = seq;
     this._initialized = true;
-
-    if (brokenAt !== null) {
-      return { ok: false, brokenAt, count: lines.length };
-    }
-    return { ok: true, fresh: false, count: lines.length };
+    return { ok: true, fresh: lines.length === 0, count: lines.length, activePath: p, sealed: this._sealed };
   }
 
   /** Append a single audit event. Throws if not initialized or write fails. */
@@ -128,6 +157,14 @@ class WormAudit {
     if (!this._initialized) throw new Error('WormAudit not initialized -- call init() first');
     if (typeof event !== 'string' || event.length === 0) throw new Error('event must be a non-empty string');
     if (data === undefined) data = {};
+    // T-557: normalize data through JSON BEFORE hashing so the hash is computed
+    // over the EXACT serialized form that gets written (and later re-parsed by
+    // verify()). Without this, a payload containing a Date / undefined / function
+    // hashes differently at append time (canonicalize sees the live object) than
+    // at verify time (which sees the round-tripped object) -> a permanent,
+    // self-inflicted hash-mismatch. The JSON round-trip makes them identical.
+    try { data = JSON.parse(JSON.stringify(data)); }
+    catch (_e) { data = { _unserializable: true }; }
 
     const seq = this._lastSeq + 1;
     const ts  = new Date().toISOString();

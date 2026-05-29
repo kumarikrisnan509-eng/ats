@@ -224,3 +224,54 @@ test('hashEntry: hash changes when ANY field changes', () => {
   assert.notEqual(hashEntry({ ...base, data: { x: 2 } }), h0);
   assert.notEqual(hashEntry({ ...base, prevHash: '0'.repeat(63) + '1' }), h0);
 });
+
+// ---- T-557 regression tests (round-trip hardening + seal-on-broken) ----
+test('T-557: append with Date/undefined/function in data still verifies', () => {
+  const p = tmpFile('roundtrip');
+  const w = new WormAudit({ path: p });
+  w.init();
+  w.append('weird', { when: new Date('2026-05-15T00:00:00.000Z'), u: undefined, fn: function () {}, n: 5, s: 'ok' });
+  w.append('plain', { x: 1 });
+  const v = w.verify();
+  assert.equal(v.ok, true);
+  assert.equal(v.totalEntries, 2);
+  fs.unlinkSync(p);
+});
+
+test('T-557: init on a broken chain seals + continues in .cont (broken file preserved)', () => {
+  const p = tmpFile('seal');
+  const cont = p + '.cont';
+  const w1 = new WormAudit({ path: p });
+  w1.init();
+  w1.append('a', { x: 1 });
+  w1.append('b', { x: 2 });
+  w1.append('c', { x: 3 });
+  // Corrupt entry 2's data on disk -> hash no longer matches -> broken at seq 2.
+  const lines = fs.readFileSync(p, 'utf8').split('\n').filter(Boolean);
+  const e2 = JSON.parse(lines[1]); e2.data = { x: 999 };
+  lines[1] = JSON.stringify(e2);
+  fs.writeFileSync(p, lines.join('\n') + '\n');
+  const brokenBytes = fs.readFileSync(p, 'utf8');
+
+  const w2 = new WormAudit({ path: p });
+  const r = w2.init();
+  assert.equal(r.ok, true);
+  assert.equal(r.activePath, cont);
+  assert.equal(r.sealed.length, 1);
+  assert.equal(r.sealed[0].brokenAt, 2);
+  assert.equal(fs.readFileSync(p, 'utf8'), brokenBytes); // primary preserved untouched
+  const a = w2.append('resume', { ok: true });
+  assert.equal(a.seq, 1);
+  assert.equal(w2.verify().ok, true);
+  assert.equal(w2.path, cont);
+
+  // Convergence: a fresh instance re-detects the break and resumes the SAME .cont
+  const w3 = new WormAudit({ path: p });
+  const r3 = w3.init();
+  assert.equal(r3.activePath, cont);
+  assert.equal(r3.ok, true);
+  assert.equal(r3.count, 1);
+
+  try { fs.unlinkSync(p); } catch (_) {}
+  try { fs.unlinkSync(cont); } catch (_) {}
+});

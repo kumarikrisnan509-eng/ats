@@ -342,6 +342,13 @@ async function init() {
   } else {
     console.log(`worm-audit: ${_wormInit.fresh ? 'fresh log' : 'resumed'} (count=${_wormInit.count})`);
   }
+  // T-557: if a prior chain segment was broken, init() sealed it (preserved on
+  // disk, untouched) and resumed on a fresh continuation segment. Record the
+  // seal into the ACTIVE (verifiable) chain so the break stays visible.
+  if (_wormInit.sealed && _wormInit.sealed.length) {
+    console.warn(`!! WORM sealed ${_wormInit.sealed.length} broken segment(s); active=${_wormInit.activePath}`);
+    try { audit('worm.chain.sealed', { sealed: _wormInit.sealed, activePath: _wormInit.activePath }); } catch (_e) {}
+  }
 
   broker = createBroker(process.env);
   await broker.start();
