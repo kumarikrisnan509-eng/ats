@@ -429,8 +429,28 @@ async function init() {
   pnl.load();
   pnl.start();   // initial snapshot + recurring every 6h
 
+  // T-536 step 3: autorun writes paper orders to the PER-USER db.paper
+  // (uid = ATS_AUTORUN_USER_ID) via paperAdapter instead of the legacy global
+  // singleton, so autorun paper trades surface in the unified Paper UI.
+  // Lazy getDb() (db is assigned after openDb()); broker LTP getter for the
+  // synchronous fill; uid pinned by env (falls back to 1).
+  const { createPaperAdapter } = require('./paper-adapter');
+  const autorunPaperAdapter = createPaperAdapter({
+    getDb: () => db,
+    uid: Number(process.env.ATS_AUTORUN_USER_ID) || 1,
+    getLtp: (sym) => {
+      try {
+        if (broker && broker._lastLtp && typeof broker._lastLtp.get === 'function') {
+          const v = broker._lastLtp.get(sym);
+          return (v && Number(v) > 0) ? Number(v) : null;
+        }
+      } catch (_) { /* ignore */ }
+      return null;
+    },
+    audit,
+  });
   autorun = new AutoRunner({
-    broker, paper, computeSignal, audit,
+    broker, paper: autorunPaperAdapter, computeSignal, audit,
     storePath: process.env.AUTORUN_PATH || '/var/lib/ats/tokens/_autorun.json',
     // T-263..T-267: risk-aware engine wiring. Engine reads operator's user_risk_config
     // via cachedGet (60s TTL) and runs all gates (golden window, daily cap, economics,

@@ -717,6 +717,9 @@ class AutoRunner {
                 qty:      effectiveQty,
                 type:     wantsBracket ? 'BRACKET' : 'MARKET',
                 strategy: this._config.strategy,
+                // T-536 step 3: bar close as the synchronous-fill reference price
+                // for the per-user paperAdapter (broker LTP still preferred when live).
+                refPrice: entryPx,
               };
               if (wantsBracket) {
                 paperPayload.price       = entryPx;
@@ -792,16 +795,26 @@ class AutoRunner {
                     }
                   }
                 } else {
-                  // Paper path -- T-508 may use BRACKET when SL/TP configured.
+                  // Paper path -- T-536 step 3: writes to per-user db.paper via
+                  // paperAdapter (synchronous fill). The adapter may return
+                  // status 'cancelled' (no price / insufficient cash / no
+                  // position to sell) -- treat that as a skip, not a fire.
                   const order = this.paper.placeOrder(paperPayload);
-                  run.result   = 'placed';
-                  run.orderId  = order.id;
-                  run.firedQty = effectiveQty;
-                  this._lastFiredKey = key;
-                  this._tradesToday += 1;
-                  this.audit('autorun.order.placed', { orderId: order.id, ...run });
-                  if (this.notify && this.notify.notifyOrderPlaced) {
-                    this.notify.notifyOrderPlaced(order).catch(() => {});
+                  if (order && /cancel|reject/i.test(String(order.status || ''))) {
+                    run.result      = 'skipped_paper_' + (order.reason || 'rejected');
+                    run.paperReject  = order.reason || 'rejected';
+                    run.orderId      = order.id || null;
+                    this.audit('autorun.order.paperRejected', { orderId: order.id, reason: run.paperReject, strategy: this._config.strategy, symbol: this._config.symbol });
+                  } else {
+                    run.result   = 'placed';
+                    run.orderId  = order.id;
+                    run.firedQty = effectiveQty;
+                    this._lastFiredKey = key;
+                    this._tradesToday += 1;
+                    this.audit('autorun.order.placed', { orderId: order.id, ...run });
+                    if (this.notify && this.notify.notifyOrderPlaced) {
+                      this.notify.notifyOrderPlaced(order).catch(() => {});
+                    }
                   }
                 }
               } catch (e) {
