@@ -458,7 +458,7 @@ async function init() {
     getRiskConfig:  (userId) => riskConfigService ? riskConfigService.cachedGet(userId) : null,
     tradeEconomics: _tradeEconomics,
     notify:         _notifyModule,
-    userId:         1,   // operator account; multi-user comes in Phase 2 (T-272+)
+    userId:         Number(process.env.ATS_AUTORUN_USER_ID) || 1,   // G3: gate user = paperAdapter write user (ATS_AUTORUN_USER_ID); was hardcoded 1, which made risk/preTrade gates evaluate the wrong user
     // T-282: regime-aware strategy gate. autorun consults the regime detector
     // (5-min cached) + strategy regime map on every signal evaluation. If the
     // current strategy is not eligible in the current regime, the trade is
