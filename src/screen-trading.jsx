@@ -233,6 +233,32 @@ const TradingScreen = () => {
     product, modeId: defaultMode,
   });
 
+  // P0 (PAGE-ELEMENT-AUDIT): the pre-trade simulator's Confirm now places a
+  // PAPER order (no real money). Real-money placement stays gated — see
+  // LIVE-ENABLEMENT-RUNBOOK.md. Uses the same per-user endpoint as the Paper screen.
+  const placePaperFromSim = async () => {
+    const o = /** @type {any} */ (simOrder);
+    if (!o || !o.symbol || !(o.qty > 0)) { setSimOrder(null); return; }
+    try {
+      const csrfResp = await window.fetchApi('/api/csrf-token');
+      const csrf = csrfResp && (csrfResp.csrfToken || csrfResp.token);
+      const r = await window.fetchApi('/api/me/paper/order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf || '' },
+        body: JSON.stringify({ symbol: o.symbol, side: o.side, qty: o.qty, strategy: 'manual' }),
+      });
+      if (r && (r.ok || r.orderId)) {
+        window.toast && window.toast({ kind: 'up', title: `Paper order placed \u00b7 ${o.side} ${o.qty} ${o.symbol}`, sub: `Simulated fill${r.fillPrice != null ? ' @ \u20b9' + Number(r.fillPrice).toFixed(2) : ''} \u2014 no real money. View it on the Paper screen.` });
+      } else {
+        window.toast && window.toast({ kind: 'down', title: 'Paper order rejected', sub: (r && (r.detail || r.reason)) || 'Could not place the paper order.' });
+      }
+    } catch (e) {
+      window.toast && window.toast({ kind: 'down', title: 'Paper order failed', sub: (e && e.message) || 'network error' });
+    } finally {
+      setSimOrder(null);
+    }
+  };
+
   return (
     <>
       <div className="page-header">
@@ -484,7 +510,7 @@ const TradingScreen = () => {
         open={!!simOrder}
         onClose={() => setSimOrder(null)}
         order={simOrder}
-        onConfirm={() => { /* would dispatch order to broker */ }}
+        onConfirm={placePaperFromSim}
         modesState={liveModes}
         totalCapital={liveTotalCapital}
       />
