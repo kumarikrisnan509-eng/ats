@@ -514,7 +514,7 @@ const BrokersScreen = () => {
           <div className="page-header__sub">Portable broker layer. Add, swap, or run multiple brokers without touching strategy code.</div>
         </div>
         <div className="page-header__right">
-          <button className="btn"><I.code size={14}/> Adapter docs</button>
+          <button className="btn" onClick={() => window.open("/docs.html", "_blank", "noopener")}><I.code size={14}/> Adapter docs</button>
           <button className="btn btn--primary" onClick={() => setModalState({ open: true, mode: 'connect', brokerName: 'Zerodha', existing: null })}>
             <I.plus size={14}/> Connect broker
           </button>

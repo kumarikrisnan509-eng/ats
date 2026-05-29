@@ -318,8 +318,8 @@ const PortfolioScreen = () => {
           <div className="page-header__sub">Long-term wealth — equity & ETFs. Fed by trading profit sweep.</div>
         </div>
         <div className="page-header__right">
-          <button className="btn"><I.download size={14}/> Statement</button>
-          <button className="btn btn--primary"><I.plus size={14}/> Add holding</button>
+          <button className="btn" disabled title="Statement export is not available yet"><I.download size={14}/> Statement</button>
+          <button className="btn btn--primary" disabled title="Holdings sync from your broker — manual entry is not available"><I.plus size={14}/> Add holding</button>
         </div>
       </div>
 

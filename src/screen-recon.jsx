@@ -64,6 +64,11 @@ const ReconScreen = () => {
     })();
     return () => { cancelled = true; };
   }, []);
+  // Re-run reconciliation = refetch /api/reconcile (the endpoint recomputes the match).
+  const reRunMatch = async () => {
+    try { const d = await window.fetchApi("/api/reconcile"); if (d && d.ok) setLiveRecon(d); }
+    catch (e) { setLoadErr(e && e.message ? e.message : "fetch failed"); }
+  };
   const [date, setDate] = React.useState("2026-04-23");
   const [filter, setFilter] = React.useState("all");
 
@@ -125,8 +130,8 @@ const ReconScreen = () => {
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <input type="date" className="input" value={date} onChange={e => setDate(e.target.value)} style={{ width: 150 }}/>
-          <button className="btn btn-ghost">Re-run match</button>
-          <button className="btn btn-primary">Download contract note PDF</button>
+          <button className="btn btn-ghost" onClick={reRunMatch}>Re-run match</button>
+          <button className="btn btn-primary" disabled title="Contract-note PDF export is not available yet">Download contract note PDF</button>
         </div>
       </div>
 

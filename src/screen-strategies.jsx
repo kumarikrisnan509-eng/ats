@@ -727,7 +727,7 @@ const StrategiesScreen = () => {
             : "Loading strategies…"}</div>
         </div>
         <div className="page-header__right">
-          <button className="btn"><I.code size={14}/> Import Python</button>
+          <button className="btn" disabled title="Python strategy import is not available yet"><I.code size={14}/> Import Python</button>
           <button className="btn btn--primary" onClick={() => {
             // T-180 (SCREENS-AUDIT F-15): replace native alert() with the
             // global toast system (window.toast from r8-primitives.jsx).

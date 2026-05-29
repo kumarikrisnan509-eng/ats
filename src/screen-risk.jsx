@@ -159,7 +159,7 @@ const RiskScreen = () => {
           <div className="page-header__sub">Hard limits, kill switch, per-strategy caps. Enforced before every order.</div>
         </div>
         <div className="page-header__right">
-          <button className="btn"><I.download size={14}/> Export rules</button>
+          <button className="btn" disabled title="Export rules is not available yet"><I.download size={14}/> Export rules</button>
         </div>
       </div>
 

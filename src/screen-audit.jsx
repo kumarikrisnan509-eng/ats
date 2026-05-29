@@ -364,9 +364,9 @@ const AuditScreen = () => {
               </div>
             </div>
             <div style={{ padding: 16, borderTop: "1px solid var(--border)", display: "flex", gap: 8 }}>
-              <button className="btn" style={{ flex: 1 }}>Re-run risk check</button>
-              <button className="btn" style={{ flex: 1 }}>Replay in paper</button>
-              <button className="btn btn--primary" style={{ flex: 1 }}>Download JSON</button>
+              <button className="btn" style={{ flex: 1 }} disabled title="Re-run risk check is not available yet">Re-run risk check</button>
+              <button className="btn" style={{ flex: 1 }} disabled title="Replay in paper is not available yet">Replay in paper</button>
+              <button className="btn btn--primary" style={{ flex: 1 }} onClick={() => { try { const blob = new Blob([JSON.stringify(selected, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "audit-order-" + ((selected && (selected.id || selected.order_id)) || "detail") + ".json"; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); } catch (e) { console.warn("[audit] download failed", e && e.message); } }}>Download JSON</button>
             </div>
           </div>
         </>

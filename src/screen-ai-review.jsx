@@ -166,7 +166,7 @@ const AIReviewScreen = () => {
           <select className="input" value={month} onChange={e => setMonth(e.target.value)} style={{ width: 160 }}>
             {months.map(m => <option key={m.v} value={m.v}>{m.label}</option>)}
           </select>
-          <button className="btn btn-ghost">Export PDF</button>
+          <button className="btn btn-ghost" disabled title="PDF export is not available yet">Export PDF</button>
         </div>
       </div>
 
@@ -398,7 +398,7 @@ const AIReviewScreen = () => {
                   <div style={{ fontSize: 13, fontWeight: 600 }}>{a.t}</div>
                   <div style={{ fontSize: 11, color: "var(--text-2)", marginTop: 4, lineHeight: 1.5 }}>{a.d}</div>
                 </div>
-                <button className="btn btn-primary" style={{ fontSize: 11, padding: "6px 12px" }}>{a.action}</button>
+                <button className="btn btn-primary" style={{ fontSize: 11, padding: "6px 12px" }} disabled title="Acting on recommendations is not available yet">{a.action}</button>
               </div>
             ))}
           </div>

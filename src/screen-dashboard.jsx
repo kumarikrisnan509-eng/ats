@@ -889,8 +889,8 @@ const DashboardScreen = () => {
           })()}</div>
         </div>
         <div className="page-header__right">
-          <button className="btn"><I.download size={14}/> Export</button>
-          <button className="btn btn--primary"><I.plus size={14}/> New strategy</button>        </div>
+          <button className="btn" disabled title="Export is not wired up yet"><I.download size={14}/> Export</button>
+          <button className="btn btn--primary" onClick={() => { location.hash = "strategies"; }}><I.plus size={14}/> New strategy</button>        </div>
       </div>
 
       {/* R10 #30 — Morning brief (pre-market) */}
@@ -1030,7 +1030,7 @@ const DashboardScreen = () => {
       {/* Active positions + AI queue */}
       <div className="grid grid-2-1" style={{ marginBottom: 16 }}>
         <Card title="Open positions" sub={positions.length ? `${positions.length} active across 3 strategies` : "No live exposure"}
-          right={positions.length ? <button className="btn btn--sm"><I.filter size={12}/> Filter</button> : null} flush>
+          right={positions.length ? <button className="btn btn--sm" disabled title="Position filtering is not wired up yet"><I.filter size={12}/> Filter</button> : null} flush>
           {positions.length === 0 ? (
             <window.EmptyState
               icon={I.portfolio}
@@ -1062,7 +1062,7 @@ const DashboardScreen = () => {
                     <td className="num">{p.avg.toLocaleString("en-IN")}</td>
                     <td className="num"><LiveCell symbol={p.s} decimals={2}/></td>
                     <td className={"num " + clsPN(pnl)}>{pnl >= 0 ? "+" : ""}{inr(Math.round(pnl))}</td>
-                    <td><button className="btn btn--sm" onClick={() => setClosing({ ...p, ltp, pnl })}>Close</button></td>
+                    <td><button className="btn btn--sm" onClick={() => { location.hash = "trading"; }} title="Manage/close positions on the Trading screen">Close</button></td>
                   </tr>
                 );
               })}
@@ -1072,7 +1072,7 @@ const DashboardScreen = () => {
         </Card>
 
         <Card title="AI signals queue" sub={demo ? "No signals · clean slate" : "Pending paper→live review"}
-          right={!demo ? <button className="btn btn--sm"><I.refresh size={12}/></button> : null}>
+          right={!demo ? <button className="btn btn--sm" disabled title="Refresh is not wired up yet"><I.refresh size={12}/></button> : null}>
           {demo ? (
             <window.EmptyState
               icon={I.brain}
@@ -1104,9 +1104,9 @@ const DashboardScreen = () => {
                   <span><span className="muted">SL </span><span className="mono down">{s.sl}</span></span>
                 </div>
                 <div className="row" style={{ marginTop: 10, gap: 6 }}>
-                  <button className="btn btn--sm btn--accent" style={{ flex: 1 }}>Paper</button>
-                  <button className="btn btn--sm" style={{ flex: 1 }}>Live</button>
-                  <button className="btn btn--sm btn--ghost">Skip</button>
+                  <button className="btn btn--sm btn--accent" style={{ flex: 1 }} disabled title="Act on signals from the Signals screen">Paper</button>
+                  <button className="btn btn--sm" style={{ flex: 1 }} disabled title="Act on signals from the Signals screen">Live</button>
+                  <button className="btn btn--sm btn--ghost" disabled title="Act on signals from the Signals screen">Skip</button>
                 </div>
               </div>
             ))}
@@ -1146,7 +1146,7 @@ const DashboardScreen = () => {
       {showMore && (
       <div className="grid grid-3">
         <Card title="Watchlist" sub="NSE · 8 symbols"
-          right={<button className="btn btn--sm"><I.plus size={12}/></button>} flush>
+          right={<button className="btn btn--sm" disabled title="Watchlist editing is not wired up yet"><I.plus size={12}/></button>} flush>
           <table className="table">
             <tbody>
               {symbols.map((s, i) => {
