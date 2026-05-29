@@ -296,8 +296,24 @@ const SignalsScreen = () => {
   // TCS pnl -₹340, INFY pnl +₹1,995, NIFTYBEES ₹6,000/Mon, etc.). T-344 claimed to
   // gate this but never did. Production pipeline must populate from realSignals fetch
   // (window.atsRealSignals). Until that wiring ships, render empty stages.
+  // T-353c follow-up: stage 1 ("Signal") is now populated from the live scanner
+  // feed (realSignals from /api/scanner/history). Later stages (paper/live/
+  // profit/long-term) track post-signal pipeline state that is not persisted
+  // yet, so they remain empty until that state lands.
+  const _signalCards = (Array.isArray(realSignals) ? realSignals : []).slice(0, 12).map((sg) => {
+    const code = String(sg.signal || '').toUpperCase();
+    const act = /OVERSOLD|CROSS_UP|BULL|LONG|BUY/.test(code) ? 'BUY'
+              : /OVERBOUGHT|CROSS_DOWN|BEAR|SHORT|SELL/.test(code) ? 'SELL' : null;
+    return {
+      sym: sg.symbol,
+      act,
+      src: sg.message || code || 'Scanner signal',
+      strategy: sg.strategy || null,
+      when: sg.ts ? String(sg.ts).slice(11, 19) : null,
+    };
+  });
   const cols = [
-    { title: "1 · Signal",    meta: "Emitted by strategies",       accent: "info", cards: [] },
+    { title: "1 · Signal",    meta: "Emitted by strategies",       accent: "info", cards: _signalCards },
     { title: "2 · Paper",     meta: "Simulated fills · gated",     accent: "acc",  cards: [] },
     { title: "3 · Live",      meta: "Real capital deployed",       accent: "vio",  cards: [] },
     { title: "4 · Profit",    meta: "Realized · awaiting sweep",   accent: "up",   cards: [] },

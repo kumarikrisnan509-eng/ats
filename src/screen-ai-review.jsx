@@ -56,12 +56,24 @@ const AIReviewScreen = () => {
   const runMonthlyReview = async () => {
     setMrBusy(true); setMrErr(null); setMrText(null);
     try {
-      const r = await window.fetchApi('/api/ai/monthly-review', {
+      // Canonical per-user BYOK endpoint (replaces the @deprecated
+      // /api/ai/monthly-review). Returns STRUCTURED fields; render as text.
+      const r = await window.fetchApi('/api/me/ai-workflows/monthly-review', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),  // auto-derives from /api/paper
+        body: JSON.stringify({}),  // auto-derives from this user's paper P&L
       });
-      if (r && r.ok) setMrText(r.narrative || '');
-      else setMrErr((r && r.reason) || 'AI call failed');
+      if (r && r.ok) {
+        const L = [];
+        if (r.headline) { L.push(r.headline, ''); }
+        if (Array.isArray(r.what_went_well) && r.what_went_well.length) { L.push('What went well:'); r.what_went_well.forEach(x => L.push('  \u2022 ' + x)); L.push(''); }
+        if (Array.isArray(r.what_went_wrong) && r.what_went_wrong.length) { L.push('What went wrong:'); r.what_went_wrong.forEach(x => L.push('  \u2022 ' + x)); L.push(''); }
+        if (r.patterns_observed) { L.push('Patterns observed:', r.patterns_observed, ''); }
+        if (Array.isArray(r.suggested_focus) && r.suggested_focus.length) { L.push('Suggested focus:'); r.suggested_focus.forEach(x => L.push('  \u2022 ' + x)); L.push(''); }
+        if (r.ai_spend_assessment) { L.push('AI spend: ' + r.ai_spend_assessment); }
+        setMrText(L.join('\n').trim() || r.narrative || 'Review generated.');
+      } else {
+        setMrErr((r && (r.reason || r.detail)) || 'AI call failed');
+      }
     } catch (e) { setMrErr(String(e.message || e)); }
     finally { setMrBusy(false); }
   };
@@ -209,7 +221,7 @@ const AIReviewScreen = () => {
                   {liveRow && liveRow.narrative_summary ? liveRow.narrative_summary : "A strong month overall, with one strategy requiring action."}
                 </div>
                 <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 6 }}>
-                  {liveRow ? (`Generated from /api/ai/monthly-review`) : "Generated Apr 1, 2026 · 03:42 AM IST · 3-AI consensus · PDF ref: AR-202603-7842"}
+                  {liveRow ? (`Generated from /api/me/ai-workflows/monthly-review`) : "Generated Apr 1, 2026 · 03:42 AM IST · 3-AI consensus · PDF ref: AR-202603-7842"}
                 </div>
               </>
             ) : (
