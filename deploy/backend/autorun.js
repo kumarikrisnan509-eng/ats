@@ -783,15 +783,39 @@ class AutoRunner {
                     run.preTrade  = { reason: pt.reason, message: pt.message };
                     this.audit('autorun.order.preTradeBlocked', { strategy: this._config.strategy, payload, preTrade: pt });
                   } else {
-                    const liveOrder = await this.broker.placeOrder(Object.assign({}, payload, { orderType: 'MARKET' }));
-                    run.result   = 'placed';
-                    run.orderId  = (liveOrder && (liveOrder.order_id || liveOrder.orderId || liveOrder.id)) || null;
-                    run.firedQty = effectiveQty;
-                    this._lastFiredKey = key;
-                    this._tradesToday += 1;
-                    this.audit('autorun.order.placed.LIVE', { orderId: run.orderId, ...run });
-                    if (this.notify && this.notify.notifyOrderPlaced) {
-                      this.notify.notifyOrderPlaced(Object.assign({}, payload, { id: run.orderId, live: true })).catch(() => {});
+                    // T-LIVE-SHADOW: default-safe dry-run for the live route.
+                    // ATS_LIVE_SHADOW defaults ON. Even with LIVE_TRADING +
+                    // liveEnabledStrategies + ATS_AUTORUN_2FA_BYPASS all set and
+                    // the full preTrade stack passed, the order is LOGGED, NOT
+                    // sent to the broker, UNLESS ATS_LIVE_SHADOW is explicitly
+                    // 'false'. This is an extra fail-safe on top of the existing
+                    // live gates: real exchange submission requires a deliberate
+                    // operator opt-out (set ATS_LIVE_SHADOW=false).
+                    const liveShadow = String(process.env.ATS_LIVE_SHADOW || 'true').toLowerCase() !== 'false';
+                    const liveOrderPayload = Object.assign({}, payload, { orderType: 'MARKET' });
+                    if (liveShadow) {
+                      run.result   = 'placed_shadow';
+                      run.shadow    = true;
+                      run.orderId   = 'SHADOW-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+                      run.firedQty  = effectiveQty;
+                      run.intended  = liveOrderPayload;
+                      this._lastFiredKey = key;
+                      this._tradesToday += 1;
+                      this.audit('autorun.order.shadow', { orderId: run.orderId, intended: liveOrderPayload, note: 'ATS_LIVE_SHADOW on -- live order LOGGED, NOT sent to broker. Set ATS_LIVE_SHADOW=false to submit real orders.' });
+                      if (this.notify && this.notify.notifyOrderPlaced) {
+                        this.notify.notifyOrderPlaced(Object.assign({}, liveOrderPayload, { id: run.orderId, live: true, shadow: true })).catch(() => {});
+                      }
+                    } else {
+                      const liveOrder = await this.broker.placeOrder(liveOrderPayload);
+                      run.result   = 'placed';
+                      run.orderId  = (liveOrder && (liveOrder.order_id || liveOrder.orderId || liveOrder.id)) || null;
+                      run.firedQty = effectiveQty;
+                      this._lastFiredKey = key;
+                      this._tradesToday += 1;
+                      this.audit('autorun.order.placed.LIVE', { orderId: run.orderId, ...run });
+                      if (this.notify && this.notify.notifyOrderPlaced) {
+                        this.notify.notifyOrderPlaced(Object.assign({}, payload, { id: run.orderId, live: true })).catch(() => {});
+                      }
                     }
                   }
                 } else {
