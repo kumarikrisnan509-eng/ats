@@ -273,6 +273,8 @@ CREATE TABLE IF NOT EXISTS user_risk_config (
   max_sector_weight    REAL    NOT NULL DEFAULT 0.30,
   -- T-487: per-user mode state (intraday/swing/options/futures + capital%). Was localStorage-only.
   active_modes_json    TEXT    NOT NULL DEFAULT '{}',
+  -- T-553: per-strategy caps {strategyId:{capitalCap,lossCutoff}} (INR, opt-in). Block-only in autorun.
+  strategy_caps_json   TEXT    NOT NULL DEFAULT '{}',
   updated_at           TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 

@@ -127,6 +127,170 @@ const RiskEventsCard = () => {
   );
 };
 
+// T-553: per-strategy caps editor. Reads strategyCaps {strategyId:{capitalCap,
+// lossCutoff}} (INR) from /api/me/risk-config, lets the operator add/remove caps,
+// and PUTs the whole map back. The auto-run engine enforces these block-only
+// before each paper order. Live-config feature -> hidden in demo mode.
+const PerStrategyCaps = () => {
+  const demo = !!(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
+  const [caps, setCaps] = React.useState(/** @type {any} */ (null));
+  const [strats, setStrats] = React.useState(/** @type {any[]} */ ([]));
+  const [draft, setDraft] = React.useState(/** @type {any} */ ({ strategy: '', capitalCap: '', lossCutoff: '' }));
+  const [saving, setSaving] = React.useState(false);
+  const [msg, setMsg] = React.useState('');
+
+  React.useEffect(() => {
+    if (demo) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [rc, sl] = await Promise.all([
+          window.fetchApi('/api/me/risk-config').catch(() => null),
+          window.fetchApi('/api/strategies').catch(() => null),
+        ]);
+        if (cancelled) return;
+        const sc = (rc && rc.config && rc.config.strategyCaps && typeof rc.config.strategyCaps === 'object' && !Array.isArray(rc.config.strategyCaps))
+          ? rc.config.strategyCaps : {};
+        setCaps(sc);
+        const list = (sl && sl.ok && Array.isArray(sl.strategies))
+          ? sl.strategies.map((x) => ({ id: x.id || x.name, name: x.name || x.id })) : [];
+        setStrats(list);
+      } catch (_e) { setCaps({}); }
+    })();
+    return () => { cancelled = true; };
+  }, [demo]);
+
+  const persist = async (next) => {
+    setSaving(true); setMsg('');
+    try {
+      const r = await window.fetchApi('/api/me/risk-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ strategyCaps: next }),
+      });
+      if (r && r.ok && r.config) {
+        setCaps((r.config.strategyCaps && typeof r.config.strategyCaps === 'object') ? r.config.strategyCaps : {});
+        if (window.toast) window.toast('Per-strategy caps saved', 'up');
+        return true;
+      }
+      setMsg((r && r.reason) || 'Save failed');
+      return false;
+    } catch (e) {
+      setMsg((e && (e.reason || e.message)) || 'Save failed');
+      return false;
+    } finally { setSaving(false); }
+  };
+
+  const addCap = async () => {
+    const sid = String(draft.strategy || '').trim();
+    if (!sid) { setMsg('Pick a strategy first'); return; }
+    const ccRaw = String(draft.capitalCap).trim();
+    const lcRaw = String(draft.lossCutoff).trim();
+    const cc = ccRaw === '' ? null : Number(ccRaw);
+    const lc = lcRaw === '' ? null : Number(lcRaw);
+    if (cc != null && (!Number.isFinite(cc) || cc < 0)) { setMsg('Capital cap must be a non-negative number'); return; }
+    if (lc != null && (!Number.isFinite(lc) || lc < 0)) { setMsg('Loss cutoff must be a non-negative number'); return; }
+    if (cc == null && lc == null) { setMsg('Set a capital cap and/or a loss cutoff'); return; }
+    const entry = /** @type {any} */ ({});
+    if (cc != null) entry.capitalCap = Math.round(cc);
+    if (lc != null) entry.lossCutoff = Math.round(lc);
+    const next = Object.assign({}, caps || {}, { [sid]: entry });
+    const ok = await persist(next);
+    if (ok) setDraft({ strategy: '', capitalCap: '', lossCutoff: '' });
+  };
+
+  const removeCap = async (sid) => {
+    const go = (typeof window.confirmAsync === 'function')
+      ? await window.confirmAsync({ title: 'Remove cap', sub: 'Remove caps for ' + sid + '?', confirmLabel: 'Remove', cancelLabel: 'Cancel' })
+      : true;
+    if (!go) return;
+    const next = Object.assign({}, caps || {});
+    delete next[sid];
+    await persist(next);
+  };
+
+  const _capInput = { width: '100%', padding: '4px 8px', fontSize: 13, background: 'var(--bg)', color: 'var(--text-1)', border: '1px solid var(--border)', borderRadius: 4 };
+  const entries = caps ? Object.keys(caps).map((k) => [k, caps[k]]) : [];
+
+  if (demo) {
+    return (
+      <Card title="Per-strategy caps" sub="Capital ceilings and loss cutoffs">
+        <div className="muted" style={{ fontSize: 12, padding: 16 }}>
+          Turn off demo mode to view and edit your real per-strategy caps.
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card title="Per-strategy caps" sub="Per-order capital ceiling and daily loss cutoff, enforced before auto-run orders" flush>
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Strategy</th>
+            <th className="num-l">Capital cap / order</th>
+            <th className="num-l">Daily loss cutoff</th>
+            <th/>
+          </tr>
+        </thead>
+        <tbody>
+          {caps == null ? (
+            <tr><td colSpan={4} className="muted" style={{ padding: 14, fontSize: 12 }}>Loading…</td></tr>
+          ) : entries.length === 0 ? (
+            <tr><td colSpan={4} className="muted" style={{ padding: 14, fontSize: 12 }}>No per-strategy caps set. Add one below.</td></tr>
+          ) : entries.map((row) => {
+            const sid = String(row[0]);
+            const c = row[1] || {};
+            return (
+              <tr key={sid}>
+                <td className="mono" style={{ fontWeight: 500 }}>{sid}</td>
+                <td className="num mono">{c.capitalCap != null ? inr(c.capitalCap) : <span className="muted">—</span>}</td>
+                <td className="num mono">{c.lossCutoff != null ? inr(c.lossCutoff) : <span className="muted">—</span>}</td>
+                <td className="num">
+                  <button className="btn btn--sm" disabled={saving} onClick={() => removeCap(sid)} title={'Remove caps for ' + sid}>
+                    <I.x size={12}/> Remove
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div style={{ padding: '12px 14px', borderTop: '1px solid var(--border)', background: 'var(--bg-soft)' }}>
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <label className="col" style={{ gap: 4, flex: '2 1 150px' }}>
+            <span className="muted" style={{ fontSize: 11 }}>Strategy</span>
+            {strats.length > 0 ? (
+              <select style={_capInput} value={draft.strategy} onChange={e => setDraft(Object.assign({}, draft, { strategy: e.target.value }))}>
+                <option value="">Select…</option>
+                {strats.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
+            ) : (
+              <input style={_capInput} placeholder="strategy id" value={draft.strategy} onChange={e => setDraft(Object.assign({}, draft, { strategy: e.target.value }))}/>
+            )}
+          </label>
+          <label className="col" style={{ gap: 4, flex: '1 1 120px' }}>
+            <span className="muted" style={{ fontSize: 11 }}>Capital cap / order (₹)</span>
+            <input style={_capInput} type="number" min="0" placeholder="e.g. 50000" value={draft.capitalCap} onChange={e => setDraft(Object.assign({}, draft, { capitalCap: e.target.value }))}/>
+          </label>
+          <label className="col" style={{ gap: 4, flex: '1 1 120px' }}>
+            <span className="muted" style={{ fontSize: 11 }}>Daily loss cutoff (₹)</span>
+            <input style={_capInput} type="number" min="0" placeholder="e.g. 2000" value={draft.lossCutoff} onChange={e => setDraft(Object.assign({}, draft, { lossCutoff: e.target.value }))}/>
+          </label>
+          <button className="btn btn--primary btn--sm" disabled={saving} onClick={addCap} style={{ flex: '0 0 auto' }}>
+            {saving ? 'Saving…' : 'Add / update'}
+          </button>
+        </div>
+        {msg ? <div className="down" style={{ fontSize: 11, marginTop: 8 }}>{msg}</div> : (
+          <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+            Capital cap limits each auto-order's rupee value (price × qty). Loss cutoff halts the strategy for the rest of the day once its realized paper loss crosses it. Leave a field blank for no cap.
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+};
+
 const RiskScreen = () => {
   // T-425 (audit-2026-05-26 frontend C2): kill-switch is now READ-ONLY
   // status from /api/kill-switch (the canonical server-side flag).
@@ -210,20 +374,20 @@ const RiskScreen = () => {
 
       {window.RiskPredictor && <div style={{ marginBottom: 16 }}><window.RiskPredictor/></div>}
 
-      {/* T99-T91 + T-425: honest banner — the 'Global limits' progress bars,
-          'Per-strategy caps' rows, and 'Risk events' table are all demo data.
-          The kill-switch panel below now reflects REAL server state. */}
+      {/* T-553: per-strategy caps are now wired — stored per user in
+          user_risk_config.strategyCaps and enforced block-only by the auto-run
+          engine before each paper order. Everything on this screen now reads
+          your real config in live mode. */}
       <div role="note" style={{
         padding: '8px 12px', marginBottom: 12, borderRadius: 6,
-        border: '1px solid color-mix(in oklab, var(--warn, #d97706) 35%, var(--border))',
-        background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
+        border: '1px solid color-mix(in oklab, var(--up, #16a34a) 30%, var(--border))',
+        background: 'color-mix(in oklab, var(--up, #16a34a) 7%, transparent)',
         fontSize: 12, color: 'var(--text-2)',
       }}>
-        <strong>Per-strategy caps are not yet wired.</strong>{' '}
-        Per-strategy capital ceilings / loss cutoffs have no per-user storage yet.
-        Everything else on this screen reads your real data in live mode: the
-        kill-switch state, per-mode limits, global limits (from your risk config),
-        and the risk-events feed.
+        <strong>All limits on this screen read your real config in live mode.</strong>{' '}
+        Per-strategy caps (below) are enforced before every auto-run order: a capital
+        cap limits the rupee size of each order, and a loss cutoff halts a strategy for
+        the rest of the day once its realized paper loss crosses it.
       </div>
 
       {/* T-425 (audit-2026-05-26 C2): READ-ONLY kill-switch status panel.
@@ -378,21 +542,7 @@ const RiskScreen = () => {
           )}
         </Card>
 
-        <Card title="Per-strategy caps" sub="Capital ceilings and loss cutoffs">
-          {/* T-353b: Was 6 hardcoded strategy caps (Momentum AI ₹8L, Mean Reversion ₹6L,
-              etc.) rendered to every user. T-342 claimed to gate -- never did. Empty
-              state until backend per-strategy cap storage ships; point user at the
-              Strategies screen where they'll be set. */}
-          <div className="col" style={{ gap: 10, padding: "16px" }}>
-            <div className="muted" style={{ fontSize: 12 }}>
-              Per-strategy capital caps and loss cutoffs are configured per strategy.
-              No strategies have caps assigned yet.
-            </div>
-            <a href="#strategies" className="btn btn--sm" style={{ alignSelf: "flex-start" }}>
-              Go to Strategies
-            </a>
-          </div>
-        </Card>
+        <PerStrategyCaps/>
       </div>
 
       <RiskEventsCard/>

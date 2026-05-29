@@ -687,6 +687,44 @@ class AutoRunner {
           }
 
           // ============================================================
+          // T-553: per-strategy caps (additive, BLOCK-ONLY, paper-safe).
+          // From user_risk_config.strategyCaps[strategy]. Two opt-in caps:
+          //   capitalCap - max INR notional for a single auto-order from this
+          //                strategy (effectiveQty * lastClose). Over => skip.
+          //   lossCutoff - once this strategy's realized loss for the current
+          //                IST day reaches this many INR, halt new orders for it
+          //                (best-effort; permissive if the reader is absent or
+          //                throws). These can only PREVENT a trade, never enable.
+          // ============================================================
+          if (!run.result && cfg && cfg.strategyCaps && typeof cfg.strategyCaps === 'object') {
+            const sc = cfg.strategyCaps[this._config.strategy];
+            if (sc && typeof sc === 'object') {
+              const capINR = Number(sc.capitalCap);
+              if (Number.isFinite(capINR) && capINR > 0
+                  && Number.isFinite(lastBar.close) && lastBar.close > 0) {
+                const notional = effectiveQty * lastBar.close;
+                if (notional > capINR) {
+                  run.result = 'skipped_strategy_capital_cap';
+                  run.strategyCap = { capitalCap: capINR, notional: Math.round(notional) };
+                }
+              }
+              if (!run.result) {
+                const cutoff = Number(sc.lossCutoff);
+                if (Number.isFinite(cutoff) && cutoff > 0
+                    && typeof this.paper.realizedTodayByStrategy === 'function') {
+                  try {
+                    const realized = Number(this.paper.realizedTodayByStrategy(this._config.strategy));
+                    if (Number.isFinite(realized) && realized <= -Math.abs(cutoff)) {
+                      run.result = 'skipped_strategy_loss_cutoff';
+                      run.strategyCap = { lossCutoff: cutoff, realizedToday: Math.round(realized) };
+                    }
+                  } catch (_e) { /* best-effort: never block on read error */ }
+                }
+              }
+            }
+          }
+
+          // ============================================================
           // Pass-through path: existing dedupe + placeOrder logic
           // ============================================================
           if (!run.result) {

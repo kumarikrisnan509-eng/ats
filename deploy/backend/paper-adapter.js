@@ -24,6 +24,16 @@
 // position is capped to the held qty, or recorded as a cancelled order.
 // ============================================================================
 
+function _istDayStartUtc() {
+  // Start of the current IST calendar day, expressed as a UTC 'YYYY-MM-DD HH:MM:SS'
+  // string so it compares correctly against paper_closed_trades.exited_at (stored
+  // via SQLite datetime('now'), i.e. UTC in that exact format). IST = UTC+5:30.
+  const IST_OFFSET_MS = 5.5 * 3600 * 1000;
+  const ist = new Date(Date.now() + IST_OFFSET_MS);
+  const istMidnightUtcMs = Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate()) - IST_OFFSET_MS;
+  return new Date(istMidnightUtcMs).toISOString().slice(0, 19).replace('T', ' ');
+}
+
 function createPaperAdapter({ getDb, uid, getLtp, audit, slippageBps } = {}) {
   if (typeof getDb !== 'function') throw new Error('paper-adapter: getDb function required');
   const UID = Number(uid);
@@ -60,6 +70,22 @@ function createPaperAdapter({ getDb, uid, getLtp, audit, slippageBps } = {}) {
         avgPrice: Number(r.avg_price || 0),
         openedAt: r.opened_at || null,
       }));
+    },
+
+    // T-553: sum realized P&L of this strategy's closed paper trades since the
+    // start of the current IST day. Used block-only by autorun's per-strategy
+    // lossCutoff gate. Returns 0 on any error / no data (fail-open -> permissive).
+    realizedTodayByStrategy(strategyTag) {
+      if (!strategyTag) return 0;
+      const db = getDb();
+      if (!db || !db._conn) return 0;
+      try {
+        const since = _istDayStartUtc();
+        const row = db._conn.prepare(
+          'SELECT COALESCE(SUM(pnl), 0) AS s FROM paper_closed_trades WHERE user_id = ? AND strategy_tag = ? AND exited_at >= ?'
+        ).get(UID, String(strategyTag), since);
+        return row ? Number(row.s || 0) : 0;
+      } catch (_) { return 0; }
     },
 
     placeOrder(payload) {
