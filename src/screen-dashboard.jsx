@@ -988,6 +988,7 @@ const DashboardScreen = () => {
         </Card>
 
         <Card title="Allocation" sub="Capital split across buckets">
+          {demo ? (
           <div style={{ display: "flex", gap: 18, alignItems: "center" }}>
             <Donut
               size={160} thickness={18}
@@ -1018,6 +1019,11 @@ const DashboardScreen = () => {
               ))}
             </div>
           </div>
+          ) : (
+          <div className="muted" style={{ padding: 12, fontSize: 12, lineHeight: 1.5 }}>
+            Allocation breakdown isn't wired to live data yet — connect a broker. The bucket split shown here is illustrative (demo mode only).
+          </div>
+          )}
         </Card>
       </div>
 

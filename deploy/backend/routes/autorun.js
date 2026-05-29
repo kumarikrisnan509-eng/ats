@@ -33,7 +33,7 @@ function mountAutorunRoutes(app, deps) {
   app.get('/api/autorun', withAuth((_req, res) => {
     const autorun = getAutorun();
     if (!autorun) return res.status(503).json({ ok: false, reason: 'autorun_not_initialized' });
-    res.json({ ok: true, config: autorun.config(), configs: autorun.listConfigs(), stats: autorun.stats(), history: autorun.history(25) });
+    res.json({ ok: true, config: autorun.config(), stats: autorun.stats(), history: autorun.history(25) });
   }));
 
   app.put('/api/autorun', withAuth((req, res) => {
@@ -43,26 +43,6 @@ function mountAutorunRoutes(app, deps) {
       const cfg = autorun.setConfig(req.body || {});
       res.json({ ok: true, config: cfg, stats: autorun.stats() });
     } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
-  }));
-
-  // T-536 follow-on (G1): multi-strategy auto-run. The engine already supports
-  // a registry of concurrent configs (addConfig/removeConfig/runOnceAll); these
-  // two routes expose it so the operator can auto-run a PORTFOLIO of strategies
-  // instead of a single one (PUT /api/autorun still REPLACES with one config).
-  app.post('/api/autorun/config', withAuth((req, res) => {
-    const autorun = getAutorun();
-    if (!autorun) return res.status(503).json({ ok: false, reason: 'autorun_not_initialized' });
-    try {
-      const added = autorun.addConfig(req.body || {});
-      res.status(201).json({ ok: true, added, configs: autorun.listConfigs(), stats: autorun.stats() });
-    } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
-  }));
-
-  app.delete('/api/autorun/config/:id', withAuth((req, res) => {
-    const autorun = getAutorun();
-    if (!autorun) return res.status(503).json({ ok: false, reason: 'autorun_not_initialized' });
-    const removed = autorun.removeConfig(String(req.params.id || ''));
-    res.json({ ok: true, removed, configs: autorun.listConfigs(), stats: autorun.stats() });
   }));
 
   app.post('/api/autorun/run', withAuth(async (_req, res) => {

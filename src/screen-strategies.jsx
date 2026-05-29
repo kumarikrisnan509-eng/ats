@@ -71,30 +71,6 @@ const AutorunPanel = () => {
     finally { setBusy(false); }
   };
 
-  // G1: multi-strategy auto-run. Add the current form as ANOTHER config
-  // (portfolio) via POST /api/autorun/config; remove individual configs by id.
-  const addToPortfolio = async () => {
-    setBusy(true); setMsg(null);
-    try {
-      const r = await window.fetchApi('/api/autorun/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, enabled: true }),
-      });
-      setMsg(r && r.ok ? '✓ added to auto-run' : '✗ ' + (r && r.reason));
-      await load();
-    } catch (e) { setMsg('✗ ' + e.message); }
-    finally { setBusy(false); }
-  };
-  const removeConfigById = async (id) => {
-    setBusy(true); setMsg(null);
-    try {
-      const r = await window.fetchApi('/api/autorun/config/' + encodeURIComponent(id), { method: 'DELETE' });
-      setMsg(r && r.ok ? '✓ removed' : '✗ ' + (r && r.reason));
-      await load();
-    } catch (e) { setMsg('✗ ' + e.message); }
-    finally { setBusy(false); }
-  };
 
   // T-467 (audit-2026-05-26 frontend L7): replaced native confirm()
   // with window.ConfirmModal (themed, focus-trapped, screen-reader-
@@ -173,30 +149,11 @@ const AutorunPanel = () => {
           {form.enabled ? 'Disable' : 'Enable + save'}
         </button>
         <button disabled={busy} onClick={() => save({})}>Save config</button>
-        <button disabled={busy} onClick={addToPortfolio}>+ Add to auto-run</button>
         <button disabled={busy} onClick={runNow}>Run once</button>
         <button disabled={busy} onClick={clearCfg}>Clear</button>
         {msg && <span style={{ fontSize: 11, color: msg.startsWith('✓') ? 'var(--up)' : 'var(--down)' }}>{msg}</span>}
       </div>
 
-      {/* G1: active auto-run portfolio (multi-config registry) */}
-      {Array.isArray(data && data.configs) && data.configs.length > 0 && (
-        <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 4 }}>Active auto-run strategies ({data.configs.length})</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {data.configs.map((c) => (
-              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', background: 'var(--bg-soft)', border: '1px solid var(--border)', borderRadius: 'var(--r-md)', fontSize: 12 }}>
-                <span style={{ width: 7, height: 7, borderRadius: '50%', background: c.enabled ? 'var(--up, #16a34a)' : 'var(--text-3)' }}/>
-                <span className="mono" style={{ fontWeight: 600 }}>{c.strategy}</span>
-                <span className="mono" style={{ color: 'var(--text-3)' }}>{c.symbol}</span>
-                <span className="mono" style={{ color: 'var(--text-3)' }}>qty {c.qty} · {c.intervalMinutes}m</span>
-                <span style={{ flex: 1 }}/>
-                <button disabled={busy} className="btn btn--sm" onClick={() => removeConfigById(c.id)} title="Remove from auto-run">✕</button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
       {/* Recent run history */}
       {Array.isArray(history) && history.length > 0 && (
         <div style={{ marginTop: 12 }}>
