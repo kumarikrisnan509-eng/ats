@@ -151,6 +151,49 @@ const RiskScreen = () => {
     return () => { cancelled = true; clearInterval(t); };
   }, []);
 
+  // T-353b follow-up: REAL per-mode limits. Mirrors the Modes screen — caps from
+  // /api/me/risk-config (config.activeModes[id].capitalPct / dailyLossCapPct,
+  // MODE_META.defaults fallback), total capital = portfolioValue + cashPaper from
+  // /api/me/dashboard-summary, deployed + today's P&L from /api/me/modes/runtime.
+  const [perMode, setPerMode] = React.useState(/** @type {any} */ (null));
+  React.useEffect(() => {
+    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [rc, ds, rt] = await Promise.all([
+          window.fetchApi('/api/me/risk-config').catch(() => null),
+          window.fetchApi('/api/me/dashboard-summary').catch(() => null),
+          window.fetchApi('/api/me/modes/runtime').catch(() => null),
+        ]);
+        if (cancelled) return;
+        const am = (rc && rc.config && rc.config.activeModes && typeof rc.config.activeModes === 'object') ? rc.config.activeModes : {};
+        const totalCapital = Number((ds && ds.portfolioValue) || 0) + Number((ds && ds.cashPaper) || 0);
+        const runtime = (rt && rt.runtime && typeof rt.runtime === 'object') ? rt.runtime : {};
+        const ids = (window.MODE_IDS && window.MODE_IDS.length) ? window.MODE_IDS : ['intraday', 'swing', 'options', 'futures'];
+        const rows = ids.map((id) => {
+          const defs = (window.MODE_META && window.MODE_META[id] && window.MODE_META[id].defaults) || {};
+          const m = am[id] || {};
+          const capPct = Number(m.capitalPct != null ? m.capitalPct : (defs.capitalPct || 0));
+          const lossPct = Number(m.dailyLossCapPct != null ? m.dailyLossCapPct : (defs.dailyLossCapPct || 0));
+          const enabled = (m.enabled != null) ? (m.enabled !== false) : (defs.enabled !== false);
+          const cap = totalCapital > 0 ? Math.round((totalCapital * capPct) / 100) : 0;
+          const lossCap = cap > 0 ? Math.round((cap * lossPct) / 100) : 0;
+          const r = runtime[id] || {};
+          const deployed = Number(r.utilized || 0);
+          const todayPnl = Number(r.todayPnl || 0);
+          const lossUsed = todayPnl < 0 ? Math.round(-todayPnl) : 0;
+          const util = cap > 0 ? (deployed / cap) * 100 : 0;
+          const lossP = lossCap > 0 ? (lossUsed / lossCap) * 100 : 0;
+          const state = !enabled ? 'idle' : (deployed <= 0 ? 'idle' : ((util > 85 || lossP > 70) ? 'warn' : 'ok'));
+          return { id, cap, deployed, lossCap, lossUsed, state };
+        });
+        setPerMode(rows);
+      } catch (e) { /* keep null -> empty fallback rows */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <>
       <div className="page-header">
@@ -241,12 +284,12 @@ const RiskScreen = () => {
                 T-342 claimed to gate this but JSX was untouched -- still shipped fake
                 limits to every user. No per-mode risk-storage backend yet, so render
                 empty rows pointing the user at where these will be configured. */}
-            {[
+            {(perMode || [
               { id: "intraday", cap: 0, deployed: 0, lossCap: 0, lossUsed: 0, state: "idle" },
               { id: "swing",    cap: 0, deployed: 0, lossCap: 0, lossUsed: 0, state: "idle" },
               { id: "options",  cap: 0, deployed: 0, lossCap: 0, lossUsed: 0, state: "idle" },
               { id: "futures",  cap: 0, deployed: 0, lossCap: 0, lossUsed: 0, state: "idle" },
-            ].map(row => {
+            ]).map(row => {
               const meta = window.MODE_META[row.id];
               // T-353b: guard 0/0 -- empty-state rows have cap=0/lossCap=0 which
               // would otherwise render "NaN%" and trip the visual-rendering spec.
