@@ -625,6 +625,29 @@ const PaperScreen = () => {
     })();
     return () => { cancelled = true; };
   }, [equityWindow]);
+  // T-526/T-527/T-528: per-mode roll-up, promotion-gate rows, and fill-quality
+  // metrics — all real, per-user, from their respective endpoints.
+  const [paperByMode, setPaperByMode] = React.useState(null);
+  const [promotionRows, setPromotionRows] = React.useState(null);
+  const [fillQuality, setFillQuality] = React.useState(null);
+  React.useEffect(() => {
+    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [bm, pr, fq] = await Promise.all([
+          window.fetchApi('/api/me/paper-by-mode'),
+          window.fetchApi('/api/me/paper/promotion'),
+          window.fetchApi('/api/me/paper/fill-quality'),
+        ]);
+        if (cancelled) return;
+        if (bm && bm.ok) setPaperByMode(bm);
+        if (pr && pr.ok) setPromotionRows(Array.isArray(pr.rows) ? pr.rows : []);
+        if (fq && fq.ok) setFillQuality(fq);
+      } catch (e) { /* keep prior */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
   React.useEffect(() => {
     if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) {
       setPaperLoading(false);
@@ -912,7 +935,9 @@ const PaperScreen = () => {
             // / 64% win / ₹82,340; swing 22/68%/₹34,120; options 18/72%/₹24,820).
             // Same root cause as T-82 — per-mode aggregation backend not wired.
             // Show empty values; when /api/me/paper-by-mode lands, derive here.
-            const stats = { trades: 0, winR: 0, pnl: 0, ready: 0, testing: 0, nextPromo: null };
+            // T-526: per-mode stats derive from /api/me/paper-by-mode.
+            const _m = (paperByMode && paperByMode.modes && paperByMode.modes[id]) || null;
+            const stats = { trades: _m ? _m.trades : 0, winR: _m ? _m.winRate : 0, pnl: _m ? _m.pnl : 0, ready: 0, testing: 0, nextPromo: null };
             const active = window.isModeActive(id);
             return (
               <div key={id} style={{
@@ -952,22 +977,17 @@ const PaperScreen = () => {
           rate / partial fills), and the 'Paper order book' table reads
           paperOrders (also hardcoded). The 'Live paper account' strip at
           the top IS real (from /api/me/paper). Same pattern as T-91. */}
+      {demo && (
       <div role="note" style={{
         padding: '8px 12px', marginBottom: 12, borderRadius: 6,
         border: '1px solid color-mix(in oklab, var(--warn, #d97706) 35%, var(--border))',
         background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
         fontSize: 12, color: 'var(--text-2)',
       }}>
-        {demo ? (
-          <><strong>Demo mode — paper panels show illustrative sample data.</strong>{' '}
-          Turn off demo mode to see your real per-user paper account.</>
-        ) : (
-          <><strong>Fill quality and the Promotion-to-live table are not yet wired to live data.</strong>{' '}
-          The Paper equity curve, Live paper account, and Paper order book are
-          real (per-user data from /api/me/paper). The remaining sample panels
-          switch to live data once their endpoints land.</>
-        )}
+        <strong>Demo mode — paper panels show illustrative sample data.</strong>{' '}
+        Turn off demo mode to see your real per-user paper account.
       </div>
+      )}
 
       {/* P&L chart */}
       <div className="grid grid-2-1" style={{ marginBottom: 16 }}>
@@ -984,12 +1004,33 @@ const PaperScreen = () => {
           {(() => {
             const _isDemoFQ = !!(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
             if (!_isDemoFQ) {
+              // T-528: real metrics from /api/me/paper/fill-quality.
+              if (fillQuality && Array.isArray(fillQuality.metrics)) {
+                if (!fillQuality.totalOrders) {
+                  return (
+                    <div className="muted" style={{ padding: 12, fontSize: 12, lineHeight: 1.5 }}>
+                      No paper orders yet. Fill-quality metrics (slippage, fill rate,
+                      rejection rate) populate once you place paper orders.
+                    </div>
+                  );
+                }
+                return (
+                  <div className="col" style={{ gap: 14 }}>
+                    {fillQuality.metrics.map((r, i) => (
+                      <div key={i}>
+                        <div className="between" style={{ marginBottom: 2 }}>
+                          <div style={{ fontSize: 12, fontWeight: 500 }}>{r.k}</div>
+                          <span className="mono" style={{ fontSize: 11, color: "var(--text-2)" }}>{r.v}</span>
+                        </div>
+                        <div className="muted" style={{ fontSize: 10, marginTop: 2 }}>{r.note}</div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              }
               return (
                 <div className="muted" style={{ padding: 12, fontSize: 12, lineHeight: 1.5 }}>
-                  Fill-quality metrics are not yet wired.<br/>
-                  Pending a <code>/api/paper/fill-quality</code> endpoint that returns
-                  per-strategy slippage, fill time, rejection rate, and partial fills
-                  computed from this user's paper order log.
+                  Loading fill-quality metrics…
                 </div>
               );
             }
@@ -1089,7 +1130,7 @@ const PaperScreen = () => {
               { n: "Covered Call",       d: 28, t:  12, w: 66, sh: 1.40, dd: "-1.2%" },
               { n: "Grid Trader",        d: 80, t: 310, w: 52, sh: 0.72, dd: "-7.2%" },
               { n: "Stock Futures Momentum", d: 22, t: 6, w: 58, sh: 1.20, dd: "-2.4%" },
-            ] : []).map((s, i) => {
+            ] : (promotionRows || [])).map((s, i) => {
               const stratMeta = window.getStrategy(s.n);
               const mode = stratMeta?.mode || "intraday";
               const modeMeta = window.MODE_META[mode];
@@ -1154,6 +1195,11 @@ const PaperScreen = () => {
                 </tr>
               );
             })}
+            {(!demo && Array.isArray(promotionRows) && promotionRows.length === 0) && (
+              <tr><td colSpan={9} className="muted" style={{ padding: 16, textAlign: 'center', fontSize: 12 }}>
+                No strategies have paper-trading history yet. Promotion gates appear here once a registered strategy logs paper trades.
+              </td></tr>
+            )}
           </tbody>
         </table>
         <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", background: "var(--bg-soft)", fontSize: 11, color: "var(--text-3)" }}>

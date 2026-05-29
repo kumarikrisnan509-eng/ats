@@ -136,6 +136,138 @@ function mountPaperTradingRoutes(app, deps) {
     });
   }));
 
+  // ---------- GET /api/me/paper-by-mode (T-526) ----------
+  // Per-mode aggregation of this user's closed paper trades. Maps each trade's
+  // strategy_tag -> trading mode via the STRATEGIES registry, then rolls up
+  // trades / win-rate / realized P&L per mode. Trades whose tag is null or
+  // unknown land in `unassigned` (honest — not silently attributed to a mode).
+  app.get('/api/me/paper-by-mode', withAuth((req, res) => {
+    const db = getDb();
+    const uid = req.user.id;
+    let STRATEGIES = [];
+    try { STRATEGIES = require('./strategies').STRATEGIES || []; } catch (e) { STRATEGIES = []; }
+    const tagToMode = {};
+    for (const s of STRATEGIES) {
+      if (s && s.id)   tagToMode[String(s.id).toLowerCase()]   = s.mode;
+      if (s && s.name) tagToMode[String(s.name).toLowerCase()] = s.mode;
+    }
+    let trades = [];
+    try { trades = db._conn.prepare('SELECT pnl, strategy_tag FROM paper_closed_trades WHERE user_id = ?').all(uid); } catch (e) { trades = []; }
+    const acc = {};
+    const unassigned = { trades: 0, wins: 0, pnl: 0 };
+    for (const t of trades) {
+      const tag = t.strategy_tag ? String(t.strategy_tag).toLowerCase() : null;
+      const mode = (tag && tagToMode[tag]) ? tagToMode[tag] : null;
+      const b = mode ? (acc[mode] || (acc[mode] = { trades: 0, wins: 0, pnl: 0 })) : unassigned;
+      b.trades += 1;
+      if (Number(t.pnl) > 0) b.wins += 1;
+      b.pnl += Number(t.pnl || 0);
+    }
+    const modes = {};
+    for (const [mode, b] of Object.entries(acc)) {
+      modes[mode] = { trades: b.trades, wins: b.wins, winRate: b.trades ? Math.round((b.wins / b.trades) * 100) : 0, pnl: b.pnl };
+    }
+    res.json({
+      ok: true,
+      modes,
+      unassigned: { trades: unassigned.trades, wins: unassigned.wins, winRate: unassigned.trades ? Math.round((unassigned.wins / unassigned.trades) * 100) : 0, pnl: unassigned.pnl },
+      totalTrades: trades.length,
+    });
+  }));
+
+  // ---------- GET /api/me/paper/promotion (T-527) ----------
+  // Per-strategy promotion-gate evaluation from this user's closed paper
+  // trades. Only registered strategies (in the STRATEGIES registry) with >=1
+  // paper trade are listed; untagged manual trades are excluded. Gates:
+  // >=14 days, >=30 trades, >=60% win, >=1.2 Sharpe (trade-return based).
+  app.get('/api/me/paper/promotion', withAuth((req, res) => {
+    const db = getDb();
+    const uid = req.user.id;
+    const state = db.paper.getState(uid);
+    const baseline = Number(state.initial_capital || state.cash || 0) || 1;
+    let STRATEGIES = [];
+    try { STRATEGIES = require('./strategies').STRATEGIES || []; } catch (e) { STRATEGIES = []; }
+    const byTag = {};
+    for (const s of STRATEGIES) {
+      if (s && s.id)   byTag[String(s.id).toLowerCase()]   = s;
+      if (s && s.name) byTag[String(s.name).toLowerCase()] = s;
+    }
+    let trades = [];
+    try { trades = db._conn.prepare('SELECT pnl, strategy_tag, entered_at, exited_at FROM paper_closed_trades WHERE user_id = ? ORDER BY exited_at ASC, id ASC').all(uid); } catch (e) { trades = []; }
+    const groups = {};
+    for (const t of trades) {
+      if (!t.strategy_tag) continue;
+      const key = String(t.strategy_tag).toLowerCase();
+      if (!byTag[key]) continue;
+      (groups[key] || (groups[key] = [])).push(t);
+    }
+    const GATES = { days: 14, trades: 30, win: 60, sharpe: 1.2 };
+    const rows = [];
+    for (const [key, ts] of Object.entries(groups)) {
+      const meta = byTag[key];
+      const n = ts.length;
+      const wins = ts.filter(t => Number(t.pnl) > 0).length;
+      const w = n ? Math.round((wins / n) * 100) : 0;
+      const pnls = ts.map(t => Number(t.pnl || 0));
+      const first = new Date(ts[0].entered_at || ts[0].exited_at);
+      const d = isNaN(first.getTime()) ? 0 : Math.max(0, Math.round((Date.now() - first.getTime()) / 86400000));
+      let sh = 0;
+      if (n >= 2) {
+        const mean = pnls.reduce((a, b) => a + b, 0) / n;
+        const variance = pnls.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (n - 1);
+        const sd = Math.sqrt(variance);
+        if (sd > 0) sh = +(((mean / sd) * Math.sqrt(252))).toFixed(2);
+      }
+      let cum = 0, peak = 0, maxdd = 0;
+      for (const p of pnls) { cum += p; if (cum > peak) peak = cum; const dd = peak - cum; if (dd > maxdd) maxdd = dd; }
+      const dd = '-' + ((maxdd / baseline) * 100).toFixed(1) + '%';
+      rows.push({ n: meta.name, mode: meta.mode, d, t: n, w, sh, dd,
+        promotable: d >= GATES.days && n >= GATES.trades && w >= GATES.win && sh >= GATES.sharpe });
+    }
+    rows.sort((a, b) => (Number(b.promotable) - Number(a.promotable)) || (b.t - a.t));
+    res.json({ ok: true, gates: GATES, rows, count: rows.length });
+  }));
+
+  // ---------- GET /api/me/paper/fill-quality (T-528) ----------
+  // Fill-quality metrics from this user's paper order log: average slippage
+  // (bps), fill rate, rejection rate, partial-fill rate. Paper fills are
+  // synchronous, so fill-latency is not modeled (omitted, not faked).
+  app.get('/api/me/paper/fill-quality', withAuth((req, res) => {
+    const db = getDb();
+    const uid = req.user.id;
+    let orders = [];
+    try { orders = db.paper.listOrders(uid) || []; } catch (e) { orders = []; }
+    const up = (s) => String(s || '').toUpperCase();
+    const filled = orders.filter(o => up(o.status) === 'FILLED');
+    const cancelled = orders.filter(o => up(o.status) === 'CANCELLED' || up(o.status) === 'REJECTED');
+    const n = orders.length;
+    let slipBpsSum = 0, slipCount = 0;
+    for (const o of filled) {
+      const reqp = Number(o.req_price || 0), fill = Number(o.fill_price || 0);
+      if (reqp > 0) { slipBpsSum += Math.abs(fill - reqp) / reqp * 10000; slipCount++; }
+    }
+    const avgSlipBps = slipCount ? +(slipBpsSum / slipCount).toFixed(2) : 0;
+    const fillRate = n ? Math.round((filled.length / n) * 100) : 0;
+    const rejectionRate = n ? +(((cancelled.length / n) * 100)).toFixed(1) : 0;
+    res.json({
+      ok: true,
+      totalOrders: n,
+      filledOrders: filled.length,
+      cancelledOrders: cancelled.length,
+      avgSlippageBps: avgSlipBps,
+      avgSlippagePct: +(avgSlipBps / 100).toFixed(3),
+      fillRate,
+      rejectionRate,
+      partialFillRate: 0,
+      metrics: [
+        { k: 'Avg slippage',   v: avgSlipBps.toFixed(2) + ' bps', note: '|fill - request| / request across filled paper orders' },
+        { k: 'Fill rate',      v: fillRate + '%',                 note: filled.length + ' / ' + n + ' orders filled' },
+        { k: 'Rejection rate', v: rejectionRate + '%',            note: cancelled.length + ' rejected/cancelled of ' + n },
+        { k: 'Partial fills',  v: '0%',                           note: 'Not modeled in the paper engine yet' },
+      ],
+    });
+  }));
+
   // ---------- POST /api/me/paper/order (Tier 72) ----------
   app.post('/api/me/paper/order', withAuth(async (req, res) => {
     try {
