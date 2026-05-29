@@ -93,6 +93,49 @@ function mountPaperTradingRoutes(app, deps) {
     });
   }));
 
+  // ---------- GET /api/me/paper/equity-curve (T-525) ----------
+  // Real paper equity curve derived from this user's closed paper trades.
+  // Series = initial_capital baseline + cumulative realized P&L, ordered by
+  // trade exit time. Supports ?window=7d|30d|all (default all). Replaces the
+  // seriesRandom() demo series the React Paper screen used before T-525.
+  app.get('/api/me/paper/equity-curve', withAuth((req, res) => {
+    const db = getDb();
+    const uid = req.user.id;
+    const state = db.paper.getState(uid);
+    const baseline = Number(state.initial_capital || state.cash || 0);
+    const w = String((req.query && req.query.window) || 'all').toLowerCase();
+    const days = w === '7d' ? 7 : w === '30d' ? 30 : null;
+    let sql = 'SELECT pnl, exited_at FROM paper_closed_trades WHERE user_id = ?';
+    const args = [uid];
+    if (days) { sql += " AND exited_at >= datetime('now', ?)"; args.push('-' + days + ' days'); }
+    sql += ' ORDER BY exited_at ASC, id ASC';
+    let trades = [];
+    try { trades = db._conn.prepare(sql).all(...args); } catch (e) { trades = []; }
+    const fmt = (iso) => {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return String(iso || '').slice(0, 10);
+      return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+    };
+    const points = [{ t: 'Start', equity: baseline, realizedCum: 0 }];
+    let cum = 0;
+    for (const tr of trades) {
+      cum += Number(tr.pnl || 0);
+      points.push({ t: fmt(tr.exited_at), equity: baseline + cum, realizedCum: cum });
+    }
+    if (trades.length === 0) points.push({ t: 'Now', equity: baseline, realizedCum: 0 });
+    res.json({
+      ok: true,
+      window: w,
+      baseline,
+      currency: 'INR',
+      realizedPnl: cum,
+      count: trades.length,
+      series: points.map(p => p.equity),
+      labels: points.map(p => p.t),
+      points,
+    });
+  }));
+
   // ---------- POST /api/me/paper/order (Tier 72) ----------
   app.post('/api/me/paper/order', withAuth(async (req, res) => {
     try {

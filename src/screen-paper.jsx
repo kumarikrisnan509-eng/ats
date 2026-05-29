@@ -610,6 +610,21 @@ const PaperScreen = () => {
   const [livePositions, setLivePositions] = React.useState(null);
   const [liveOrders, setLiveOrders] = React.useState(null);
   const [paperLoading, setPaperLoading] = React.useState(true);
+  // T-525: real paper equity curve (initial capital + cumulative realized P&L
+  // from closed trades). Replaces the seriesRandom() demo series. Window-aware.
+  const [equityCurve, setEquityCurve] = React.useState(null);
+  const [equityWindow, setEquityWindow] = React.useState('30d');
+  React.useEffect(() => {
+    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await window.fetchApi('/api/me/paper/equity-curve?window=' + encodeURIComponent(String(equityWindow).toLowerCase()));
+        if (!cancelled && r && r.ok) setEquityCurve(r);
+      } catch (e) { /* keep prior series */ }
+    })();
+    return () => { cancelled = true; };
+  }, [equityWindow]);
   React.useEffect(() => {
     if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) {
       setPaperLoading(false);
@@ -688,7 +703,9 @@ const PaperScreen = () => {
   }) : []);
 
   // T-346: synthetic PnL series only in demo mode.
-  const pnlSeries = demo ? seriesRandom(9, 40, -8000, 160000, 3500) : [];
+  const pnlSeries = demo ? seriesRandom(9, 40, -8000, 160000, 3500) : ((equityCurve && Array.isArray(equityCurve.series)) ? equityCurve.series : []);
+  // T-525: labels come from the equity-curve endpoint in live mode.
+  const pnlLabels = demo ? [window.daysAgo(55), window.daysAgo(40), window.daysAgo(24), window.daysAgo(9), window.TODAY_SHORT] : ((equityCurve && Array.isArray(equityCurve.labels)) ? equityCurve.labels : []);
 
   // Paper vs live calibration
   // T-346: paper-vs-live calibration is fixture data; gate behind demo.
@@ -941,17 +958,22 @@ const PaperScreen = () => {
         background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
         fontSize: 12, color: 'var(--text-2)',
       }}>
-        <strong>Equity curve + Fill quality + Paper order book are demo data.</strong>{' '}
-        The chart uses random series and the fill/order tables are
-        hardcoded. The 'Live paper account' card at the very top of this
-        screen IS real (per-user state from /api/me/paper).
+        {demo ? (
+          <><strong>Demo mode — paper panels show illustrative sample data.</strong>{' '}
+          Turn off demo mode to see your real per-user paper account.</>
+        ) : (
+          <><strong>Fill quality and the Promotion-to-live table are not yet wired to live data.</strong>{' '}
+          The Paper equity curve, Live paper account, and Paper order book are
+          real (per-user data from /api/me/paper). The remaining sample panels
+          switch to live data once their endpoints land.</>
+        )}
       </div>
 
       {/* P&L chart */}
       <div className="grid grid-2-1" style={{ marginBottom: 16 }}>
-        <Card title="Paper equity curve" sub="₹ vs virtual capital baseline" right={<Segmented value="30d" onChange={()=>{}} options={["7d","30d","All"]}/>}>
+        <Card title="Paper equity curve" sub="₹ vs virtual capital baseline" right={<Segmented value={demo ? '30d' : equityWindow} onChange={demo ? (()=>{}) : ((v)=>setEquityWindow(v))} options={["7d","30d","All"]}/>}>
           <AreaChart data={pnlSeries} height={220} color="var(--accent)" formatter={v => inrCompact(v)}
-            labels={[window.daysAgo(55), window.daysAgo(40), window.daysAgo(24), window.daysAgo(9), window.TODAY_SHORT]}/>
+            labels={pnlLabels}/>
         </Card>
         <Card title="Fill quality" sub="Paper fills are calibrated to live">
           {/* T-184 (F-3): gate the 4-row paperVsLive hardcoded table behind
