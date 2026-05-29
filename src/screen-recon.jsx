@@ -45,76 +45,109 @@ const _ReconLoadErrPill_legacy = ({ err, onRetry }) => {
 };
 
 const ReconScreen = () => {
-  // ---- live /api/reconcile ----
-  const [liveRecon, setLiveRecon] = React.useState(null);
-  // T-208 (CODE-AUDIT F.5 M2.4): surface load failures to the user.
-  const [loadErr, setLoadErr] = React.useState(null);
+  const _isDemo = !!(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
+
+  // Live paper-vs-broker STATE snapshot (cash / holdings / pending-order drift).
+  const [liveRecon, setLiveRecon] = React.useState(/** @type {any} */ (null));
+  const [loadErr, setLoadErr] = React.useState(/** @type {any} */ (null));
+
+  // T-554: real TRADE-LEVEL reconciliation (per-user) + 30-day trade history.
+  const _todayIST = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+  const [date, setDate] = React.useState(_todayIST);
+  const [tradeRecon, setTradeRecon] = React.useState(/** @type {any} */ (null));
+  const [hist, setHist] = React.useState(/** @type {any} */ (null));
+  const [filter, setFilter] = React.useState("all");
+  const [busy, setBusy] = React.useState(false);
+
   React.useEffect(() => {
-    if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
+    if (_isDemo) return;
     let cancelled = false;
     (async () => {
       try {
-        const d = await window.fetchApi('/api/reconcile');
+        const d = await window.fetchApi("/api/reconcile");
         if (!cancelled && d && d.ok) setLiveRecon(d);
       } catch (e) {
-        // T-208: log AND surface to user via inline pill below header.
-        console.warn('[screen-recon] error:', e && e.message);
-        if (!cancelled) setLoadErr(e && e.message ? e.message : 'fetch failed');
+        console.warn("[screen-recon] error:", e && e.message);
+        if (!cancelled) setLoadErr(e && e.message ? e.message : "fetch failed");
       }
     })();
     return () => { cancelled = true; };
-  }, []);
-  // Re-run reconciliation = refetch /api/reconcile (the endpoint recomputes the match).
-  const reRunMatch = async () => {
-    try { const d = await window.fetchApi("/api/reconcile"); if (d && d.ok) setLiveRecon(d); }
-    catch (e) { setLoadErr(e && e.message ? e.message : "fetch failed"); }
-  };
-  const [date, setDate] = React.useState("2026-04-23");
-  const [filter, setFilter] = React.useState("all");
+  }, [_isDemo]);
 
-  // T-420 (production-readiness audit, BLOCKER #4):
-  // Was: hardcoded `summary` (42 trades, ₹17,776 P&L) and `rows` (8 fake
-  //      RELIANCE/TCS/HDFCBANK/NIFTY trades with broker IDs "ZR-A2948372"
-  //      etc.) rendered as if they were today's reconciliation results.
-  //      A warning banner above said "demo data until /api/reconcile
-  //      responds" but the data still rendered convincingly.
-  // Now: fixtures only render in demo mode. In prod, summary uses zeros and
-  //      rows is empty -- table shows an "empty reconciliation" state.
-  const _reconIsDemo = !!(window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn());
-  const summary = _reconIsDemo ? {
-    ours: { trades: 42, grossPnL: 18400, fees: 624, netPnL: 17776 },
-    broker: { trades: 42, grossPnL: 18400, fees: 628, netPnL: 17772 },
-    matched: 40,
-    mismatched: 2,
-    missing: 0,
-  } : {
-    ours: { trades: 0, grossPnL: 0, fees: 0, netPnL: 0 },
-    broker: { trades: 0, grossPnL: 0, fees: 0, netPnL: 0 },
-    matched: 0,
-    mismatched: 0,
-    missing: 0,
-  };
+  const loadTrades = React.useCallback(async (forDate) => {
+    if (_isDemo) return;
+    setBusy(true);
+    try {
+      const d = await window.fetchApi("/api/me/reconcile/trades?date=" + encodeURIComponent(forDate));
+      if (d && d.ok) setTradeRecon(d);
+    } catch (e) {
+      setLoadErr(e && e.message ? e.message : "fetch failed");
+    } finally { setBusy(false); }
+  }, [_isDemo]);
 
-  const rows = _reconIsDemo ? [
-    { id: "OUR-8842", brokerId: "ZR-A2948372", sym: "RELIANCE",   qty: 50,  side: "BUY",  ours: 2843.50, broker: 2843.50, feeOur: 18.42, feeBk: 18.42, status: "matched" },
-    { id: "OUR-8843", brokerId: "ZR-A2948373", sym: "RELIANCE",   qty: 50,  side: "SELL", ours: 2848.20, broker: 2848.20, feeOur: 18.45, feeBk: 18.45, status: "matched" },
-    { id: "OUR-8844", brokerId: "ZR-A2948380", sym: "TCS",         qty: 20,  side: "BUY",  ours: 4142.80, broker: 4142.80, feeOur: 12.18, feeBk: 12.18, status: "matched" },
-    { id: "OUR-8845", brokerId: "ZR-A2948381", sym: "TCS",         qty: 20,  side: "SELL", ours: 4148.60, broker: 4148.60, feeOur: 12.22, feeBk: 14.80, status: "fee-diff" },
-    { id: "OUR-8846", brokerId: "ZR-A2948392", sym: "HDFCBANK",   qty: 40,  side: "BUY",  ours: 1684.20, broker: 1684.25, feeOur: 11.38, feeBk: 11.38, status: "price-diff" },
-    { id: "OUR-8847", brokerId: "ZR-A2948393", sym: "HDFCBANK",   qty: 40,  side: "SELL", ours: 1686.90, broker: 1686.90, feeOur: 11.42, feeBk: 11.42, status: "matched" },
-    { id: "OUR-8848", brokerId: "ZR-A2948410", sym: "NIFTY24APR24000CE", qty: 50, side: "BUY", ours: 142.80, broker: 142.80, feeOur: 8.42, feeBk: 8.42, status: "matched" },
-    { id: "OUR-8849", brokerId: "ZR-A2948411", sym: "NIFTY24APR24000CE", qty: 50, side: "SELL", ours: 148.60, broker: 148.60, feeOur: 8.62, feeBk: 8.62, status: "matched" },
-  ] : [];
+  React.useEffect(() => { loadTrades(date); }, [date, loadTrades]);
 
-  const filtered = filter === "all" ? rows : rows.filter(r => filter === "mismatch" ? r.status !== "matched" : r.status === "matched");
+  React.useEffect(() => {
+    if (_isDemo) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const d = await window.fetchApi("/api/me/reconcile/history?days=30");
+        if (!cancelled && d && d.ok) setHist(d);
+      } catch (_e) { /* history is non-critical */ }
+    })();
+    return () => { cancelled = true; };
+  }, [_isDemo]);
 
+  // Demo fixtures render only in demo mode; live mode uses real per-user data.
+  const _demoRows = [
+    { id: "OUR-8844", brokerId: "ZR-A2948380", sym: "TCS", side: "BUY", qty: 20, ours: 4142.80, broker: 4142.80, feeOur: 12.18, feeBk: 12.18, status: "matched" },
+    { id: "OUR-8845", brokerId: "ZR-A2948381", sym: "TCS", side: "SELL", qty: 20, ours: 4148.60, broker: 4148.60, feeOur: 12.22, feeBk: 14.80, status: "fee-diff" },
+    { id: "OUR-8846", brokerId: "ZR-A2948392", sym: "HDFCBANK", side: "BUY", qty: 40, ours: 1684.20, broker: 1684.25, feeOur: 11.38, feeBk: 11.38, status: "price-diff" },
+  ];
+  const rows = _isDemo ? _demoRows : ((tradeRecon && Array.isArray(tradeRecon.rows)) ? tradeRecon.rows : []);
+  const reconcilable = _isDemo ? true : !!(tradeRecon && tradeRecon.reconcilable);
+  const sum = _isDemo
+    ? { ourTrades: 3, brokerTrades: 3, matched: 1, mismatched: 2 }
+    : ((tradeRecon && tradeRecon.summary) ? tradeRecon.summary : { ourTrades: 0, brokerTrades: 0, matched: 0, mismatched: 0 });
+
+  const MISMATCH = ["price-diff", "qty-diff", "fee-diff", "missing-broker", "missing-ours"];
+  const filtered = filter === "all" ? rows
+    : filter === "mismatch" ? rows.filter((r) => MISMATCH.indexOf(r.status) >= 0)
+    : rows.filter((r) => r.status === "matched");
+
+  const px = (v) => (v == null ? "—" : Number(v).toFixed(2));
   const diffChip = (status) => {
     if (status === "matched") return <Chip variant="up">✓ Matched</Chip>;
     if (status === "price-diff") return <Chip variant="down">Price diff</Chip>;
+    if (status === "qty-diff") return <Chip variant="down">Qty diff</Chip>;
     if (status === "fee-diff") return <Chip variant="warn">Fee diff</Chip>;
-    if (status === "missing") return <Chip variant="down">Missing</Chip>;
+    if (status === "missing-broker") return <Chip variant="down">Missing @ broker</Chip>;
+    if (status === "missing-ours") return <Chip variant="down">Broker only</Chip>;
+    if (status === "unreconciled") return <Chip>Unreconciled</Chip>;
     return <Chip>{status}</Chip>;
   };
+
+  const exportCsv = () => {
+    const hdr = ["Our ID", "Broker ID", "Symbol", "Side", "Qty", "Our price", "Broker price", "Our fee", "Broker fee", "Status"];
+    const esc = (x) => {
+      const v = (x == null ? "" : String(x));
+      return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+    };
+    const lines = [hdr.join(",")];
+    for (const r of rows) lines.push([r.id, r.brokerId, r.sym, r.side, r.qty, r.ours, r.broker, r.feeOur, r.feeBk, r.status].map(esc).join(","));
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "reconciliation-" + date + ".csv";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    if (window.toast) window.toast("Reconciliation exported (" + rows.length + " rows)", "info");
+  };
+
+  const histRows = (hist && Array.isArray(hist.rows)) ? hist.rows : [];
+  const histMax = histRows.reduce((mx, r) => Math.max(mx, r.trades || 0), 0);
+  const histSum = (hist && hist.summary) ? hist.summary : null;
 
   return (
     <>
@@ -125,42 +158,22 @@ const ReconScreen = () => {
             Operations · Broker reconciliation
           </h2>
           <div style={{ fontSize: 13, color: "var(--text-2)", marginTop: 4, maxWidth: 720 }}>
-            Daily match between our internal trade log and Zerodha contract notes. Runs automatically at 6 PM IST after market close. Mismatches must be resolved before books are closed for the day.
+            Daily match between your executed trades and the broker contract note. With a live broker connected each trade is matched on symbol/side/qty/price; in paper mode your simulated fills are listed for review (no broker note to match against).
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <input type="date" className="input" value={date} onChange={e => setDate(e.target.value)} style={{ width: 150 }}/>
-          <button className="btn btn-ghost" onClick={reRunMatch}>Re-run match</button>
-          <button className="btn btn-primary" disabled title="Contract-note PDF export is not available yet">Download contract note PDF</button>
+          <input type="date" value={date} max={_todayIST} onChange={(e) => setDate(e.target.value)} style={{ width: 150, padding: "4px 8px", fontSize: 13, background: "var(--bg)", color: "var(--text-1)", border: "1px solid var(--border)", borderRadius: 4 }} />
+          <button className="btn btn-ghost" disabled={busy} onClick={() => loadTrades(date)}>{busy ? "Matching…" : "Re-run match"}</button>
+          <button className="btn btn-primary" disabled={!rows.length} title={rows.length ? "Export the reconciliation table as CSV" : "No trades to export"} onClick={exportCsv}>Export CSV</button>
         </div>
       </div>
 
-      {/* T99-T95 banner — partially obsolete now that T-102 renders the
-          live snapshot below. We keep the banner narrowed: it only fires
-          when liveRecon is null (fetch failed / not loaded yet). */}
-      {!liveRecon && (
-        <div role="note" style={{
-          padding: '8px 12px', marginBottom: 12, borderRadius: 6,
-          border: '1px solid color-mix(in oklab, var(--warn, #d97706) 35%, var(--border))',
-          background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
-          fontSize: 12, color: 'var(--text-2)',
-        }}>
-          <strong>Reconciliation snapshot loading…</strong>{' '}
-          The summary cards, trade rows, and mismatch banner shown below are
-          demo data until /api/reconcile responds. Per-trade contract-note
-          reconciliation hasn't shipped — what loads is a paper-vs-broker
-          state snapshot (cash drift, holdings drift, pending orders).
-        </div>
-      )}
-
-      {/* T99-T102: live /api/reconcile snapshot. Replaces the static
-          demo cards as the primary view when the endpoint is reachable. */}
       {liveRecon && (
         <Card style={{ marginBottom: 16, borderColor: 'var(--accent)', borderWidth: 1 }}>
           <div className="row between" style={{ marginBottom: 12 }}>
             <div>
               <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4 }}>
-                Live reconciliation · {liveRecon.brokerName || 'broker'}
+                Live state · {liveRecon.brokerName || 'broker'}
               </div>
               <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
                 as of {liveRecon.asOf ? new Date(liveRecon.asOf).toLocaleString('en-IN') : '—'}
@@ -210,147 +223,112 @@ const ReconScreen = () => {
               <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>paper / broker</div>
             </div>
           </div>
-          {Array.isArray(liveRecon.holdings) && liveRecon.holdings.length > 0 && (
-            <div style={{ marginTop: 16 }}>
-              <div className="muted" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>
-                Holdings ({liveRecon.holdings.length})
-              </div>
-              <table className="table">
-                <thead><tr><th>Symbol</th><th className="num-l">Paper qty</th><th className="num-l">Broker qty</th><th className="num-l">Avg</th><th className="num-l">LTP</th></tr></thead>
-                <tbody>
-                  {liveRecon.holdings.slice(0, 10).map((h, i) => (
-                    <tr key={i}>
-                      <td style={{ fontWeight: 500 }}>{h.symbol}</td>
-                      <td className="num mono">{h.paperQty || 0}</td>
-                      <td className="num mono">{h.brokerQty || 0}</td>
-                      <td className="num mono">{h.brokerAvg ? '₹' + h.brokerAvg.toFixed(2) : '—'}</td>
-                      <td className="num mono">{h.brokerLtp ? '₹' + h.brokerLtp.toFixed(2) : '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
         </Card>
       )}
 
-      {/* Match summary */}
+      {!_isDemo && tradeRecon && !reconcilable && tradeRecon.note && (
+        <div role="note" style={{
+          padding: '8px 12px', marginBottom: 12, borderRadius: 6,
+          border: '1px solid color-mix(in oklab, var(--warn, #d97706) 35%, var(--border))',
+          background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
+          fontSize: 12, color: 'var(--text-2)',
+        }}>
+          {tradeRecon.note}
+        </div>
+      )}
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
         <Card>
-          <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Trades matched</div>
-          <div className="mono" style={{ fontSize: 28, fontWeight: 700, marginTop: 6, color: "var(--up)" }}>{summary.matched}<span style={{ fontSize: 14, color: "var(--text-3)", fontWeight: 500 }}> / {summary.ours.trades}</span></div>
-          <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>{summary.ours.trades > 0 ? Math.round(summary.matched / summary.ours.trades * 100) : 0}% match rate</div>
+          <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Your trades</div>
+          <div className="mono" style={{ fontSize: 28, fontWeight: 700, marginTop: 6 }}>{sum.ourTrades}</div>
+          <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>executed on {date}</div>
+        </Card>
+        <Card>
+          <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Broker trades</div>
+          <div className="mono" style={{ fontSize: 28, fontWeight: 700, marginTop: 6 }}>{reconcilable ? sum.brokerTrades : "—"}</div>
+          <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>{reconcilable ? "from contract note" : "paper — none"}</div>
+        </Card>
+        <Card>
+          <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Matched</div>
+          <div className="mono" style={{ fontSize: 28, fontWeight: 700, marginTop: 6, color: "var(--up)" }}>{reconcilable ? sum.matched : "—"}</div>
+          <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>{reconcilable && sum.ourTrades > 0 ? Math.round(sum.matched / sum.ourTrades * 100) + "% of yours" : "needs live broker"}</div>
         </Card>
         <Card>
           <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Mismatched</div>
-          <div className="mono" style={{ fontSize: 28, fontWeight: 700, marginTop: 6, color: "oklch(65% 0.13 80)" }}>{summary.mismatched}</div>
-          <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>Needs review before close</div>
-        </Card>
-        <Card>
-          <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Net PnL (ours)</div>
-          <div className="mono" style={{ fontSize: 28, fontWeight: 700, marginTop: 6 }}>+₹{summary.ours.netPnL.toLocaleString("en-IN")}</div>
-          <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>after ₹{summary.ours.fees} fees</div>
-        </Card>
-        <Card>
-          <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Net PnL (broker)</div>
-          <div className="mono" style={{ fontSize: 28, fontWeight: 700, marginTop: 6, color: "var(--down)" }}>+₹{summary.broker.netPnL.toLocaleString("en-IN")}</div>
-          <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>Diff: ₹{summary.ours.netPnL - summary.broker.netPnL} (fee undercount)</div>
+          <div className="mono" style={{ fontSize: 28, fontWeight: 700, marginTop: 6, color: sum.mismatched > 0 ? "var(--down)" : "var(--text-3)" }}>{reconcilable ? sum.mismatched : "—"}</div>
+          <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>needs review before close</div>
         </Card>
       </div>
 
-      {/* Trade-level match */}
-      <Card title="Trade-level match" sub={`${filtered.length} trades · ${summary.mismatched} flagged for review`}>
+      <Card title="Trade-level match" sub={`${filtered.length} shown · ${reconcilable ? sum.mismatched + " flagged" : "paper — not reconciled"}`}>
         <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
-          {["all", "mismatch", "matched"].map(f => (
+          {["all", "mismatch", "matched"].map((f) => (
             <button key={f} className={filter === f ? "btn btn-primary" : "btn btn-ghost"} style={{ fontSize: 11, padding: "4px 10px", textTransform: "capitalize" }} onClick={() => setFilter(f)}>
-              {f === "all" ? `All (${rows.length})` : f === "mismatch" ? `Mismatched (${summary.mismatched})` : `Matched (${summary.matched})`}
+              {f === "all" ? `All (${rows.length})` : f === "mismatch" ? `Mismatched (${rows.filter((r) => MISMATCH.indexOf(r.status) >= 0).length})` : `Matched (${rows.filter((r) => r.status === "matched").length})`}
             </button>
           ))}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "120px 140px 1fr 60px 60px 100px 100px 90px 90px 110px", padding: "8px 12px", borderBottom: "1px solid var(--border)", fontSize: 10, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "120px 140px 1fr 60px 60px 100px 100px 90px 90px 130px", padding: "8px 12px", borderBottom: "1px solid var(--border)", fontSize: 10, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600 }}>
           <div>Our ID</div><div>Broker ID</div><div>Symbol</div><div>Side</div><div style={{ textAlign: "right" }}>Qty</div><div style={{ textAlign: "right" }}>Our price</div><div style={{ textAlign: "right" }}>Broker px</div><div style={{ textAlign: "right" }}>Our fee</div><div style={{ textAlign: "right" }}>Broker fee</div><div>Status</div>
         </div>
-        {filtered.map((r, i) => {
-          const priceOk = r.ours === r.broker;
-          const feeOk = r.feeOur === r.feeBk;
+        {filtered.length === 0 ? (
+          <div className="muted" style={{ padding: "20px 12px", fontSize: 12, textAlign: "center" }}>
+            {busy ? "Loading…" : "No trades for " + date + "."}
+          </div>
+        ) : filtered.map((r, idx) => {
+          const priceOk = r.ours != null && r.broker != null && Math.abs(Number(r.ours) - Number(r.broker)) < 0.011;
+          const feeOk = r.feeOur != null && r.feeBk != null && Math.abs(Number(r.feeOur) - Number(r.feeBk)) < 0.011;
           return (
-            <div key={i} style={{
-              display: "grid", gridTemplateColumns: "120px 140px 1fr 60px 60px 100px 100px 90px 90px 110px",
-              padding: "10px 12px", borderBottom: i < filtered.length - 1 ? "1px solid var(--border)" : "none",
-              alignItems: "center", fontSize: 11, background: r.status !== "matched" ? "var(--warn-soft)" : "transparent",
+            <div key={idx} style={{
+              display: "grid", gridTemplateColumns: "120px 140px 1fr 60px 60px 100px 100px 90px 90px 130px",
+              padding: "10px 12px", borderBottom: idx < filtered.length - 1 ? "1px solid var(--border)" : "none",
+              alignItems: "center", fontSize: 11, background: (r.status !== "matched" && r.status !== "unreconciled") ? "var(--warn-soft)" : "transparent",
             }}>
-              <div className="mono" style={{ color: "var(--text-3)" }}>{r.id}</div>
-              <div className="mono" style={{ color: "var(--text-3)" }}>{r.brokerId}</div>
+              <div className="mono" style={{ color: "var(--text-3)" }}>{r.id || "—"}</div>
+              <div className="mono" style={{ color: "var(--text-3)" }}>{r.brokerId || "—"}</div>
               <div style={{ fontWeight: 500 }}>{r.sym}</div>
               <div style={{ color: r.side === "BUY" ? "var(--up)" : "var(--down)", fontWeight: 600 }}>{r.side}</div>
               <div className="mono" style={{ textAlign: "right" }}>{r.qty}</div>
-              <div className="mono" style={{ textAlign: "right", color: priceOk ? "var(--text)" : "var(--down)", fontWeight: priceOk ? 400 : 700 }}>{r.ours.toFixed(2)}</div>
-              <div className="mono" style={{ textAlign: "right", color: priceOk ? "var(--text)" : "var(--down)", fontWeight: priceOk ? 400 : 700 }}>{r.broker.toFixed(2)}</div>
-              <div className="mono" style={{ textAlign: "right", color: feeOk ? "var(--text)" : "oklch(65% 0.13 80)", fontWeight: feeOk ? 400 : 700 }}>{r.feeOur.toFixed(2)}</div>
-              <div className="mono" style={{ textAlign: "right", color: feeOk ? "var(--text)" : "oklch(65% 0.13 80)", fontWeight: feeOk ? 400 : 700 }}>{r.feeBk.toFixed(2)}</div>
+              <div className="mono" style={{ textAlign: "right", color: r.broker != null && !priceOk ? "var(--down)" : "var(--text)", fontWeight: r.broker != null && !priceOk ? 700 : 400 }}>{px(r.ours)}</div>
+              <div className="mono" style={{ textAlign: "right", color: r.broker != null && !priceOk ? "var(--down)" : "var(--text)", fontWeight: r.broker != null && !priceOk ? 700 : 400 }}>{px(r.broker)}</div>
+              <div className="mono" style={{ textAlign: "right", color: r.feeBk != null && !feeOk ? "oklch(65% 0.13 80)" : "var(--text)" }}>{px(r.feeOur)}</div>
+              <div className="mono" style={{ textAlign: "right", color: r.feeBk != null && !feeOk ? "oklch(65% 0.13 80)" : "var(--text)" }}>{px(r.feeBk)}</div>
               <div>{diffChip(r.status)}</div>
             </div>
           );
         })}
-
-        {/* T-420: summary.mismatched is hardcoded to 0 outside demo mode now
-            (see _reconIsDemo gate above), so this entire block renders only
-            when demo mode is on. The hardcoded text refers to OUR-8845/8846
-            which are demo-only trade IDs. */}
-        {summary.mismatched > 0 && (
-          <div style={{ marginTop: 14, padding: 14, background: "var(--warn-soft)", color: "oklch(40% 0.12 80)", borderRadius: "var(--r-md)", fontSize: 12 }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>Action required · 2 mismatches</div>
-            <div style={{ lineHeight: 1.5 }}>
-              <strong>OUR-8845:</strong> Fee differs by ₹2.58 — Zerodha applied additional STT on LTP-above-5%. Our calc used average, theirs used close. Update our fee model to match.<br/>
-              <strong>OUR-8846:</strong> Price differs by ₹0.05 — likely a tick-size rounding issue on our snapshot. Broker fill is authoritative. Adjusting book.
-            </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-              <button className="btn btn-primary" style={{ fontSize: 11 }}>Accept broker values</button>
-              <button className="btn btn-ghost" style={{ fontSize: 11 }}>Raise ticket with Zerodha</button>
-            </div>
-          </div>
-        )}
       </Card>
 
-      {/* 30-day recon history */}
       <div style={{ marginTop: 16 }}>
-        <Card title="30-day reconciliation history" sub="Match rate trend">
+        <Card title="30-day trade history" sub="Executed trades per day (IST)">
           <div style={{ display: "grid", gridTemplateColumns: "repeat(30, 1fr)", gap: 3, height: 60, alignItems: "flex-end", padding: "8px 0" }}>
-            {/* T-420: 30-day match-rate history was synthesised from Math.random()
-                which is the worst kind of fake -- shaped to look like real
-                data. In prod we render an empty grid (each cell is a thin
-                grey bar) until a real /api/reconcile/history endpoint exists. */}
-            {Array.from({ length: 30 }, (_, i) => {
-              const matchPct = _reconIsDemo ? (95 + Math.random() * 5) : 0;
-              const hasIssue = _reconIsDemo ? (Math.random() > 0.8) : false;
+            {(histRows.length ? histRows : Array.from({ length: 30 }, () => ({ date: "", trades: 0 }))).slice(-30).map((r, i) => {
+              const h = histMax > 0 ? Math.round((r.trades / histMax) * 100) : 0;
               return (
                 <div key={i} style={{ display: "flex", flexDirection: "column", gap: 2, alignItems: "center" }}>
-                  <div style={{ width: "100%", height: _reconIsDemo ? `${matchPct - 90}%` : "4px", minHeight: _reconIsDemo ? 20 : 2, background: _reconIsDemo ? (hasIssue ? "oklch(65% 0.13 80)" : "var(--up)") : "var(--border)", borderRadius: 2 }} title={_reconIsDemo ? `Day ${i+1}: ${matchPct.toFixed(1)}%` : `Day ${i+1}: no data`}/>
+                  <div title={r.date ? `${r.date}: ${r.trades} trade${r.trades === 1 ? "" : "s"}` : "no data"} style={{ width: "100%", height: r.trades > 0 ? `${Math.max(12, h)}%` : "4px", minHeight: r.trades > 0 ? 12 : 2, background: r.trades > 0 ? "var(--up)" : "var(--border)", borderRadius: 2 }} />
                 </div>
               );
             })}
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, fontSize: 10, color: "var(--text-3)" }}>
-            <div className="mono">Mar 24</div>
-            <div className="mono">Apr 8</div>
+            <div className="mono">{histRows.length ? histRows[0].date : "—"}</div>
+            <div className="mono">{histRows.length ? histRows[Math.floor(histRows.length / 2)].date : ""}</div>
             <div className="mono">Today</div>
           </div>
           <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-            {/* T-420d: was 3 hardcoded fake summary stats (98.4%, 14/14, 18 min)
-                rendered as if they were real 30-day rollups. Gated to em-dash
-                outside demo until a real /api/reconcile/history rollup exists. */}
             <div style={{ padding: 10, background: "var(--bg-soft)", borderRadius: "var(--r-sm)" }}>
-              <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>30-day avg match</div>
-              <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: _reconIsDemo ? "var(--up)" : "var(--text-3)" }}>{_reconIsDemo ? "98.4%" : "—"}</div>
+              <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Trades (30d)</div>
+              <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>{histSum ? histSum.totalTrades : "—"}</div>
             </div>
             <div style={{ padding: 10, background: "var(--bg-soft)", borderRadius: "var(--r-sm)" }}>
-              <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Issues resolved</div>
-              <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>{_reconIsDemo ? "14 / 14" : "—"}</div>
+              <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Active days</div>
+              <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>{histSum ? histSum.activeDays : "—"}</div>
             </div>
             <div style={{ padding: 10, background: "var(--bg-soft)", borderRadius: "var(--r-sm)" }}>
-              <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Avg resolution time</div>
-              <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>{_reconIsDemo ? "18 min" : "—"}</div>
+              <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, textTransform: "uppercase" }}>Mismatches (30d)</div>
+              <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>{histSum ? histSum.totalMismatched : "—"}</div>
             </div>
           </div>
         </Card>

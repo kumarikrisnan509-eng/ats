@@ -268,6 +268,166 @@ function mountPaperTradingRoutes(app, deps) {
     });
   }));
 
+  // ---------- T-554: per-user trade-level reconciliation ----------
+  // Reconciles the user's EXECUTED (paper) trades for an IST day against the
+  // broker's completed orders for the same day. HONEST by design: in paper mode
+  // (or whenever the broker returns no trades for that date) our trades are
+  // returned with an 'unreconciled' status and reconcilable:false -- we NEVER
+  // fabricate broker contract-note rows. Replaces the old hardcoded demo table.
+  function _istDayWindowUtc(dateStr) {
+    // dateStr 'YYYY-MM-DD' is interpreted as an IST calendar day. Returns the
+    // [startIso,endIso) UTC window (to compare against paper_orders.filled_at,
+    // which is a UTC ISO string) plus the normalized IST date.
+    const IST = 5.5 * 3600 * 1000;
+    let y, m, d;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || ''))) {
+      const p = String(dateStr).split('-').map(Number); y = p[0]; m = p[1]; d = p[2];
+    } else {
+      const ist = new Date(Date.now() + IST);
+      y = ist.getUTCFullYear(); m = ist.getUTCMonth() + 1; d = ist.getUTCDate();
+    }
+    const startUtc = Date.UTC(y, m - 1, d) - IST;
+    return {
+      startIso: new Date(startUtc).toISOString(),
+      endIso:   new Date(startUtc + 86400000).toISOString(),
+      dateIST:  y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0'),
+    };
+  }
+
+  app.get('/api/me/reconcile/trades', withAuth(async (req, res) => {
+    try {
+      const db = getDb();
+      const uid = req.user.id;
+      const { startIso, endIso, dateIST } = _istDayWindowUtc(req.query.date);
+
+      // OUR executed trades for the day = filled paper orders in the IST window.
+      let ourOrders = [];
+      try {
+        ourOrders = (db.paper.listOrders(uid) || []).filter((o) => {
+          const f = o.filled_at || '';
+          return String(o.status || '').toUpperCase() === 'FILLED' && f >= startIso && f < endIso;
+        });
+      } catch (_) { ourOrders = []; }
+      const ours = ourOrders.map((o) => ({
+        id: o.client_order_id || ('OUR-' + o.id),
+        sym: String(o.symbol || '').toUpperCase(),
+        side: String(o.side || '').toUpperCase(),
+        qty: Number(o.qty || 0),
+        price: Number(o.fill_price || 0),
+        fee: Number(o.slippage || 0),
+        strategy: o.strategy_tag || null,
+      }));
+
+      // BROKER side: only attempted when a broker is actually connected.
+      const broker = getBroker();
+      const brokerConnected = !!(broker && broker.health && broker.health().connected);
+      let brokerOk = false, brokerErr = null, brokerTrades = [];
+      if (brokerConnected) {
+        try {
+          const orders = await broker.getOrders();
+          brokerOk = true;
+          brokerTrades = (Array.isArray(orders) ? orders : []).filter((o) => {
+            const st = String(o.status || '').toUpperCase();
+            if (st !== 'COMPLETE' && st !== 'FILLED') return false;
+            const ts = String(o.order_timestamp || o.exchange_timestamp || o.filled_at || '');
+            return ts.slice(0, 10) === dateIST || (ts >= startIso && ts < endIso);
+          }).map((o) => ({
+            brokerId: o.order_id || o.id || null,
+            sym: String(o.tradingsymbol || o.symbol || '').toUpperCase(),
+            side: String(o.transaction_type || o.side || '').toUpperCase(),
+            qty: Number(o.filled_quantity != null ? o.filled_quantity : (o.quantity || 0)),
+            price: Number(o.average_price || o.price || 0),
+            fee: null,
+          }));
+        } catch (e) { brokerOk = false; brokerErr = e.message; }
+      }
+
+      // Reconcilable only if the broker actually returned trades for this date.
+      const reconcilable = brokerConnected && brokerOk && brokerTrades.length > 0;
+      const TOL = 0.01; // rupee price tolerance
+      const remaining = brokerTrades.slice();
+      const rows = [];
+      for (const t of ours) {
+        let mi = -1;
+        if (reconcilable) {
+          mi = remaining.findIndex((b) => b.sym === t.sym && b.side === t.side && b.qty === t.qty);
+          if (mi === -1) mi = remaining.findIndex((b) => b.sym === t.sym && b.side === t.side);
+        }
+        if (mi >= 0) {
+          const b = remaining.splice(mi, 1)[0];
+          let status = 'matched';
+          if (b.qty !== t.qty) status = 'qty-diff';
+          else if (Math.abs((b.price || 0) - (t.price || 0)) > TOL) status = 'price-diff';
+          rows.push({ id: t.id, brokerId: b.brokerId, sym: t.sym, side: t.side, qty: t.qty,
+                      ours: t.price, broker: b.price, feeOur: t.fee, feeBk: b.fee, status });
+        } else {
+          rows.push({ id: t.id, brokerId: null, sym: t.sym, side: t.side, qty: t.qty,
+                      ours: t.price, broker: null, feeOur: t.fee, feeBk: null,
+                      status: reconcilable ? 'missing-broker' : 'unreconciled' });
+        }
+      }
+      for (const b of remaining) {
+        rows.push({ id: null, brokerId: b.brokerId, sym: b.sym, side: b.side, qty: b.qty,
+                    ours: null, broker: b.price, feeOur: null, feeBk: b.fee, status: 'missing-ours' });
+      }
+
+      const matched = rows.filter((r) => r.status === 'matched').length;
+      const mismatched = rows.filter((r) => ['price-diff', 'qty-diff', 'missing-broker', 'missing-ours'].includes(r.status)).length;
+      const note = reconcilable
+        ? null
+        : (brokerConnected
+            ? 'No broker trades found for this date — nothing to reconcile against. Rows below are your executed trades.'
+            : 'Paper mode (no live broker connected): these are your simulated fills, so there is no broker contract note to match against.');
+
+      res.json({
+        ok: true, date: dateIST, brokerConnected, brokerOk, brokerErr, reconcilable,
+        brokerName: (broker && broker.name) || null,
+        summary: { ourTrades: ours.length, brokerTrades: brokerTrades.length, matched, mismatched },
+        note,
+        rows,
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: e.message });
+    }
+  }));
+
+  app.get('/api/me/reconcile/history', withAuth((req, res) => {
+    try {
+      const db = getDb();
+      const uid = req.user.id;
+      let days = parseInt(req.query.days, 10);
+      if (!Number.isInteger(days) || days < 1 || days > 120) days = 30;
+      const IST = 5.5 * 3600 * 1000;
+      let orders = [];
+      try { orders = (db.paper.listOrders(uid) || []).filter((o) => String(o.status || '').toUpperCase() === 'FILLED'); } catch (_) { orders = []; }
+      const byDay = new Map();
+      for (const o of orders) {
+        if (!o.filled_at) continue;
+        const ist = new Date(new Date(o.filled_at).getTime() + IST);
+        const key = ist.toISOString().slice(0, 10);
+        byDay.set(key, (byDay.get(key) || 0) + 1);
+      }
+      const today = new Date(Date.now() + IST);
+      const baseUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+      const rows = [];
+      for (let i = days - 1; i >= 0; i--) {
+        const key = new Date(baseUtc - i * 86400000).toISOString().slice(0, 10);
+        rows.push({ date: key, trades: byDay.get(key) || 0, mismatched: 0 });
+      }
+      const totalTrades = rows.reduce((sum, r) => sum + r.trades, 0);
+      const activeDays = rows.filter((r) => r.trades > 0).length;
+      res.json({
+        ok: true, days, rows,
+        summary: {
+          totalTrades, activeDays, totalMismatched: 0,
+          note: 'Counts are your real executed paper trades per IST day. Paper fills have no broker contract note, so per-day mismatches are 0; daily trade-level mismatches (when a live broker is connected) surface in the trade table above.',
+        },
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: e.message });
+    }
+  }));
+
   // ---------- POST /api/me/paper/order (Tier 72) ----------
   app.post('/api/me/paper/order', withAuth(async (req, res) => {
     try {
