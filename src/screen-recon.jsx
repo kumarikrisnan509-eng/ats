@@ -64,7 +64,7 @@ const ReconScreen = () => {
     let cancelled = false;
     (async () => {
       try {
-        const d = await window.fetchApi("/api/reconcile");
+        const d = await window.fetchApi("/api/me/reconcile/state");
         if (!cancelled && d && d.ok) setLiveRecon(d);
       } catch (e) {
         console.warn("[screen-recon] error:", e && e.message);

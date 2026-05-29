@@ -428,6 +428,80 @@ function mountPaperTradingRoutes(app, deps) {
     }
   }));
 
+  // ---------- T-555: per-user reconcile STATE (drift) snapshot ----------
+  // Mirrors /api/reconcile's cash/holdings/pending drift card, but reads the
+  // PER-USER db.paper (the source of truth for this user's paper account and
+  // for autorun fills) instead of the legacy global paper singleton. This makes
+  // the recon screen fully per-user — its trade table (T-554) and this state
+  // card now agree. Broker side is best-effort (safe() wrap), as in /api/reconcile.
+  app.get('/api/me/reconcile/state', withAuth(async (req, res) => {
+    try {
+      const db = getDb();
+      const uid = req.user.id;
+      const broker = getBroker();
+      const safe = async (fn) => { try { return { ok: true, data: await fn() }; } catch (e) { return { ok: false, error: e.message }; } };
+      const [holdingsR, ordersR, marginsR] = await Promise.all([
+        safe(() => broker.getHoldings()),
+        safe(() => broker.getOrders()),
+        safe(() => broker.getMargins()),
+      ]);
+
+      let brokerCash = null;
+      if (marginsR.ok && marginsR.data) {
+        const eq = marginsR.data.equity || {};
+        const av = eq.available || {};
+        brokerCash = typeof av.cash === 'number' ? av.cash
+                   : typeof av.live_balance === 'number' ? av.live_balance
+                   : typeof eq.net === 'number' ? eq.net
+                   : null;
+      }
+
+      const state = db.paper.getState(uid);
+      const paperCash = Number((state && state.cash) || 0);
+      let paperPositions = [];
+      try { paperPositions = db.paper.listPositions(uid) || []; } catch (_) { paperPositions = []; }
+
+      const brokerHoldings = holdingsR.ok && Array.isArray(holdingsR.data) ? holdingsR.data : [];
+      const bySym = new Map();
+      for (const h of brokerHoldings) {
+        const s = String(h.tradingsymbol || h.symbol || '').toUpperCase();
+        if (!s) continue;
+        bySym.set(s, { symbol: s, brokerQty: Number(h.quantity || 0), brokerAvg: Number(h.average_price || 0), brokerLtp: Number(h.last_price || 0), paperQty: 0, paperAvg: 0 });
+      }
+      for (const p of paperPositions) {
+        const s = String(p.symbol || '').toUpperCase();
+        const cur = bySym.get(s) || { symbol: s, brokerQty: 0, brokerAvg: 0, brokerLtp: 0, paperQty: 0, paperAvg: 0 };
+        cur.paperQty = Number(p.qty || 0);
+        cur.paperAvg = Number(p.avg_price || 0);
+        bySym.set(s, cur);
+      }
+      const holdingsRows = Array.from(bySym.values()).map((r) => ({ ...r, qtyDrift: r.brokerQty - r.paperQty, matches: r.brokerQty === r.paperQty }));
+
+      let paperOrders = [];
+      try { paperOrders = db.paper.listOrders(uid) || []; } catch (_) { paperOrders = []; }
+      const paperPendingCnt = paperOrders.filter((o) => { const s = String(o.status || '').toUpperCase(); return s === 'PENDING' || s === 'OPEN'; }).length;
+      const brokerOrdersAll = ordersR.ok && Array.isArray(ordersR.data) ? ordersR.data : [];
+      const brokerPendingCnt = brokerOrdersAll.filter((o) => { const s = String(o.status || '').toUpperCase(); return s === 'OPEN' || s === 'TRIGGER PENDING' || s === 'PENDING'; }).length;
+
+      const cashDrift = (brokerCash != null) ? +(brokerCash - paperCash).toFixed(2) : null;
+      const h = (broker && broker.health) ? broker.health() : {};
+      res.json({
+        ok: true,
+        asOf: new Date().toISOString(),
+        brokerName: (broker && broker.name) || null,
+        brokerConnected: !!(h && h.connected),
+        brokerStalledOnToken: !!(h && h.stalledOnToken),
+        brokerTickStale: !!(h && h.tickStale),
+        cash: { paper: paperCash, broker: brokerCash, drift: cashDrift, brokerOk: marginsR.ok, brokerErr: marginsR.ok ? null : marginsR.error },
+        holdings: { rows: holdingsRows, brokerOk: holdingsR.ok, brokerErr: holdingsR.ok ? null : holdingsR.error },
+        pendingOrders: { paperCnt: paperPendingCnt, brokerCnt: brokerPendingCnt, brokerOk: ordersR.ok },
+        summary: { cashDrift, holdingsDrifts: holdingsRows.filter((r) => !r.matches).length, paperPendingCnt, brokerPendingCnt },
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, reason: e.message });
+    }
+  }));
+
   // ---------- POST /api/me/paper/order (Tier 72) ----------
   app.post('/api/me/paper/order', withAuth(async (req, res) => {
     try {
