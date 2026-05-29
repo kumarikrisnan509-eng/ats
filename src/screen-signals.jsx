@@ -300,7 +300,7 @@ const SignalsScreen = () => {
   // feed (realSignals from /api/scanner/history). Later stages (paper/live/
   // profit/long-term) track post-signal pipeline state that is not persisted
   // yet, so they remain empty until that state lands.
-  const _signalCards = (Array.isArray(realSignals) ? realSignals : []).slice(0, 12).map((sg) => {
+  const _signalCards = /** @type {any[]} */ ((Array.isArray(realSignals) ? realSignals : []).slice(0, 12).map((sg) => {
     const code = String(sg.signal || '').toUpperCase();
     const act = /OVERSOLD|CROSS_UP|BULL|LONG|BUY/.test(code) ? 'BUY'
               : /OVERBOUGHT|CROSS_DOWN|BEAR|SHORT|SELL/.test(code) ? 'SELL' : null;
@@ -311,7 +311,7 @@ const SignalsScreen = () => {
       strategy: sg.strategy || null,
       when: sg.ts ? String(sg.ts).slice(11, 19) : null,
     };
-  });
+  }));
   const cols = [
     { title: "1 · Signal",    meta: "Emitted by strategies",       accent: "info", cards: _signalCards },
     { title: "2 · Paper",     meta: "Simulated fills · gated",     accent: "acc",  cards: [] },
