@@ -156,6 +156,7 @@ const RiskScreen = () => {
   // MODE_META.defaults fallback), total capital = portfolioValue + cashPaper from
   // /api/me/dashboard-summary, deployed + today's P&L from /api/me/modes/runtime.
   const [perMode, setPerMode] = React.useState(/** @type {any} */ (null));
+  const [riskCfg, setRiskCfg] = React.useState(/** @type {any} */ (null));
   React.useEffect(() => {
     if (window.MockData && window.MockData.isDemoOn && window.MockData.isDemoOn()) return;
     let cancelled = false;
@@ -189,6 +190,7 @@ const RiskScreen = () => {
           return { id, cap, deployed, lossCap, lossUsed, state };
         });
         setPerMode(rows);
+        setRiskCfg((rc && rc.config) ? rc.config : null);
       } catch (e) { /* keep null -> empty fallback rows */ }
     })();
     return () => { cancelled = true; };
@@ -217,11 +219,11 @@ const RiskScreen = () => {
         background: 'color-mix(in oklab, var(--warn, #d97706) 8%, transparent)',
         fontSize: 12, color: 'var(--text-2)',
       }}>
-        <strong>Risk dashboard is demo data.</strong>{' '}
-        The Global limits, Per-strategy caps, and Risk events tables below are
-        hardcoded examples. Per-user risk-limit storage and a per-user event
-        log haven't shipped yet. The kill-switch panel reflects REAL server
-        state. Don't rely on the limits shown for real risk management.
+        <strong>Per-strategy caps are not yet wired.</strong>{' '}
+        Per-strategy capital ceilings / loss cutoffs have no per-user storage yet.
+        Everything else on this screen reads your real data in live mode: the
+        kill-switch state, per-mode limits, global limits (from your risk config),
+        and the risk-events feed.
       </div>
 
       {/* T-425 (audit-2026-05-26 C2): READ-ONLY kill-switch status panel.
@@ -344,16 +346,36 @@ const RiskScreen = () => {
               etc.) rendered to every user. T-342 said it was gated, but never gated.
               No backend yet for per-user global limits -- show empty-state with a
               pointer to Settings where they'll be configured. */}
+          {riskCfg ? (
+          <div className="col" style={{ gap: 6, padding: "8px 4px" }}>
+            {[
+              { k: "Max position size",  v: riskCfg.maxPositionPct  != null ? (Number(riskCfg.maxPositionPct)  * 100).toFixed(1) + "% of capital" : "\u2014" },
+              { k: "Daily loss cap",     v: riskCfg.maxDailyLossPct != null ? (Number(riskCfg.maxDailyLossPct) * 100).toFixed(1) + "% of capital" : "\u2014" },
+              { k: "Max open positions", v: riskCfg.maxOpenPositions != null ? String(riskCfg.maxOpenPositions) : "\u2014" },
+              { k: "Max trades / day",   v: riskCfg.maxDailyTrades  != null ? String(riskCfg.maxDailyTrades)  : "\u2014" },
+              { k: "Max leverage",       v: riskCfg.maxLeverage     != null ? Number(riskCfg.maxLeverage).toFixed(1) + "\u00d7" : "\u2014" },
+              { k: "Max sector weight",  v: riskCfg.maxSectorWeight != null ? Math.round(Number(riskCfg.maxSectorWeight) * 100) + "%" : "\u2014" },
+              { k: "Trading window (IST)", v: (riskCfg.goldenStartHHMM && riskCfg.goldenEndHHMM) ? (riskCfg.goldenStartHHMM + "\u2013" + riskCfg.goldenEndHHMM) : "\u2014" },
+              { k: "Trading mode",       v: String(riskCfg.tradingMode || "paper") },
+            ].map((r, i) => (
+              <div key={i} className="between" style={{ fontSize: 12, padding: "5px 0", borderBottom: "1px solid var(--border)" }}>
+                <span className="muted">{r.k}</span>
+                <span className="mono" style={{ fontWeight: 500 }}>{r.v}</span>
+              </div>
+            ))}
+            <a href="#riskconfig" className="btn btn--sm" style={{ alignSelf: "flex-start", marginTop: 6 }}>Edit limits</a>
+          </div>
+          ) : (
           <div className="col" style={{ gap: 10, padding: "8px 4px" }}>
             <div className="muted" style={{ fontSize: 12 }}>
-              No portfolio-wide limits configured yet. Once per-user risk storage ships,
-              your daily-loss cap, max position size, leverage ceiling, and circuit-breaker
-              cooldown will be editable from Settings → Risk.
+              Portfolio-wide limits load from your risk config (daily-loss cap, max position size,
+              leverage ceiling, trading window). Configure them under Risk management.
             </div>
-            <a href="#settings" className="btn btn--sm" style={{ alignSelf: "flex-start", marginTop: 4 }}>
-              Configure in Settings
+            <a href="#riskconfig" className="btn btn--sm" style={{ alignSelf: "flex-start", marginTop: 4 }}>
+              Configure risk
             </a>
           </div>
+          )}
         </Card>
 
         <Card title="Per-strategy caps" sub="Capital ceilings and loss cutoffs">
