@@ -427,7 +427,8 @@ const KebabMenu = ({ strategy }) => {
 
   const removeAll = async () => {
     setOpen(false);
-    if (!window.confirm(`Remove ALL auto-runner configs for "${strategy.n}"?\nThis disables future autorun fires for this strategy until you add new configs.`)) return;
+    const ok = window.confirmAsync ? await window.confirmAsync({ title: `Remove all auto-runner configs for "${strategy.n}"?`, sub: 'This disables future autorun fires for this strategy.', detail: 'All auto-run configs for this strategy are removed; autorun will not fire it again until you add new configs.', confirmLabel: 'Remove all', cancelLabel: 'Cancel', tone: 'danger' }) : window.confirm(`Remove all auto-runner configs for "${strategy.n}"?`);
+    if (!ok) return;
     setBusy(true);
     try {
       const r = await window.fetchApi('/api/autorun/configs');

@@ -59,7 +59,8 @@ const StpSwpScreen = () => {
     setDraft(null);
   };
   const delSip = async (id) => {
-    if (!confirm('Delete this SIP?')) return;
+    const ok = window.confirmAsync ? await window.confirmAsync({ title: 'Delete this SIP?', sub: 'This removes the recurring plan.', detail: 'The SIP stops and is removed from your plan. This cannot be undone.', confirmLabel: 'Delete', cancelLabel: 'Cancel', tone: 'danger' }) : confirm('Delete this SIP?');
+    if (!ok) return;
     await saveAll(sips.filter(x => x.id !== id));
   };
   const toggleSip = async (id) => {
