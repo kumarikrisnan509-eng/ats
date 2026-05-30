@@ -51,7 +51,7 @@ jobs:
             echo "probe attempt failed: HTTP=$STATUS body=$(echo "$BODY" | head -c 200)"
             return 1
           }
-          probe || { echo "::warning::1st probe failed, sleeping 15s then retrying once (likely deploy restart)"; sleep 15; probe || { echo "::error::/api/health still failing after retry"; exit 1; }; }
+          probe || { echo "::warning::probe 1 failed, sleep 15s (likely deploy restart)"; sleep 15; probe || { echo "::warning::probe 2 failed, sleep 20s"; sleep 20; probe || { echo "::error::/api/health still failing after 3 attempts (~35s)"; exit 1; }; }; }
 
       - name: GET /api/health-deep (broker + DR + market signals)
         # Retry once with a 15s wait. The deep endpoint is slightly heavier

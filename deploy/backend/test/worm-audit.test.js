@@ -275,3 +275,25 @@ test('T-557: init on a broken chain seals + continues in .cont (broken file pres
   try { fs.unlinkSync(p); } catch (_) {}
   try { fs.unlinkSync(cont); } catch (_) {}
 });
+
+test('T-559: archived broken primary -> init follows the .cont continuation', () => {
+  const p = tmpFile('archived');
+  const cont = p + '.cont';
+  const w1 = new WormAudit({ path: p }); w1.init();
+  w1.append('a', { x: 1 }); w1.append('b', { x: 2 });
+  // break entry 1 on disk -> chain broken at seq 1
+  const lines = fs.readFileSync(p, 'utf8').split('\n').filter(Boolean);
+  const e1 = JSON.parse(lines[0]); e1.data = { x: 999 }; lines[0] = JSON.stringify(e1);
+  fs.writeFileSync(p, lines.join('\n') + '\n');
+  const w2 = new WormAudit({ path: p }); const r2 = w2.init();
+  assert.equal(r2.activePath, cont);
+  w2.append('c', { ok: true });
+  // operator archives (removes) the broken primary
+  fs.unlinkSync(p);
+  const w3 = new WormAudit({ path: p }); const r3 = w3.init();
+  assert.equal(r3.activePath, cont);          // followed .cont, NOT a fresh chain
+  assert.equal(r3.ok, true);
+  assert.ok(r3.count >= 1);
+  assert.equal(w3.verify().ok, true);
+  try { fs.unlinkSync(cont); } catch (_) {}
+});

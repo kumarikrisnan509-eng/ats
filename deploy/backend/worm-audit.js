@@ -106,6 +106,15 @@ class WormAudit {
     try { fs.mkdirSync(path.dirname(p), { recursive: true }); } catch (e) { console.warn('[worm-audit] swallowed:', e && e.message); }
 
     if (!fs.existsSync(p)) {
+      // T-559: if this segment was archived/removed but a continuation segment
+      // exists, follow it instead of starting a fresh chain at the archived
+      // path. Lets the operator archive a sealed broken segment (gzip it aside)
+      // without orphaning the active `.cont` chain on the next restart.
+      const cont = p + '.cont';
+      if (depth < 8 && fs.existsSync(cont)) {
+        this._sealed.push({ path: p, archived: true });
+        return this._initFrom(cont, depth + 1);
+      }
       this._lastHash = GENESIS_PREV;
       this._lastSeq  = 0;
       this._initialized = true;
