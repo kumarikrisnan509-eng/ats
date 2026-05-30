@@ -257,6 +257,28 @@ const ComplianceScreen = () => {
   const [info, setInfo] = React.useState(null);
   const [audit, setAudit] = React.useState(null);
   const [profile, setProfile] = React.useState(null);
+  // T-558: live probe of the ACTUAL response security headers (same-origin
+  // fetch can read them) so this gate reflects reality instead of a stale
+  // hardcoded 'missing'. null = not yet checked.
+  const [secHeaders, setSecHeaders] = React.useState(/** @type {any} */ (null));
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(window.location.origin + '/app.html', { method: 'HEAD' });
+        if (cancelled) return;
+        const h = r.headers;
+        setSecHeaders({
+          hsts:     !!h.get('strict-transport-security'),
+          nosniff:  /nosniff/i.test(h.get('x-content-type-options') || ''),
+          frame:    !!(h.get('x-frame-options') || h.get('content-security-policy')),
+          referrer: !!h.get('referrer-policy'),
+        });
+      } catch (_e) { if (!cancelled) setSecHeaders({ _err: true }); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -288,6 +310,10 @@ const ComplianceScreen = () => {
     : [];
   const blockedEvents = audit && Array.isArray(audit.rows)
     ? audit.rows.filter(r => String(r.event || '').includes('blocked')).length : 0;
+
+  // T-558: hardened-headers gate is green when the live probe confirms the key
+  // headers are present (nosniff + X-Frame/CSP). null = still checking.
+  const _secOk = !!(secHeaders && secHeaders.nosniff && secHeaders.frame);
 
   // Live checklist derived from system state
   const checks = [
@@ -337,9 +363,13 @@ const ComplianceScreen = () => {
       sub: 'Required by spec §0 for production algo endpoints. Operator-side task; declare your VM egress IP to Zerodha via the Kite Connect dashboard.',
     },
     {
-      area: 'Production security headers', ok: false,
-      t: 'HSTS / CSP / X-Frame-Options missing',
-      sub: 'Tier 15 ships UPDATE-NGINX.cmd to install hardened config. Run that script on your local machine to fix.',
+      area: 'Production security headers', ok: _secOk,
+      t: secHeaders == null ? 'Checking response headers\u2026'
+         : _secOk ? 'Hardened headers active (nosniff, X-Frame/CSP, Referrer-Policy, HSTS)'
+         : 'HSTS / CSP / X-Frame-Options missing',
+      sub: _secOk
+        ? 'Live same-origin probe confirms the hardened nginx security headers are present on responses.'
+        : 'Tier 15 ships UPDATE-NGINX.cmd to install hardened config. Run that script on your local machine to fix.',
     },
     {
       area: 'WORM audit immutability', ok: false,
@@ -354,7 +384,7 @@ const ComplianceScreen = () => {
     <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div>
         <div style={{ fontSize: 12, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.6 }}>System</div>
-        <h2 style={{ fontSize: 22, fontWeight: 600, marginTop: 2, marginBottom: 0 }}>Compliance & SEBI readiness</h2>
+        <div style={{ fontSize: 22, fontWeight: 600, marginTop: 2 }}>Compliance & SEBI readiness</div>
         <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: 4 }}>
           Live state of every gate that gets us regulatory-OK for live trading. {greenCount} / {checks.length} green.
         </div>
